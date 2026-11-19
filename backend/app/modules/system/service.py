@@ -1,7 +1,7 @@
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.db import engine
+from app.core.db import engine
 
 
 def database_is_up() -> bool:

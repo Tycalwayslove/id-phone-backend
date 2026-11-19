@@ -3,8 +3,18 @@
 from datetime import datetime
 
 from sqlalchemy import (
-    BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Identity, Index, Integer,
-    LargeBinary, SmallInteger, Text, UniqueConstraint,
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Identity,
+    Index,
+    Integer,
+    LargeBinary,
+    SmallInteger,
+    Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -77,12 +87,8 @@ class ProviderSpec(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
-    provider_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("providers.id", ondelete="CASCADE")
-    )
-    spec_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("specs.id", ondelete="CASCADE"), index=True
-    )
+    provider_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("providers.id", ondelete="CASCADE"))
+    spec_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("specs.id", ondelete="CASCADE"), index=True)
     provider_item_id: Mapped[str] = mapped_column(Text)
     param_mapping: Mapped[dict] = mapped_column(JSONB, server_default="{}")
     cost_fen: Mapped[int] = mapped_column(Integer)
@@ -98,16 +104,16 @@ class RouteRule(TimestampMixin, Base):
         # region_code 为空表示“不限地区”；NULLS NOT DISTINCT 让两个空值也算重复
         Index(
             "uq_route_rules_spec_region_provider",
-            "spec_id", "region_code", "provider_id",
+            "spec_id",
+            "region_code",
+            "provider_id",
             unique=True,
             postgresql_nulls_not_distinct=True,
         ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
-    spec_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("specs.id", ondelete="CASCADE")
-    )
+    spec_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("specs.id", ondelete="CASCADE"))
     provider_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("providers.id", ondelete="CASCADE"), index=True
     )

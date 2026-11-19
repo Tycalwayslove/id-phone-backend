@@ -7,8 +7,16 @@ entitlements、entitlement_quotas、entitlement_ledger。
 from datetime import datetime
 
 from sqlalchemy import (
-    BigInteger, CheckConstraint, DateTime, ForeignKey, Identity, Index, Integer, Text,
-    UniqueConstraint, text,
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Identity,
+    Index,
+    Integer,
+    Text,
+    UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -19,12 +27,12 @@ from app.models.base import Base, TimestampMixin
 PLAN_STATUSES = ("draft", "on_sale", "off_sale")
 # 新增一种权益类型 = 在这里加一个值 + 写对应的业务代码
 BENEFIT_TYPES = (
-    "storage_days",      # 保管天数
-    "photo_scope",       # 1 = 单张照片，0 = 用户全部照片
-    "receipt_quota",     # 可办回执次数（按成功出证计）
-    "resubmit_limit",    # 每次回执被驳回后可免费重提次数
-    "spec_change",       # 1 = 保管期内可无限改规格
-    "one_person",        # 1 = 一卡一人
+    "storage_days",  # 保管天数
+    "photo_scope",  # 1 = 单张照片，0 = 用户全部照片
+    "receipt_quota",  # 可办回执次数（按成功出证计）
+    "resubmit_limit",  # 每次回执被驳回后可免费重提次数
+    "spec_change",  # 1 = 保管期内可无限改规格
+    "one_person",  # 1 = 一卡一人
     "attach_to_parent",  # 1 = 加购项，到期时间跟随所属权益
 )
 ORDER_STATUSES = ("pending", "paid", "closed", "part_refunded", "refunded")
@@ -89,9 +97,7 @@ class Order(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     order_no: Mapped[str] = mapped_column(Text, unique=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="RESTRICT")
-    )
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     channel_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("channels.id", ondelete="SET NULL"), index=True
     )
@@ -192,15 +198,11 @@ class Entitlement(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="RESTRICT")
-    )
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     order_item_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("order_items.id", ondelete="RESTRICT"), unique=True
     )
-    plan_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("plans.id", ondelete="RESTRICT"), index=True
-    )
+    plan_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("plans.id", ondelete="RESTRICT"), index=True)
     # 为空 = 覆盖该用户全部照片（99 元档）
     photo_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("photos.id", ondelete="RESTRICT"), index=True
@@ -218,9 +220,7 @@ class EntitlementQuota(TimestampMixin, Base):
 
     __tablename__ = "entitlement_quotas"
     __table_args__ = (
-        UniqueConstraint(
-            "entitlement_id", "benefit_type", name="uq_entitlement_quotas_ent_type"
-        ),
+        UniqueConstraint("entitlement_id", "benefit_type", name="uq_entitlement_quotas_ent_type"),
         check_in("benefit_type", BENEFIT_TYPES, "benefit_type_valid"),
         CheckConstraint("used >= 0 AND used <= total", name="used_within_total"),
     )
@@ -239,9 +239,7 @@ class EntitlementLedger(TimestampMixin, Base):
 
     __tablename__ = "entitlement_ledger"
     __table_args__ = (
-        UniqueConstraint(
-            "quota_id", "action", "application_id", name="uq_entitlement_ledger_once"
-        ),
+        UniqueConstraint("quota_id", "action", "application_id", name="uq_entitlement_ledger_once"),
         check_in("action", LEDGER_ACTIONS, "action_valid"),
     )
 

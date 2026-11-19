@@ -7,8 +7,18 @@ OSS 命名规则（见文档「数据库设计」第四节 4）：
 from datetime import datetime
 
 from sqlalchemy import (
-    BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Identity, Index, Integer,
-    SmallInteger, Text, UniqueConstraint, text,
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Identity,
+    Index,
+    Integer,
+    SmallInteger,
+    Text,
+    UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -35,9 +45,7 @@ class File(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="RESTRICT")
-    )
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     kind: Mapped[str] = mapped_column(Text)
     bucket: Mapped[str] = mapped_column(Text)
     storage_key: Mapped[str] = mapped_column(Text)
@@ -64,9 +72,7 @@ class Photo(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="RESTRICT")
-    )
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     source: Mapped[str] = mapped_column(Text)
     original_file_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("files.id", ondelete="RESTRICT"), unique=True
@@ -89,7 +95,11 @@ class PhotoRender(TimestampMixin, Base):
     __tablename__ = "photo_renders"
     __table_args__ = (
         UniqueConstraint(
-            "photo_id", "spec_id", "bg_color", "beauty_level", "watermarked",
+            "photo_id",
+            "spec_id",
+            "bg_color",
+            "beauty_level",
+            "watermarked",
             name="uq_photo_renders_variant",
         ),
         CheckConstraint("beauty_level BETWEEN 0 AND 5", name="beauty_level_range"),
@@ -99,12 +109,8 @@ class PhotoRender(TimestampMixin, Base):
     photo_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("photos.id", ondelete="RESTRICT")
     )  # 联合唯一约束以 photo_id 开头，已经能当索引用
-    spec_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("specs.id", ondelete="RESTRICT"), index=True
-    )
-    file_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("files.id", ondelete="RESTRICT"), unique=True
-    )
+    spec_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("specs.id", ondelete="RESTRICT"), index=True)
+    file_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("files.id", ondelete="RESTRICT"), unique=True)
     bg_color: Mapped[str] = mapped_column(Text)
     beauty_level: Mapped[int] = mapped_column(SmallInteger, server_default="0")
     watermarked: Mapped[bool] = mapped_column(Boolean)

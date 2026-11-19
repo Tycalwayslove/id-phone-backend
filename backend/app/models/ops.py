@@ -3,7 +3,14 @@
 from datetime import datetime
 
 from sqlalchemy import (
-    BigInteger, CheckConstraint, DateTime, ForeignKey, Identity, Index, SmallInteger, Text,
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Identity,
+    Index,
+    SmallInteger,
+    Text,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -13,7 +20,10 @@ from app.models._types import check_in
 from app.models.base import Base, TimestampMixin
 
 NOTIFY_EVENTS = (
-    "receipt_rejected", "receipt_completed", "entitlement_expiring", "receipt_expiring",
+    "receipt_rejected",
+    "receipt_completed",
+    "entitlement_expiring",
+    "receipt_expiring",
 )
 NOTIFY_CHANNELS = ("mini_subscribe", "mp_template", "wecom", "sms", "voice", "manual_call")
 NOTIFY_STATUSES = ("pending", "sent", "failed", "skipped", "cancelled")
@@ -30,12 +40,14 @@ class NotifyTask(TimestampMixin, Base):
         check_in("channel", NOTIFY_CHANNELS, "channel_valid"),
         check_in("status", NOTIFY_STATUSES, "status_valid"),
         # 申请和权益二选一，恰好一个不为空
-        CheckConstraint(
-            "num_nonnulls(application_id, entitlement_id) = 1", name="one_target"
-        ),
+        CheckConstraint("num_nonnulls(application_id, entitlement_id) = 1", name="one_target"),
         Index(
             "uq_notify_tasks_once",
-            "application_id", "entitlement_id", "event", "step", "channel",
+            "application_id",
+            "entitlement_id",
+            "event",
+            "step",
+            "channel",
             unique=True,
             postgresql_nulls_not_distinct=True,
         ),
@@ -47,9 +59,7 @@ class NotifyTask(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), index=True
-    )
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), index=True)
     application_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("receipt_applications.id", ondelete="CASCADE"), index=True
     )

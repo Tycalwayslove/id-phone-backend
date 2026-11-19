@@ -9,8 +9,19 @@
 from datetime import datetime
 
 from sqlalchemy import (
-    BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Identity, Index, Integer,
-    LargeBinary, Text, UniqueConstraint, func, text,
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Identity,
+    Index,
+    Integer,
+    LargeBinary,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -19,11 +30,22 @@ from app.models._types import check_in
 from app.models.base import Base, TimestampMixin
 
 APPLICATION_STATUSES = (
-    "pending", "processing", "rejected", "completed", "failed", "cancelled",
+    "pending",
+    "processing",
+    "rejected",
+    "completed",
+    "failed",
+    "cancelled",
 )
 ATTEMPT_STATUSES = (
-    "created", "submitted", "unknown", "processing",
-    "completed", "rejected", "failed", "abandoned",
+    "created",
+    "submitted",
+    "unknown",
+    "processing",
+    "completed",
+    "rejected",
+    "failed",
+    "abandoned",
 )
 CALLBACK_RESULTS = ("pending", "applied", "stale", "duplicate", "unmatched", "error")
 
@@ -39,16 +61,12 @@ class ReceiptApplication(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     app_no: Mapped[str] = mapped_column(Text, unique=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="RESTRICT")
-    )
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
     # 当前照片：驳回后换照片重提会更新；每次提交用的照片记在提交记录上
     photo_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("photos.id", ondelete="RESTRICT"), index=True
     )
-    spec_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("specs.id", ondelete="RESTRICT"), index=True
-    )
+    spec_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("specs.id", ondelete="RESTRICT"), index=True)
     entitlement_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("entitlements.id", ondelete="RESTRICT"), index=True
     )
@@ -71,9 +89,7 @@ class ReceiptAttempt(TimestampMixin, Base):
     __tablename__ = "receipt_attempts"
     __table_args__ = (
         UniqueConstraint("application_id", "seq", name="uq_receipt_attempts_app_seq"),
-        UniqueConstraint(
-            "provider_id", "provider_order_no", name="uq_receipt_attempts_provider_order"
-        ),
+        UniqueConstraint("provider_id", "provider_order_no", name="uq_receipt_attempts_provider_order"),
         check_in("status", ATTEMPT_STATUSES, "status_valid"),
         CheckConstraint("seq >= 1", name="seq_positive"),
         CheckConstraint("cost_fen IS NULL OR cost_fen >= 0", name="cost_non_negative"),
@@ -98,9 +114,7 @@ class ReceiptAttempt(TimestampMixin, Base):
         BigInteger, ForeignKey("receipt_applications.id", ondelete="RESTRICT")
     )
     seq: Mapped[int] = mapped_column(Integer)
-    provider_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("providers.id", ondelete="RESTRICT")
-    )
+    provider_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("providers.id", ondelete="RESTRICT"))
     render_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("photo_renders.id", ondelete="RESTRICT"), index=True
     )
@@ -134,7 +148,5 @@ class ProviderCallback(TimestampMixin, Base):
     signature_ok: Mapped[bool] = mapped_column(Boolean)
     dedupe_key: Mapped[str] = mapped_column(Text, unique=True)
     process_result: Mapped[str] = mapped_column(Text, server_default="pending")
-    received_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

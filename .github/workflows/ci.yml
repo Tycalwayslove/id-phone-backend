@@ -1,0 +1,121 @@
+# 每次推送：检查依赖锁 → 代码检查 → 起临时数据库跑迁移和测试 → 检查接口文档 → 同步到 Apifox
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lock:
+    # pyproject.toml 改了依赖但 uv.lock 没更新时，自动更新并提交回仓库
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Update uv.lock if needed
+        run: |
+          if uv lock --check; then
+            echo "uv.lock 已是最新"
+            exit 0
+          fi
+          uv lock
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git commit -m "chore: 自动更新 uv.lock"
+          git push
+
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: idphone_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/idphone_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies
+        # 不加 --frozen：依赖刚改、锁文件还没被 lock 任务更新时也能跑
+        run: uv sync
+
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Migrate
+        run: |
+          uv run alembic upgrade head
+          # 模型和迁移脚本必须一致：改了模型却忘了写迁移，这一步会失败
+          uv run alembic check
+
+      - name: Test
+        run: uv run pytest
+
+      - name: Check API docs are complete
+        run: uv run python -m scripts.check_api_docs
+
+      - name: Export OpenAPI
+        run: uv run python -m scripts.export_openapi openapi.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openapi
+          path: backend/openapi.json
+
+  apifox:
+    # 测试全部通过、推送到 main 时，把接口文档同步到 Apifox
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: openapi
+      - name: Import into Apifox
+        env:
+          APIFOX_ACCESS_TOKEN: ${{ secrets.APIFOX_ACCESS_TOKEN }}
+          APIFOX_PROJECT_ID: ${{ secrets.APIFOX_PROJECT_ID }}
+        run: |
+          if [ -z "$APIFOX_ACCESS_TOKEN" ] || [ -z "$APIFOX_PROJECT_ID" ]; then
+            echo "未配置 Apifox 密钥，跳过同步"
+            exit 0
+          fi
+          jq -n --rawfile spec openapi.json \
+            '{input: $spec, options: {endpointOverwriteBehavior: "AUTO_MERGE", schemaOverwriteBehavior: "AUTO_MERGE", updateFolderOfChangedEndpoint: true}}' > body.json
+          curl --fail-with-body -sS -X POST \
+            "https://api.apifox.com/v1/projects/${APIFOX_PROJECT_ID}/import-openapi?locale=zh-CN" \
+            -H "X-Apifox-Api-Version: 2024-03-28" \
+            -H "Authorization: Bearer ${APIFOX_ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data @body.json

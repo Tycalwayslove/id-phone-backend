@@ -3,7 +3,13 @@
 from datetime import datetime
 
 from sqlalchemy import (
-    BigInteger, DateTime, ForeignKey, Identity, LargeBinary, Text, UniqueConstraint,
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Identity,
+    LargeBinary,
+    Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -46,16 +52,12 @@ class UserIdentity(TimestampMixin, Base):
 
     __tablename__ = "user_identities"
     __table_args__ = (
-        UniqueConstraint(
-            "provider", "app_id", "open_id", name="uq_user_identities_provider_app_open"
-        ),
+        UniqueConstraint("provider", "app_id", "open_id", name="uq_user_identities_provider_app_open"),
         check_in("provider", IDENTITY_PROVIDERS, "provider_valid"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True
-    )
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     provider: Mapped[str] = mapped_column(Text)
     app_id: Mapped[str] = mapped_column(Text)
     open_id: Mapped[str] = mapped_column(Text)
