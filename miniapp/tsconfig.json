@@ -3,7 +3,10 @@
     "target": "es2017",
     "module": "esnext",
     "moduleResolution": "node",
-    "lib": ["es2020", "dom"],
+    "lib": [
+      "es2020",
+      "dom"
+    ],
     "jsx": "react-jsx",
     "strict": true,
     "noImplicitAny": true,
@@ -21,8 +24,14 @@
     "baseUrl": ".",
     "rootDir": ".",
     "outDir": "lib",
-    "typeRoots": ["node_modules/@types"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["./src", "./types", "./config"],
+  "include": [
+    "./src",
+    "./types",
+    "./config"
+  ],
   "compileOnSave": false
 }
