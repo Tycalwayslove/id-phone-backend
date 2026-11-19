@@ -1,0 +1,148 @@
+.rd-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+
+  &__name {
+    font-size: 36px;
+    font-weight: 600;
+  }
+}
+
+.rd-line {
+  display: block;
+}
+
+.rd-wait {
+  display: block;
+  margin-top: 16px;
+  font-size: var(--fs-small);
+  color: var(--c-primary);
+}
+
+.rd-title {
+  display: block;
+  margin-bottom: 16px;
+  font-size: var(--fs-title);
+  font-weight: 600;
+
+  &--danger {
+    color: var(--c-danger);
+  }
+}
+
+.rd-receipt {
+  width: 100%;
+  border-radius: 12px;
+}
+
+.rd-code {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 24px 0;
+  padding: 24px;
+  border-radius: 16px;
+  background: var(--c-bg);
+
+  &__value {
+    display: block;
+    font-size: 40px;
+    font-weight: 600;
+    letter-spacing: 2px;
+  }
+
+  &__copy {
+    padding: 12px 32px;
+    border-radius: 999px;
+    background: var(--c-primary);
+    color: #fff;
+    font-size: var(--fs-small);
+  }
+}
+
+.rd-reason {
+  display: block;
+  margin-bottom: 12px;
+  font-size: var(--fs-body);
+  color: var(--c-danger);
+}
+
+.rd-contact {
+  display: flex;
+  flex-direction: column;
+  margin-top: 24px;
+
+  .btn-native {
+    margin-top: 16px;
+  }
+}
+
+.rd-kv {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 0;
+}
+
+.rd-timeline {
+  &__item {
+    display: flex;
+    padding-bottom: 24px;
+  }
+
+  &__dot {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    margin: 12px 20px 0 0;
+    border-radius: 50%;
+    background: var(--c-primary);
+  }
+
+  &__body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  &__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  &__reason {
+    margin-top: 4px;
+    font-size: var(--fs-small);
+    color: var(--c-danger);
+  }
+}
+
+.rd-dev {
+  margin-top: 16px;
+  padding: 16px;
+  text-align: center;
+
+  &__btns {
+    display: flex;
+    justify-content: center;
+    margin-top: 8px;
+  }
+
+  &__btn {
+    margin: 0 12px;
+    padding: 6px 20px;
+    border: 1px dashed var(--c-text-2);
+    border-radius: 8px;
+    font-size: var(--fs-small);
+    color: var(--c-text-2);
+  }
+}
+
+.rd-footer-link {
+  padding: 24px;
+  text-align: center;
+  font-size: var(--fs-small);
+  color: var(--c-primary);
+}

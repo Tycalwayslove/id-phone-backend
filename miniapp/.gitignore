@@ -1,0 +1,12 @@
+node_modules/
+dist/
+deploy_versions/
+.temp/
+.rn_temp/
+.swc/
+*.log
+.DS_Store
+.env.local
+.env.*.local
+# 由 pnpm run gen:api 从 ../docs/api/openapi.json 生成，CI 每次重新生成
+src/api/schema.d.ts

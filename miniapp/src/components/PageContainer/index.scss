@@ -1,0 +1,10 @@
+.page-container {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 24px 32px 48px;
+  background: var(--c-bg);
+
+  &.with-bottom-bar {
+    padding-bottom: calc(200px + env(safe-area-inset-bottom));
+  }
+}

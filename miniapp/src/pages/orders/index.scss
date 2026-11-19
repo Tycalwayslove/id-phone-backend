@@ -1,0 +1,47 @@
+.order-item {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+
+  &__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
+  &__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    font-size: var(--fs-body);
+  }
+
+  &__foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--c-line);
+  }
+
+  &__total {
+    display: flex;
+    align-items: baseline;
+  }
+
+  &__actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 16px;
+  }
+
+  &__btn {
+    padding: 8px 32px;
+    border: 2px solid var(--c-line);
+    border-radius: 999px;
+    font-size: var(--fs-small);
+  }
+}

@@ -1,0 +1,55 @@
+.spec-detail {
+  &__name {
+    display: block;
+    margin-bottom: 16px;
+    font-size: 40px;
+    font-weight: 600;
+  }
+
+  &__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 0;
+    border-bottom: 1px solid var(--c-line);
+    font-size: var(--fs-body);
+
+    &:last-child {
+      border-bottom: none;
+    }
+  }
+
+  &__label {
+    color: var(--c-text-2);
+  }
+
+  &__colors {
+    display: flex;
+  }
+
+  &__color {
+    width: 48px;
+    height: 48px;
+    margin-left: 16px;
+    border: 2px solid var(--c-line);
+    border-radius: 50%;
+  }
+
+  &__yes {
+    color: var(--c-success);
+  }
+
+  &__notice-title {
+    font-size: var(--fs-title);
+    font-weight: 600;
+  }
+
+  &__notice {
+    display: flex;
+    flex-direction: column;
+    margin-top: 16px;
+    font-size: var(--fs-small);
+    line-height: 1.8;
+    color: var(--c-text-2);
+  }
+}

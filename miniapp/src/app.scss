@@ -1,0 +1,149 @@
+page {
+  /* 品牌色与语义色 */
+  --c-primary: #2b6bff;
+  --c-success: #00b578;
+  --c-warning: #ff8f1f;
+  --c-danger: #ff3141;
+  --c-text: #1f2329;
+  --c-text-2: #646a73;
+  --c-bg: #f5f6f8;
+  --c-line: #eceef1;
+  /* 字号 */
+  --fs-body: 28px;
+  --fs-title: 32px;
+  --fs-small: 24px;
+  /* 卡片 */
+  --radius: 24px;
+  --gap: 24px;
+
+  /* NutUI 主色跟随品牌色 */
+  --nutui-color-primary: #2b6bff;
+  --nutui-color-primary-stop-1: #2b6bff;
+  --nutui-color-primary-stop-2: #2b6bff;
+
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+}
+
+/* 白底卡片 */
+.card {
+  margin-bottom: var(--gap);
+  padding: 32px;
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.section-title {
+  margin: 8px 0 var(--gap);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--fs-title);
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+.section-more {
+  font-size: var(--fs-small);
+  font-weight: 400;
+  color: var(--c-text-2);
+}
+
+.list-gap > * + * {
+  margin-top: var(--gap);
+}
+
+.hint {
+  font-size: var(--fs-small);
+  color: var(--c-text-2);
+}
+
+/* 列表底部提示 */
+.list-footer {
+  padding: 32px 0;
+  text-align: center;
+  font-size: var(--fs-small);
+  color: var(--c-text-2);
+}
+
+/* 固定在底部的操作栏 */
+.bottom-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  box-sizing: border-box;
+  padding: 24px 32px calc(24px + env(safe-area-inset-bottom));
+  background: #fff;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.04);
+
+  > * + * {
+    margin-left: 24px;
+  }
+
+  > * {
+    flex: 1;
+  }
+}
+
+/* 原生 Button（openType 场景）统一成主色实心圆角 */
+.btn-native {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0 48px;
+  height: 88px;
+  border: none;
+  border-radius: 999px;
+  background: var(--c-primary);
+  color: #fff;
+  font-size: var(--fs-title);
+  line-height: 88px;
+
+  &::after {
+    border: none;
+  }
+
+  &--plain {
+    background: #fff;
+    color: var(--c-primary);
+    border: 2px solid var(--c-primary);
+  }
+}
+
+/* 菜单行 */
+.cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 32px;
+  background: #fff;
+  font-size: var(--fs-title);
+  color: var(--c-text);
+  border-bottom: 1px solid var(--c-line);
+
+  &__arrow {
+    color: var(--c-text-2);
+  }
+}
+
+/* 原生按钮做成菜单行 */
+.cell-btn {
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  line-height: inherit;
+  text-align: left;
+  font-size: inherit;
+
+  &::after {
+    border: none;
+  }
+}

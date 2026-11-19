@@ -1,0 +1,21 @@
+.price-text {
+  color: var(--c-danger);
+  font-weight: 600;
+
+  &--small {
+    font-size: var(--fs-body);
+  }
+
+  &--normal {
+    font-size: 36px;
+  }
+
+  &--large {
+    font-size: 56px;
+  }
+
+  &__sym {
+    font-size: 0.6em;
+    margin-right: 2px;
+  }
+}
