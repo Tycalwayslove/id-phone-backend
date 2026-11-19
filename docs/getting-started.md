@@ -50,3 +50,31 @@ DATABASE_URL=postgresql+psycopg://idphone_app:密码@localhost:5432/idphone_test
 | 检查模型和迁移是否一致 | `uv run alembic check` |
 | 检查接口文档是否写全 | `uv run python -m scripts.check_api_docs` |
 | 备份本机数据库 | `./scripts/db_backup.sh` |
+
+## 用 Claude Code + Codex 协作（省 Claude 额度）
+
+在 Mac 终端里用 Claude Code 当“决策者”，通过 OpenAI 官方插件 [codex-plugin-cc](https://github.com/openai/codex-plugin-cc) 把编码任务交给 Codex（用 ChatGPT 账号额度）。插件只能在本机运行。
+
+一次性安装：
+
+```bash
+npm install -g @openai/codex     # 需要 Node 18.18+
+codex login                       # 用 ChatGPT 账号登录
+cd /Users/mac/id-phone && claude  # 在项目目录启动 Claude Code
+```
+
+在 Claude Code 里：
+
+```
+/plugin marketplace add openai/codex-plugin-cc
+/plugin install codex@openai-codex
+/reload-plugins
+/codex:setup
+```
+
+日常用法：
+
+- 交任务：`/codex:rescue --background 按 docs/tasks/T001-admin-web.md 完成，遵守 AGENTS.md`
+- 看进度和结果：`/codex:status`、`/codex:result`
+- 让 Codex 审查改动：`/codex:review --background`
+- 不要打开插件的 review gate（自动循环审查），很快耗光额度。
