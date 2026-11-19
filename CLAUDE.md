@@ -26,7 +26,7 @@ Python 3.14 · uv · FastAPI · SQLAlchemy 2（同步）· Alembic · PostgreSQL
 - 下单、提交回执等接口支持 `Idempotency-Key` 请求头。
 - 接口文档必须写全，`scripts/check_api_docs.py` 在 CI 里检查，不全就不同步到 Apifox：
   - 每个接口：`tags`、固定的 `operation_id`（如 `photos_list`）、`summary`、`description`（说明用途、是否要登录、关键业务规则）、`response_description`。
-  - 可能返回的错误都在 `responses` 里用 `error_doc("…，错误码 XXX")` 声明。
+  - 可能返回的错误都在 `responses` 里声明：`responses=errors_doc(ErrorCode.XXX, ...)`；业务里只抛 `AppError(ErrorCode.XXX)`，新错误码加在 `app/core/errors.py`。
   - 请求和响应都用 schemas.py 里的 Pydantic 模型，不返回裸字典；模型写 docstring。
   - 每个字段和每个路径、查询、请求头参数都写 `description`，有意义的给 `examples`；枚举值在 description 里逐个解释含义。
   - 说明用中文，写给前端看：这个字段是什么、单位、取值范围、什么时候为空。
@@ -40,7 +40,7 @@ Python 3.14 · uv · FastAPI · SQLAlchemy 2（同步）· Alembic · PostgreSQL
 - `scripts/seed_dev.py` 只能对名字以 `_dev` 结尾的库执行。
 
 ## 环境与部署
-- 配置一律从环境变量读（`app/config.py`），代码里不写死地址、密码、环境判断以外的开关。
+- 配置一律从环境变量读（`app/core/config.py`），代码里不写死地址、密码、环境判断以外的开关。
 - `APP_ENV`：dev 本机 / test 自动化测试 / prod 服务器。
 - 现在数据库在开发者 Mac 上；搬到服务器的步骤见 `docs/deploy.md`。不要让任何代码依赖“数据库在本机”。
 
@@ -53,7 +53,12 @@ Python 3.14 · uv · FastAPI · SQLAlchemy 2（同步）· Alembic · PostgreSQL
 - 数据库不对局域网开放。
 
 ## 工作方式
-1. 先给设计：动哪些模块、哪些表、新增哪些接口和错误码；确认后再写代码。
-2. 代码和测试一起写；关键路径（扣额度、回调幂等、驳回重提、越权访问）必须有测试。
-3. 需要执行的命令（迁移、seed、启动服务）写成步骤交给用户在本机运行，输出存到 `backend/logs/`。
-4. 重要设计决定记到 `docs/adr/`。
+- **目标模式**：用户已授权全程自主推进，不需要中途确认。按 `docs/progress.md` 的顺序做；遇到真正无法替用户决定的事（花钱、资质、对外发布），先用 fake 模式绕过并记进 progress 的“需要用户提供”。
+- **每项需求都要留记录**（换人、换电脑、换 AI 会话都靠它接上）：
+  1. 开工前在 `docs/devlog/` 新建一篇（模板见 `docs/devlog/README.md`），写需求原文和拆解；
+  2. 完成后补上方案、改动、验证、遗留，并更新 `docs/devlog/README.md` 目录和 `docs/progress.md`；
+  3. 影响长期的设计决定写进 `docs/adr/`。
+- **分工**：架构、跨模块设计、评审由高级模型（Opus）负责；按模块的实现可交给 Sonnet 子代理，每个子代理只改自己模块目录和对应测试目录，共享文件（`app/core`、`app/main.py`、`app/models/__init__.py`、迁移）由主会话统一修改。
+- **验证靠 CI**：本地改完先 `ruff check` / `ruff format`；推送后看 GitHub Actions（迁移、`alembic check`、测试、接口文档检查）全部通过才算完成。
+- **提交**：一次提交做一件事，提交信息说明“做了什么、为什么”。代码在 `/Users/mac/id-phone`（用户 Mac），推送到 GitHub `Tycalwayslove/id-phone-backend` 的 main。
+- **用户本机才能做的事**（数据库在用户 Mac 上）：迁移、seed、启动服务。写成命令交给用户，输出存到 `backend/logs/`。
