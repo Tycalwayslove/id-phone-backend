@@ -1,0 +1,5 @@
+# pnpm 10（CI）用 onlyBuiltDependencies；pnpm 11+ 用 allowBuilds
+onlyBuiltDependencies:
+  - esbuild
+allowBuilds:
+  esbuild: true

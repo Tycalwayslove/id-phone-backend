@@ -1,6 +1,6 @@
 # T001 运营后台前端 admin-web
 
-- 状态：待开始
+- 状态：已完成（见 [开发日志 0012](../devlog/0012-admin-web.md)）
 - 依赖：后端 admin 模块（已完成），接口见 `docs/api/openapi.json` 中 `/api/v1/admin/*`
 
 ## 目标

@@ -10,5 +10,6 @@
 4. 后台退款支持幂等：请求体增加 `request_id`（前端生成 UUID），同一 request_id 只退一次（可复用 idempotency_keys 表，user_id 改为可空需要迁移——先在报告里提出方案）。
 5. 订单已关闭却收到支付成功通知：自动发起全额退款并记审计。
 6. 照片列表每张照片单独查权益（N+1）：entitlements 新增批量函数 `photo_access_many(db, user_id, photo_ids)`。
+7. 后台按手机号筛选用户时手机号在 URL 查询串里，会进 Uvicorn/Nginx 访问日志：改为不在 URL 中出现（如 `POST /api/v1/admin/users/search`，或前端只传手机号哈希），并在 `docs/deploy.md` 注明访问日志格式不记录查询串。（来自 0012 评审）
 
 每条都要有测试。只允许改涉及到的模块目录和对应 tests 目录；`app/core/errors.py` 本任务允许改。
