@@ -36,7 +36,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add uv.lock
           git commit -m "chore: 自动更新 uv.lock"
-          git push
+          for i in 1 2 3; do git pull --rebase -q && git push && break; sleep 3; done
 
   test:
     runs-on: ubuntu-latest
@@ -92,6 +92,23 @@ jobs:
         with:
           name: openapi
           path: backend/openapi.json
+
+      - name: Commit OpenAPI snapshot
+        # 接口文档快照存进仓库（docs/api/openapi.json）：前端据此生成类型，代码审查时能看到接口变化
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p ../docs/api
+          cp openapi.json ../docs/api/openapi.json
+          cd ..
+          if git diff --quiet -- docs/api/openapi.json && git ls-files --error-unmatch docs/api/openapi.json >/dev/null 2>&1; then
+            echo "接口文档无变化"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/api/openapi.json
+          git commit -m "chore: 更新接口文档快照 docs/api/openapi.json"
+          for i in 1 2 3; do git pull --rebase -q && git push && break; sleep 3; done
 
   apifox:
     # 测试全部通过、推送到 main 时，把接口文档同步到 Apifox
