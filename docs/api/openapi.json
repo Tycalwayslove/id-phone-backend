@@ -1,0 +1,5292 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "证件照与回执 API",
+    "description": "证件照制作、回执办理、权益和订单相关接口。\n\n- C 端接口需要登录的，请求头带 `Authorization: Bearer <token>`（登录接口返回）。\n- 后台接口使用登录后写入的 Cookie，修改类请求还要带 `X-CSRF-Token`。\n- 金额单位一律是分（字段名以 `_fen` 结尾）；时间是带时区的 ISO 8601。\n- 列表接口用游标翻页：第一页不传 cursor，之后传上一页的 next_cursor。\n- 出错时统一返回 `{\"code\": \"...\", \"message\": \"...\"}`，前端按 code 处理。\n\n## 错误码\n\n| 错误码 | HTTP 状态 | 默认提示 |\n|---|---|---|\n| VALIDATION_ERROR | 422 | 请求参数不正确 |\n| NOT_FOUND | 404 | 资源不存在 |\n| METHOD_NOT_ALLOWED | 405 | 不支持这种请求方式 |\n| RATE_LIMITED | 429 | 操作太频繁，请稍后再试 |\n| IDEMPOTENCY_CONFLICT | 409 | 同一个请求正在处理或参数不一致 |\n| INTERNAL_ERROR | 500 | 服务开小差了，请稍后再试 |\n| DB_UNAVAILABLE | 503 | 数据库暂时不可用，请稍后再试 |\n| AUTH_REQUIRED | 401 | 请先登录 |\n| AUTH_INVALID | 401 | 登录已失效，请重新登录 |\n| WECHAT_LOGIN_FAILED | 400 | 微信登录失败，请重试 |\n| ACCOUNT_DISABLED | 403 | 账号已被停用 |\n| PHONE_ALREADY_BOUND | 409 | 这个手机号已绑定其他账号，请联系客服 |\n| ADMIN_LOGIN_FAILED | 401 | 账号或密码错误 |\n| PERMISSION_DENIED | 403 | 没有这个操作的权限 |\n| SPEC_NOT_FOUND | 404 | 规格不存在 |\n| PHOTO_NOT_FOUND | 404 | 照片不存在 |\n| PHOTO_ACCESS_EXPIRED | 403 | 照片保管期已过，续费后可继续下载和换规格 |\n| PHOTO_NOT_READY | 409 | 照片还在处理中 |\n| UPLOAD_NOT_FOUND | 404 | 上传的文件不存在或已过期 |\n| UPLOAD_INVALID | 422 | 上传的文件格式或大小不符合要求 |\n| SPEC_CHANGE_NOT_ALLOWED | 403 | 当前权益不支持更换规格 |\n| PLAN_NOT_AVAILABLE | 409 | 这个套餐暂不可购买 |\n| ORDER_NOT_FOUND | 404 | 订单不存在 |\n| ORDER_NOT_PAYABLE | 409 | 订单当前不能支付 |\n| ORDER_NOT_CANCELLABLE | 409 | 订单当前不能取消 |\n| PAYMENT_SIGNATURE_INVALID | 401 | 支付通知签名不正确 |\n| REFUND_NOT_ALLOWED | 409 | 订单当前不能退款 |\n| ENTITLEMENT_NOT_FOUND | 404 | 权益不存在 |\n| ENTITLEMENT_EXPIRED | 403 | 权益已过期 |\n| QUOTA_EXHAUSTED | 409 | 回执次数已用完 |\n| ONE_PERSON_MISMATCH | 403 | 该权益仅限本人使用 |\n| RECEIPT_NOT_SUPPORTED | 409 | 这个规格暂不支持办理回执 |\n| APPLICATION_NOT_FOUND | 404 | 回执申请不存在 |\n| APPLICATION_NOT_RESUBMITTABLE | 409 | 当前状态不能重新提交 |\n| RESUBMIT_LIMIT_REACHED | 409 | 重新提交次数已用完 |\n| RECEIPT_NOT_READY | 409 | 回执还没有出来 |\n| PROVIDER_UNAVAILABLE | 503 | 回执通道暂时不可用，请稍后再试 |\n| CALLBACK_SIGNATURE_INVALID | 401 | 回调签名不正确 |\n",
+    "version": "0.2.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "系统"
+        ],
+        "summary": "健康检查",
+        "description": "检查服务和数据库是否可用。部署平台和监控用它判断服务是否存活。不需要登录。",
+        "operationId": "system_health",
+        "responses": {
+          "200": {
+            "description": "服务和数据库都正常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "错误码：DB_UNAVAILABLE（数据库暂时不可用，请稍后再试）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/files/{key}": {
+      "get": {
+        "tags": [
+          "系统"
+        ],
+        "summary": "下载文件（签名链接）",
+        "description": "本机存储模式下的文件下载地址。链接由其他接口生成（如照片下载、回执查看），带有效期和签名，前端直接用于 image 组件或 wx.downloadFile，不需要自己拼。过期或签名不对返回 404。",
+        "operationId": "system_file_download",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "文件存储路径，由接口返回的链接自带",
+              "title": "Key"
+            },
+            "description": "文件存储路径，由接口返回的链接自带"
+          },
+          {
+            "name": "exp",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "description": "链接过期时间（Unix 秒）",
+              "title": "Exp"
+            },
+            "description": "链接过期时间（Unix 秒）"
+          },
+          {
+            "name": "sig",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "链接签名",
+              "title": "Sig"
+            },
+            "description": "链接签名"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "文件内容（图片二进制）"
+          },
+          "404": {
+            "description": "错误码：NOT_FOUND（资源不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/wechat-mini/login": {
+      "post": {
+        "tags": [
+          "登录"
+        ],
+        "summary": "微信小程序登录",
+        "description": "用 wx.login() 拿到的 code 换取登录令牌。不需要登录。第一次登录会自动创建用户（返回 user.is_new=true）；同一个微信再次登录得到同一个用户。已注销的账号再次登录视为全新用户。账号被停用时不能登录。",
+        "operationId": "auth_wechat_mini_login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WechatMiniLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "登录成功，返回令牌和用户信息",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "错误码：WECHAT_LOGIN_FAILED（微信登录失败，请重试）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：ACCOUNT_DISABLED（账号已被停用）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "登录"
+        ],
+        "summary": "退出登录",
+        "description": "吊销当前令牌，之后用它访问任何需要登录的接口都会返回 AUTH_INVALID。需要登录。其他设备上的登录不受影响。",
+        "operationId": "auth_logout",
+        "responses": {
+          "200": {
+            "description": "退出成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：ACCOUNT_DISABLED（账号已被停用）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "tags": [
+          "我的"
+        ],
+        "summary": "获取我的资料",
+        "description": "返回当前登录用户的昵称、头像、打码手机号等。需要登录。",
+        "operationId": "users_me",
+        "responses": {
+          "200": {
+            "description": "当前用户资料",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：ACCOUNT_DISABLED（账号已被停用）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "我的"
+        ],
+        "summary": "修改我的资料",
+        "description": "修改昵称和头像，只改传了的字段。需要登录。头像必须是 https 链接。",
+        "operationId": "users_update_me",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "修改后的用户资料",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：ACCOUNT_DISABLED（账号已被停用）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/me/phone": {
+      "post": {
+        "tags": [
+          "我的"
+        ],
+        "summary": "绑定手机号",
+        "description": "用小程序“获取手机号”按钮拿到的 code 绑定手机号。需要登录。手机号已被其他账号绑定时失败；重复绑定自己的号码或换绑新号码会直接覆盖。",
+        "operationId": "users_bind_phone",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindPhoneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "绑定后的用户资料",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：ACCOUNT_DISABLED（账号已被停用）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "错误码：WECHAT_LOGIN_FAILED（微信登录失败，请重试）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：PHONE_ALREADY_BOUND（这个手机号已绑定其他账号，请联系客服）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/me/cancel": {
+      "post": {
+        "tags": [
+          "我的"
+        ],
+        "summary": "注销账号",
+        "description": "注销当前账号。需要登录，confirm 必须为 true。会删除该用户的全部照片文件、清空昵称头像手机号，并让所有设备的登录立即失效。不可恢复。",
+        "operationId": "users_cancel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "注销成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：ACCOUNT_DISABLED（账号已被停用）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/specs": {
+      "get": {
+        "tags": [
+          "规格"
+        ],
+        "summary": "规格列表",
+        "description": "分页列出可用的证件照规格，按后台设置的顺序排列。不需要登录。只返回已启用的规格；可按分类筛选、按名称关键字搜索。",
+        "operationId": "specs_list",
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "receipt",
+                    "normal",
+                    "exam"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按分类筛选，不传返回全部。receipt = 回执类（身份证、社保卡、驾驶证等，可办官方回执）；normal = 普通证件照（一寸、二寸、签证等）；exam = 考试报名照",
+              "examples": [
+                "receipt"
+              ],
+              "title": "Category"
+            },
+            "description": "按分类筛选，不传返回全部。receipt = 回执类（身份证、社保卡、驾驶证等，可办官方回执）；normal = 普通证件照（一寸、二寸、签证等）；exam = 考试报名照"
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按规格名称模糊搜索，不区分大小写；不传不过滤",
+              "examples": [
+                "身份证"
+              ],
+              "title": "Keyword"
+            },
+            "description": "按规格名称模糊搜索，不区分大小写；不传不过滤"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "title": "Cursor"
+            },
+            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数，1～100，默认 20",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，1～100，默认 20"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "本页规格和下一页游标",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpecPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/specs/{code}": {
+      "get": {
+        "tags": [
+          "规格"
+        ],
+        "summary": "规格详情",
+        "description": "按规格编码查询详情：尺寸、可选底色、文件大小要求、美颜上限、回执表单字段，以及当前能否办理回执（supports_receipt）。不需要登录。规格不存在或已下架返回 SPEC_NOT_FOUND。",
+        "operationId": "specs_detail",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "规格编码，来自规格列表的 code",
+              "examples": [
+                "gd_idcard"
+              ],
+              "title": "Code"
+            },
+            "description": "规格编码，来自规格列表的 code"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "规格详情",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpecDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：SPEC_NOT_FOUND（规格不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/uploads": {
+      "post": {
+        "tags": [
+          "照片"
+        ],
+        "summary": "上传原图",
+        "description": "上传一张照片原图（multipart 表单，文件字段名 file）。需要登录。只接受 JPEG / PNG，不超过 10MB，宽高都不小于 300 像素；文件内容会被校验，扩展名或 Content-Type 与实际内容不符也会被拒绝。上传成功后用返回的 file_id 调用创建照片接口。",
+        "operationId": "photos_upload",
+        "requestBody": {
+          "description": "multipart/form-data，只有一个文件字段 file",
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "图片文件，JPEG 或 PNG，不超过 10MB，宽高都不小于 300 像素"
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "上传成功，返回文件 ID 和图片尺寸",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：UPLOAD_INVALID（上传的文件格式或大小不符合要求）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/photos": {
+      "post": {
+        "tags": [
+          "照片"
+        ],
+        "summary": "创建照片",
+        "description": "用已上传的原图创建一张照片（底片）。需要登录。file_id 必须是本人上传、还没被其他照片使用的原图，否则返回 UPLOAD_NOT_FOUND。创建后尚未付费，只能生成带水印的预览。",
+        "operationId": "photos_create",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhotoCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "创建成功，返回照片信息",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：UPLOAD_NOT_FOUND（上传的文件不存在或已过期）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "照片"
+        ],
+        "summary": "我的照片列表",
+        "description": "分页列出当前用户未删除的照片，最新的在前。需要登录。列表不含导出图，要看导出图请调用照片详情。",
+        "operationId": "photos_list",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "title": "Cursor"
+            },
+            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数，1～100，默认 20",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，1～100，默认 20"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "本页照片和下一页游标",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/photos/{photo_id}": {
+      "get": {
+        "tags": [
+          "照片"
+        ],
+        "summary": "照片详情",
+        "description": "查看一张照片及其全部导出图。需要登录。只能查看自己的照片，否则返回 PHOTO_NOT_FOUND。保管期已过（access.active 为 false）时，只返回带水印的预览图。",
+        "operationId": "photos_detail",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "photo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "description": "照片 ID",
+              "examples": [
+                12
+              ],
+              "title": "Photo Id"
+            },
+            "description": "照片 ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "照片信息和导出图列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：PHOTO_NOT_FOUND（照片不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "照片"
+        ],
+        "summary": "删除照片",
+        "description": "删除照片及其原图、抠图、全部导出图，不可恢复。需要登录。只能删除自己的照片，否则返回 PHOTO_NOT_FOUND。",
+        "operationId": "photos_delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "photo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "description": "照片 ID",
+              "examples": [
+                12
+              ],
+              "title": "Photo Id"
+            },
+            "description": "照片 ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "删除成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：PHOTO_NOT_FOUND（照片不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/photos/{photo_id}/renders": {
+      "post": {
+        "tags": [
+          "照片"
+        ],
+        "summary": "生成导出图",
+        "description": "按规格、底色、美颜档位生成导出图。需要登录。没有有效权益（未付费或已过保管期）时生成带水印的预览图（watermarked 为 true）；权益有效时生成无水印的正式图，但如果权益不允许换规格，且这张照片已有其他规格的无水印图，返回 SPEC_CHANGE_NOT_ALLOWED。bg_color 必须在规格的可选底色里，beauty_level 不能超过规格的 beauty_max，不符合时返回 VALIDATION_ERROR。相同参数重复请求会复用已有的图。",
+        "operationId": "photos_render",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "photo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "description": "照片 ID",
+              "examples": [
+                12
+              ],
+              "title": "Photo Id"
+            },
+            "description": "照片 ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenderCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "生成（或复用）的导出图",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RenderOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：PHOTO_NOT_FOUND（照片不存在）、SPEC_NOT_FOUND（规格不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：SPEC_CHANGE_NOT_ALLOWED（当前权益不支持更换规格）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：PHOTO_NOT_READY（照片还在处理中）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/photos/{photo_id}/renders/{render_id}/download": {
+      "get": {
+        "tags": [
+          "照片"
+        ],
+        "summary": "获取下载链接",
+        "description": "获取无水印导出图的下载链接，10 分钟内有效。需要登录。只有无水印的导出图、且照片在保管期内才能下载；带水印的预览图或已过保管期返回 PHOTO_ACCESS_EXPIRED，前端应引导用户付费或续费。",
+        "operationId": "photos_render_download",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "photo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "description": "照片 ID",
+              "examples": [
+                12
+              ],
+              "title": "Photo Id"
+            },
+            "description": "照片 ID"
+          },
+          {
+            "name": "render_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "description": "导出图 ID",
+              "examples": [
+                7
+              ],
+              "title": "Render Id"
+            },
+            "description": "导出图 ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "临时下载链接和过期时间",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：PHOTO_NOT_FOUND（照片不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PHOTO_ACCESS_EXPIRED（照片保管期已过，续费后可继续下载和换规格）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/plans": {
+      "get": {
+        "tags": [
+          "套餐与订单"
+        ],
+        "summary": "在售套餐列表",
+        "description": "返回当前可购买的套餐，按运营配置的顺序排列。不需要登录。只包含已上架且在销售时间窗口内的套餐；权益里没有的项为 0。价格和权益以此接口为准，不要写死在前端。",
+        "operationId": "plans_list",
+        "responses": {
+          "200": {
+            "description": "在售套餐列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PlanOut"
+                  },
+                  "type": "array",
+                  "title": "Response Plans List"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/orders": {
+      "post": {
+        "tags": [
+          "套餐与订单"
+        ],
+        "summary": "下单",
+        "description": "为当前用户创建一个待支付订单并返回拉起支付的参数。需要登录。照片范围为“单张”的套餐必须传 photo_id（本人的照片）；加购项必须传 parent_entitlement_id（本人有效的权益）。订单 30 分钟内有效。支持 Idempotency-Key：网络重试时带同一个 key，只会创建一个订单。",
+        "operationId": "orders_create",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "防重复提交：客户端为每次操作生成一个随机串（如 UUID），网络重试时带同一个值，服务端只处理一次",
+              "title": "Idempotency-Key"
+            },
+            "description": "防重复提交：客户端为每次操作生成一个随机串（如 UUID），网络重试时带同一个值，服务端只处理一次"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderCreateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "订单信息和拉起支付的参数 pay_params",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderCreatedOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：PLAN_NOT_AVAILABLE（这个套餐暂不可购买）、IDEMPOTENCY_CONFLICT（同一个请求正在处理或参数不一致）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：PHOTO_NOT_FOUND（照片不存在）、ENTITLEMENT_NOT_FOUND（权益不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：ENTITLEMENT_EXPIRED（权益已过期）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "套餐与订单"
+        ],
+        "summary": "我的订单列表",
+        "description": "返回当前用户的订单，按下单时间从新到旧，游标分页。需要登录。待支付但已超过支付截止时间的订单，读取时会被自动改为已关闭。",
+        "operationId": "orders_list",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "title": "Cursor"
+            },
+            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数，1～100，默认 20",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，1～100，默认 20"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "订单分页列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/orders/{order_no}": {
+      "get": {
+        "tags": [
+          "套餐与订单"
+        ],
+        "summary": "订单详情",
+        "description": "按订单号查询当前用户的订单，支付后前端用它确认订单是否已变为 paid。需要登录。别人的订单或不存在的订单号都返回 ORDER_NOT_FOUND。待支付但已超时的订单会被自动改为已关闭。",
+        "operationId": "orders_detail",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "order_no",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "订单号，下单或订单列表接口返回的 order_no",
+              "examples": [
+                "O20261119083012A1B2C3"
+              ],
+              "title": "Order No"
+            },
+            "description": "订单号，下单或订单列表接口返回的 order_no"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "订单详情",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：ORDER_NOT_FOUND（订单不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/orders/{order_no}/cancel": {
+      "post": {
+        "tags": [
+          "套餐与订单"
+        ],
+        "summary": "取消订单",
+        "description": "取消当前用户的待支付订单，取消后订单变为已关闭。需要登录。只有待支付的订单能取消，已支付或已关闭的返回 ORDER_NOT_CANCELLABLE。",
+        "operationId": "orders_cancel",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "order_no",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "订单号，下单或订单列表接口返回的 order_no",
+              "examples": [
+                "O20261119083012A1B2C3"
+              ],
+              "title": "Order No"
+            },
+            "description": "订单号，下单或订单列表接口返回的 order_no"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "取消后的订单",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：ORDER_NOT_FOUND（订单不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：ORDER_NOT_CANCELLABLE（订单当前不能取消）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/callbacks/wxpay": {
+      "post": {
+        "tags": [
+          "回调"
+        ],
+        "summary": "微信支付结果通知",
+        "description": "由微信支付服务器调用，前端不要调用。不需要登录，靠签名验证来源：签名不对返回 PAYMENT_SIGNATURE_INVALID。处理是幂等的，重复通知不会重复发放权益。处理成功返回 {code: SUCCESS, message: 成功}。联调（fake）模式下，签名放在 X-Fake-Signature 请求头，请求体是 JSON。",
+        "operationId": "callbacks_wxpay",
+        "responses": {
+          "200": {
+            "description": "通知已处理",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WxpayAck"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：PAYMENT_SIGNATURE_INVALID（支付通知签名不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：ORDER_NOT_FOUND（订单不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：ORDER_NOT_PAYABLE（订单当前不能支付）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dev/orders/{order_no}/simulate-paid": {
+      "post": {
+        "tags": [
+          "联调"
+        ],
+        "summary": "模拟支付成功（仅开发测试）",
+        "description": "联调用，生产环境不存在此接口。需要登录，且只能操作自己的订单。效果等同于收到一笔支付成功的通知：订单变为已支付并发放权益。重复调用不会重复发放。下单返回 pay_params.mode=fake 时，前端改调这个接口代替微信支付。",
+        "operationId": "dev_orders_simulate_paid",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "order_no",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "订单号，下单或订单列表接口返回的 order_no",
+              "examples": [
+                "O20261119083012A1B2C3"
+              ],
+              "title": "Order No"
+            },
+            "description": "订单号，下单或订单列表接口返回的 order_no"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "支付后的订单",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：ORDER_NOT_FOUND（订单不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：ORDER_NOT_PAYABLE（订单当前不能支付）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/entitlements": {
+      "get": {
+        "tags": [
+          "权益"
+        ],
+        "summary": "我的权益列表",
+        "description": "返回当前用户买到的权益（保管期、回执次数等），按到期时间从晚到早排序，最多 100 条，不分页。需要登录。默认只返回当前有效的权益；传 status=expired 查已到期的（用于展示“续费”），status=all 查全部。",
+        "operationId": "entitlements_list",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "expired",
+                "all"
+              ],
+              "type": "string",
+              "description": "按状态过滤。active：有效（状态正常且未到期，默认）；expired：已到期或已撤销；all：全部",
+              "default": "active",
+              "title": "Status"
+            },
+            "description": "按状态过滤。active：有效（状态正常且未到期，默认）；expired：已到期或已撤销；all：全部"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "权益列表，没有则为空数组",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EntitlementOut"
+                  },
+                  "title": "Response Entitlements List"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/entitlements/{entitlement_id}": {
+      "get": {
+        "tags": [
+          "权益"
+        ],
+        "summary": "权益详情",
+        "description": "按 ID 查看当前用户的一份权益。需要登录。别人的权益或不存在的 ID 都返回 ENTITLEMENT_NOT_FOUND。",
+        "operationId": "entitlements_detail",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entitlement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "description": "权益 ID，来自权益列表",
+              "examples": [
+                12
+              ],
+              "title": "Entitlement Id"
+            },
+            "description": "权益 ID，来自权益列表"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "权益详情",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntitlementOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：ENTITLEMENT_NOT_FOUND（权益不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/receipt-applications": {
+      "post": {
+        "tags": [
+          "回执"
+        ],
+        "summary": "创建回执申请",
+        "description": "为一张照片办理官方照片回执。需要登录。系统按规格和地区自动选择服务商，校验办理表单，占用一次回执次数并提交办理，申请进入“办理中”。办理结果通过服务商回调或系统轮询得到，用户可通过详情接口查看。支持 Idempotency-Key 请求头防止重复提交。一卡一人的权益会在第一次办理时绑定身份证号，之后只能为同一人办理。",
+        "operationId": "receipts_create",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "防重复提交：客户端为每次操作生成一个随机串（如 UUID），网络重试时带同一个值，服务端只处理一次",
+              "title": "Idempotency-Key"
+            },
+            "description": "防重复提交：客户端为每次操作生成一个随机串（如 UUID），网络重试时带同一个值，服务端只处理一次"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReceiptCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "创建后的申请，通常处于办理中（processing）；提交服务商失败时为 failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：ACCOUNT_DISABLED（账号已被停用）、PHOTO_ACCESS_EXPIRED（照片保管期已过，续费后可继续下载和换规格）、ENTITLEMENT_EXPIRED（权益已过期）、ONE_PERSON_MISMATCH（该权益仅限本人使用）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：IDEMPOTENCY_CONFLICT（同一个请求正在处理或参数不一致）、PHOTO_NOT_READY（照片还在处理中）、RECEIPT_NOT_SUPPORTED（这个规格暂不支持办理回执）、QUOTA_EXHAUSTED（回执次数已用完）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：SPEC_NOT_FOUND（规格不存在）、PHOTO_NOT_FOUND（照片不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "回执"
+        ],
+        "summary": "我的回执申请列表",
+        "description": "分页列出当前用户的回执申请，按创建时间从新到旧。需要登录。只能看到自己的申请。",
+        "operationId": "receipts_list",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "title": "Cursor"
+            },
+            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数，1～100，默认 20",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，1～100，默认 20"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "本页申请和下一页游标",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：ACCOUNT_DISABLED（账号已被停用）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/receipt-applications/{app_no}": {
+      "get": {
+        "tags": [
+          "回执"
+        ],
+        "summary": "回执申请详情",
+        "description": "查看一条回执申请的状态、驳回原因、还能重提几次、回执图片链接和每次提交记录。需要登录。别人的申请和不存在的申请一样返回 APPLICATION_NOT_FOUND。",
+        "operationId": "receipts_detail",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "app_no",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "回执申请单号，来自创建申请或列表接口的 app_no",
+              "examples": [
+                "R20261119083012A1B2C3"
+              ],
+              "title": "App No"
+            },
+            "description": "回执申请单号，来自创建申请或列表接口的 app_no"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "申请详情",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：ACCOUNT_DISABLED（账号已被停用）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：APPLICATION_NOT_FOUND（回执申请不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/receipt-applications/{app_no}/resubmit": {
+      "post": {
+        "tags": [
+          "回执"
+        ],
+        "summary": "驳回后重新提交",
+        "description": "被驳回（rejected）的申请可以重新提交，可换一张新照片。需要登录。不会再次占用回执次数；重提次数受权益限制，用完后返回 RESUBMIT_LIMIT_REACHED；权益已过期返回 ENTITLEMENT_EXPIRED。支持 Idempotency-Key 请求头防止重复提交。",
+        "operationId": "receipts_resubmit",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "app_no",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "回执申请单号，来自创建申请或列表接口的 app_no",
+              "examples": [
+                "R20261119083012A1B2C3"
+              ],
+              "title": "App No"
+            },
+            "description": "回执申请单号，来自创建申请或列表接口的 app_no"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "防重复提交：客户端为每次操作生成一个随机串（如 UUID），网络重试时带同一个值，服务端只处理一次",
+              "title": "Idempotency-Key"
+            },
+            "description": "防重复提交：客户端为每次操作生成一个随机串（如 UUID），网络重试时带同一个值，服务端只处理一次"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResubmitRequest",
+                "default": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "重提后的申请，状态变为办理中（processing）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：ACCOUNT_DISABLED（账号已被停用）、ENTITLEMENT_EXPIRED（权益已过期）、PHOTO_ACCESS_EXPIRED（照片保管期已过，续费后可继续下载和换规格）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：IDEMPOTENCY_CONFLICT（同一个请求正在处理或参数不一致）、APPLICATION_NOT_RESUBMITTABLE（当前状态不能重新提交）、RESUBMIT_LIMIT_REACHED（重新提交次数已用完）、PHOTO_NOT_READY（照片还在处理中）、RECEIPT_NOT_SUPPORTED（这个规格暂不支持办理回执）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：APPLICATION_NOT_FOUND（回执申请不存在）、PHOTO_NOT_FOUND（照片不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/receipt-applications/{app_no}/cancel": {
+      "post": {
+        "tags": [
+          "回执"
+        ],
+        "summary": "取消回执申请",
+        "description": "取消申请并退还占用的回执次数。需要登录。只有“已创建”（pending）和“被驳回”（rejected）的申请能取消，办理中、已出回执、已失败的申请不能取消。",
+        "operationId": "receipts_cancel",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "app_no",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "回执申请单号，来自创建申请或列表接口的 app_no",
+              "examples": [
+                "R20261119083012A1B2C3"
+              ],
+              "title": "App No"
+            },
+            "description": "回执申请单号，来自创建申请或列表接口的 app_no"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "取消后的申请，状态为 cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：ACCOUNT_DISABLED（账号已被停用）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：APPLICATION_NOT_FOUND（回执申请不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：APPLICATION_NOT_RESUBMITTABLE（当前状态不能重新提交）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/callbacks/receipt/{provider_code}": {
+      "post": {
+        "tags": [
+          "回调"
+        ],
+        "summary": "回执服务商回调",
+        "description": "供回执服务商推送办理结果，不需要登录，靠签名验证来源。签名不正确返回 CALLBACK_SIGNATURE_INVALID；同一条回调重复发送只处理一次，仍返回成功。请求体格式由各服务商决定，不在这里展开。前端不要调用此接口。",
+        "operationId": "callbacks_receipt_provider",
+        "parameters": [
+          {
+            "name": "provider_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "服务商编码，对应后台配置的服务商 code",
+              "examples": [
+                "zheying"
+              ],
+              "title": "Provider Code"
+            },
+            "description": "服务商编码，对应后台配置的服务商 code"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "已收到回调（含重复回调）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：CALLBACK_SIGNATURE_INVALID（回调签名不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：NOT_FOUND（资源不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dev/receipt-applications/{app_no}/simulate": {
+      "post": {
+        "tags": [
+          "联调"
+        ],
+        "summary": "模拟回执结果（联调）",
+        "description": "仅开发和测试环境可用，生产环境不开放。需要登录，只能操作自己的申请。让假通道对该申请当前一次提交给出指定结果（成功、驳回或失败），并像真实回调一样更新申请。非假通道模式下返回 NOT_FOUND。",
+        "operationId": "dev_receipts_simulate",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "app_no",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "回执申请单号，来自创建申请或列表接口的 app_no",
+              "examples": [
+                "R20261119083012A1B2C3"
+              ],
+              "title": "App No"
+            },
+            "description": "回执申请单号，来自创建申请或列表接口的 app_no"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "模拟后的申请",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：ACCOUNT_DISABLED（账号已被停用）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：APPLICATION_NOT_FOUND（回执申请不存在）、NOT_FOUND（资源不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notify/templates": {
+      "get": {
+        "tags": [
+          "通知"
+        ],
+        "summary": "订阅消息模板列表",
+        "description": "返回小程序需要向用户申请授权的订阅消息模板。需要登录。前端在用户提交回执申请前，用这里的 template_id 调 wx.requestSubscribeMessage，再调用“上报订阅授权”接口把用户点了允许的模板告诉后端，办理结果出来后才能通知到用户。",
+        "operationId": "notify_templates",
+        "responses": {
+          "200": {
+            "description": "需要授权的模板列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TemplateOut"
+                  },
+                  "type": "array",
+                  "title": "Response Notify Templates"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：ACCOUNT_DISABLED（账号已被停用）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/notify/subscriptions": {
+      "post": {
+        "tags": [
+          "通知"
+        ],
+        "summary": "上报订阅授权",
+        "description": "上报用户在订阅消息弹窗里点了“允许”的模板。需要登录。每个模板每次授权累计 1 次发送机会，发一条通知消耗 1 次；不在模板列表里的 ID 会被忽略；用户没有小程序身份时返回空的 quota。",
+        "operationId": "notify_report_subscriptions",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscriptionReport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "各模板当前剩余的授权次数",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionQuota"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：ACCOUNT_DISABLED（账号已被停用）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AccessOut": {
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "description": "保管期内是否有效；false 表示未付费或已到期，只能看带水印预览，不能下载",
+            "examples": [
+              true
+            ]
+          },
+          "access_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Until",
+            "description": "保管到期时间；从未付费时为空",
+            "examples": [
+              "2027-11-19T08:30:00Z"
+            ]
+          },
+          "spec_change": {
+            "type": "boolean",
+            "title": "Spec Change",
+            "description": "是否允许更换规格（用同一张底片导出其他规格的无水印图）",
+            "examples": [
+              true
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "active",
+          "spec_change"
+        ],
+        "title": "AccessOut",
+        "description": "这张照片当前的权益状态。"
+      },
+      "ApplicationOut": {
+        "properties": {
+          "app_no": {
+            "type": "string",
+            "title": "App No",
+            "description": "申请单号，对外唯一编号",
+            "examples": [
+              "R20261119083012A1B2C3"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "processing",
+              "rejected",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "description": "申请状态。pending = 已创建，还没提交给服务商；processing = 办理中，等待结果；rejected = 被驳回，可以换照片重提（看 resubmit_left）；completed = 已出回执，可查看回执图片；failed = 办理失败，回执次数已退还；cancelled = 已取消，回执次数已退还",
+            "examples": [
+              "processing"
+            ]
+          },
+          "spec_code": {
+            "type": "string",
+            "title": "Spec Code",
+            "description": "规格编码",
+            "examples": [
+              "gd_idcard"
+            ]
+          },
+          "spec_name": {
+            "type": "string",
+            "title": "Spec Name",
+            "description": "规格名称",
+            "examples": [
+              "广东省身份证"
+            ]
+          },
+          "photo_id": {
+            "type": "integer",
+            "title": "Photo Id",
+            "description": "当前使用的照片 ID；换照片重提后会变成新照片",
+            "examples": [
+              12
+            ]
+          },
+          "entitlement_id": {
+            "type": "integer",
+            "title": "Entitlement Id",
+            "description": "本次占用回执次数的权益 ID",
+            "examples": [
+              88
+            ]
+          },
+          "reject_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reject Reason",
+            "description": "驳回原因，展示给用户；只在 status 为 rejected 时有值",
+            "examples": [
+              "照片不符合要求：背景不均匀"
+            ]
+          },
+          "rejected_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejected At",
+            "description": "被驳回的时间；只在 status 为 rejected 时有值",
+            "examples": [
+              "2026-11-19T09:10:00Z"
+            ]
+          },
+          "resubmit_count": {
+            "type": "integer",
+            "title": "Resubmit Count",
+            "description": "已经重新提交的次数，首次提交不算",
+            "examples": [
+              1
+            ]
+          },
+          "resubmit_left": {
+            "type": "integer",
+            "title": "Resubmit Left",
+            "description": "还能重新提交几次，最小为 0；为 0 时被驳回后不能再重提",
+            "examples": [
+              2
+            ]
+          },
+          "image_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Code",
+            "description": "回执上的图像号，办理证件时使用；只在 completed 时有值",
+            "examples": [
+              "IMG1A2B3C4D"
+            ]
+          },
+          "receipt_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receipt Url",
+            "description": "回执图片的临时链接，约 10 分钟有效，过期后重新请求接口获取；只在 completed 时有值",
+            "examples": [
+              "https://api.example.com/files/..."
+            ]
+          },
+          "official_expire_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Official Expire At",
+            "description": "官方回执的有效截止时间，过期后需要重新办理；未知或未出回执时为空",
+            "examples": [
+              "2027-02-17T00:00:00Z"
+            ]
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At",
+            "description": "出回执的时间；只在 completed 时有值",
+            "examples": [
+              "2026-11-19T09:10:00Z"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "申请创建时间",
+            "examples": [
+              "2026-11-19T08:30:00Z"
+            ]
+          },
+          "form_masked": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Form Masked",
+            "description": "打码后的办理表单，用于展示：姓名只显示姓加 *，身份证号只显示前 3 位和后 4 位，手机号中间打码，其他字段原样返回",
+            "examples": [
+              {
+                "city": "深圳市",
+                "idcard": "110***********002X",
+                "name": "张*"
+              }
+            ]
+          },
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/AttemptOut"
+            },
+            "type": "array",
+            "title": "Attempts",
+            "description": "提交记录，按提交次序从早到晚"
+          }
+        },
+        "type": "object",
+        "required": [
+          "app_no",
+          "status",
+          "spec_code",
+          "spec_name",
+          "photo_id",
+          "entitlement_id",
+          "resubmit_count",
+          "resubmit_left",
+          "created_at",
+          "form_masked",
+          "attempts"
+        ],
+        "title": "ApplicationOut",
+        "description": "一条回执申请。"
+      },
+      "ApplicationPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ApplicationOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本页数据，按创建时间从新到旧"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "下一页游标；为空表示没有更多了"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ApplicationPage",
+        "description": "分页列表：一条回执申请。"
+      },
+      "AttemptOut": {
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "title": "Seq",
+            "description": "第几次提交，从 1 开始",
+            "examples": [
+              1
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "created",
+              "submitted",
+              "unknown",
+              "processing",
+              "completed",
+              "rejected",
+              "failed",
+              "abandoned"
+            ],
+            "title": "Status",
+            "description": "这次提交的状态。created = 已创建还没发出；submitted = 已提交等待结果；unknown = 网络超时还不确定是否提交成功，系统会自动核对；processing = 对方办理中；completed = 已出回执；rejected = 被驳回；failed = 办理失败；abandoned = 已放弃",
+            "examples": [
+              "rejected"
+            ]
+          },
+          "reject_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reject Reason",
+            "description": "被驳回的原因；没有被驳回时为空",
+            "examples": [
+              "照片不符合要求：背景不均匀"
+            ]
+          },
+          "submitted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted At",
+            "description": "提交成功的时间；还没提交成功时为空",
+            "examples": [
+              "2026-11-19T08:30:00Z"
+            ]
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At",
+            "description": "出结果的时间；还没出结果时为空",
+            "examples": [
+              "2026-11-19T09:10:00Z"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "seq",
+          "status"
+        ],
+        "title": "AttemptOut",
+        "description": "一次提交记录。驳回后每重提一次增加一条。"
+      },
+      "BindPhoneRequest": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Code",
+            "description": "小程序里用户点“获取手机号”按钮（getPhoneNumber）拿到的 code，只能用一次",
+            "examples": [
+              "e1f2a3b4c5d6e7f8"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "BindPhoneRequest",
+        "description": "绑定手机号请求。"
+      },
+      "CancelAccountRequest": {
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm",
+            "description": "用户确认注销，必须为 true，否则返回 VALIDATION_ERROR。注销后照片文件被删除、不可恢复",
+            "examples": [
+              true
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "confirm"
+        ],
+        "title": "CancelAccountRequest",
+        "description": "注销账号请求。"
+      },
+      "DownloadOut": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "无水印图片的临时下载链接，10 分钟内有效",
+            "examples": [
+              "https://api.example.com/files/..."
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At",
+            "description": "链接过期时间",
+            "examples": [
+              "2026-11-19T08:40:00Z"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "expires_at"
+        ],
+        "title": "DownloadOut",
+        "description": "下载链接。"
+      },
+      "EntitlementOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "权益 ID",
+            "examples": [
+              12
+            ]
+          },
+          "plan_code": {
+            "type": "string",
+            "title": "Plan Code",
+            "description": "购买的套餐编码",
+            "examples": [
+              "photo_year_39_9"
+            ]
+          },
+          "plan_name": {
+            "type": "string",
+            "title": "Plan Name",
+            "description": "购买的套餐名称，可直接展示",
+            "examples": [
+              "单张照片年度保管"
+            ]
+          },
+          "photo_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Id",
+            "description": "权益覆盖的照片 ID；为空表示覆盖该用户全部照片（如年度不限次套餐）",
+            "examples": [
+              101
+            ]
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Starts At",
+            "description": "权益生效时间（带时区）",
+            "examples": [
+              "2026-11-19T08:30:12Z"
+            ]
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ends At",
+            "description": "权益到期时间（带时区），到期后不能下载和换规格",
+            "examples": [
+              "2027-11-19T08:30:12Z"
+            ]
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "description": "当前是否有效：状态正常且还没到期为 true；已到期或被撤销为 false",
+            "examples": [
+              true
+            ]
+          },
+          "spec_change": {
+            "type": "boolean",
+            "title": "Spec Change",
+            "description": "保管期内是否可以无限更换规格",
+            "examples": [
+              true
+            ]
+          },
+          "one_person": {
+            "type": "boolean",
+            "title": "One Person",
+            "description": "是否一卡一人：true 时首次办理回执后只能给同一个人办",
+            "examples": [
+              false
+            ]
+          },
+          "receipt_quota_total": {
+            "type": "integer",
+            "title": "Receipt Quota Total",
+            "description": "可办回执总次数；套餐不含回执时为 0",
+            "examples": [
+              1
+            ]
+          },
+          "receipt_quota_used": {
+            "type": "integer",
+            "title": "Receipt Quota Used",
+            "description": "已使用（含办理中占用）的回执次数",
+            "examples": [
+              0
+            ]
+          },
+          "receipt_quota_left": {
+            "type": "integer",
+            "title": "Receipt Quota Left",
+            "description": "剩余回执次数 = 总次数 - 已使用",
+            "examples": [
+              1
+            ]
+          },
+          "resubmit_limit": {
+            "type": "integer",
+            "title": "Resubmit Limit",
+            "description": "回执被驳回后可免费重新提交的次数；没有则为 0",
+            "examples": [
+              3
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "plan_code",
+          "plan_name",
+          "photo_id",
+          "starts_at",
+          "ends_at",
+          "is_active",
+          "spec_change",
+          "one_person",
+          "receipt_quota_total",
+          "receipt_quota_used",
+          "receipt_quota_left",
+          "resubmit_limit"
+        ],
+        "title": "EntitlementOut",
+        "description": "用户买到的一份权益：保管期、回执次数等，每次购买生成一条。"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "错误码，全大写下划线，完整列表见接口文档首页",
+            "examples": [
+              "QUOTA_EXHAUSTED"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "给用户看的错误说明",
+            "examples": [
+              "回执次数已用完"
+            ]
+          },
+          "errors": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FieldError"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errors",
+            "description": "参数校验失败时，逐个列出出错的参数；其他错误为空"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorResponse",
+        "description": "所有接口出错时的统一返回格式。前端按 code 判断错误类型，message 可以直接展示给用户。"
+      },
+      "FieldError": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "title": "Field",
+            "description": "出错的参数位置，如 body.spec_code、query.limit",
+            "examples": [
+              "body.spec_code"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "错误原因",
+            "examples": [
+              "Field required"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "field",
+          "message"
+        ],
+        "title": "FieldError",
+        "description": "一个参数的校验错误。"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "title": "Status",
+            "description": "服务状态，能返回就固定为 ok",
+            "examples": [
+              "ok"
+            ]
+          },
+          "database": {
+            "type": "string",
+            "const": "ok",
+            "title": "Database",
+            "description": "数据库状态，能执行查询时为 ok",
+            "examples": [
+              "ok"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "database"
+        ],
+        "title": "HealthResponse",
+        "description": "健康检查结果。"
+      },
+      "LoginResponse": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "title": "Token",
+            "description": "登录令牌。之后每个需要登录的接口都在请求头带 Authorization: Bearer <token>；不要放进 URL",
+            "examples": [
+              "q3mJ0s2kT9x8Yb7wVnC1aZpL4dRfE6uHgIoKjXcMvBQ"
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At",
+            "description": "令牌当前的闲置过期时间（UTC，带时区）。持续使用会自动顺延，但最长不超过绝对有效期",
+            "examples": [
+              "2026-11-26T08:30:12Z"
+            ]
+          },
+          "user": {
+            "$ref": "#/components/schemas/LoginUserOut",
+            "description": "当前登录的用户信息"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "expires_at",
+          "user"
+        ],
+        "title": "LoginResponse",
+        "description": "登录成功的返回：令牌和用户信息。"
+      },
+      "LoginUserOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "用户 ID",
+            "examples": [
+              1024
+            ]
+          },
+          "nickname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nickname",
+            "description": "昵称；用户还没设置时为空",
+            "examples": [
+              "小明"
+            ]
+          },
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url",
+            "description": "头像链接；还没设置时为空",
+            "examples": [
+              "https://example.com/a.png"
+            ]
+          },
+          "phone_masked": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone Masked",
+            "description": "打码后的手机号；还没绑定手机号时为空",
+            "examples": [
+              "138****1234"
+            ]
+          },
+          "is_new": {
+            "type": "boolean",
+            "title": "Is New",
+            "description": "是否本次登录刚创建的新用户。true 表示首次登录，前端可走新用户引导",
+            "examples": [
+              true
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "nickname",
+          "avatar_url",
+          "phone_masked",
+          "is_new"
+        ],
+        "title": "LoginUserOut",
+        "description": "登录后返回的用户简要信息。"
+      },
+      "MeOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "用户 ID",
+            "examples": [
+              1024
+            ]
+          },
+          "nickname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nickname",
+            "description": "昵称；还没设置时为空",
+            "examples": [
+              "小明"
+            ]
+          },
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url",
+            "description": "头像链接；还没设置时为空",
+            "examples": [
+              "https://example.com/a.png"
+            ]
+          },
+          "phone_masked": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone Masked",
+            "description": "打码后的手机号，中间四位用 * 代替；没绑定手机号时为空",
+            "examples": [
+              "138****1234"
+            ]
+          },
+          "has_phone": {
+            "type": "boolean",
+            "title": "Has Phone",
+            "description": "是否已绑定手机号",
+            "examples": [
+              true
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "注册时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T08:30:12Z"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "nickname",
+          "avatar_url",
+          "phone_masked",
+          "has_phone",
+          "created_at"
+        ],
+        "title": "MeOut",
+        "description": "当前用户的个人资料。"
+      },
+      "OkResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "description": "固定为 true",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "OkResponse",
+        "description": "只表示操作成功、没有其他数据的返回。"
+      },
+      "OrderCreateIn": {
+        "properties": {
+          "plan_code": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Plan Code",
+            "description": "要购买的套餐编码，来自套餐列表",
+            "examples": [
+              "photo_year_39_9"
+            ]
+          },
+          "photo_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Id",
+            "description": "要保管/办理的照片 ID，必须是本人的照片。照片范围为“单张”的套餐必填；其他套餐可不传",
+            "examples": [
+              101
+            ]
+          },
+          "parent_entitlement_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Entitlement Id",
+            "description": "主权益 ID，必须是本人当前有效的权益。只有加购项套餐（如加办回执）必填，其他套餐不用传",
+            "examples": [
+              12
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan_code"
+        ],
+        "title": "OrderCreateIn",
+        "description": "下单请求。"
+      },
+      "OrderCreatedOut": {
+        "properties": {
+          "order_no": {
+            "type": "string",
+            "title": "Order No",
+            "description": "订单号，对外展示和查询用",
+            "examples": [
+              "O20261119083012A1B2C3"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "paid",
+              "closed",
+              "part_refunded",
+              "refunded"
+            ],
+            "title": "Status",
+            "description": "订单状态：pending = 待支付；paid = 已支付；closed = 已关闭（超时未支付或用户取消）；part_refunded = 部分退款；refunded = 已全额退款",
+            "examples": [
+              "pending"
+            ]
+          },
+          "total_fen": {
+            "type": "integer",
+            "title": "Total Fen",
+            "description": "订单应付金额，单位：分",
+            "examples": [
+              3990
+            ]
+          },
+          "paid_fen": {
+            "type": "integer",
+            "title": "Paid Fen",
+            "description": "已支付金额，单位：分；未支付为 0",
+            "examples": [
+              0
+            ]
+          },
+          "refunded_fen": {
+            "type": "integer",
+            "title": "Refunded Fen",
+            "description": "已退款金额，单位：分；没有退款为 0",
+            "examples": [
+              0
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "下单时间（带时区）",
+            "examples": [
+              "2026-11-19T08:30:12Z"
+            ]
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid At",
+            "description": "支付成功时间（带时区）；未支付时为空",
+            "examples": [
+              "2026-11-19T08:31:00Z"
+            ]
+          },
+          "expire_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expire At",
+            "description": "支付截止时间（带时区），超过后订单自动关闭，需要重新下单",
+            "examples": [
+              "2026-11-19T09:00:12Z"
+            ]
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OrderItemOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "订单商品项"
+          },
+          "pay_params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Pay Params",
+            "description": "拉起微信支付所需的参数。真实支付时是 wx.requestPayment 需要的 timeStamp、nonceStr、package、signType、paySign；联调（fake）模式下为 {\"mode\": \"fake\", ...}，前端看到 mode=fake 时不要调 wx.requestPayment，改调模拟支付接口 POST /api/v1/dev/orders/{order_no}/simulate-paid",
+            "examples": [
+              {
+                "amount_fen": 3990,
+                "mode": "fake",
+                "out_trade_no": "P20261119083012A1B2C3"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "order_no",
+          "status",
+          "total_fen",
+          "paid_fen",
+          "refunded_fen",
+          "created_at",
+          "paid_at",
+          "expire_at",
+          "items",
+          "pay_params"
+        ],
+        "title": "OrderCreatedOut",
+        "description": "下单结果：订单信息加上拉起支付的参数。"
+      },
+      "OrderItemOut": {
+        "properties": {
+          "item_type": {
+            "type": "string",
+            "enum": [
+              "plan",
+              "addon",
+              "renew"
+            ],
+            "title": "Item Type",
+            "description": "类型：plan = 套餐；addon = 加购项（跟随主权益）；renew = 续费",
+            "examples": [
+              "plan"
+            ]
+          },
+          "plan_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Code",
+            "description": "套餐编码；没有关联套餐时为空",
+            "examples": [
+              "photo_year_39_9"
+            ]
+          },
+          "plan_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Name",
+            "description": "套餐名称（下单时的名称）；没有关联套餐时为空",
+            "examples": [
+              "单张照片年度保管"
+            ]
+          },
+          "photo_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Id",
+            "description": "关联的照片 ID；不针对某张照片时为空",
+            "examples": [
+              101
+            ]
+          },
+          "amount_fen": {
+            "type": "integer",
+            "title": "Amount Fen",
+            "description": "这一项的金额，单位：分",
+            "examples": [
+              3990
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "item_type",
+          "plan_code",
+          "plan_name",
+          "photo_id",
+          "amount_fen"
+        ],
+        "title": "OrderItemOut",
+        "description": "订单里的一个商品项。"
+      },
+      "OrderOut": {
+        "properties": {
+          "order_no": {
+            "type": "string",
+            "title": "Order No",
+            "description": "订单号，对外展示和查询用",
+            "examples": [
+              "O20261119083012A1B2C3"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "paid",
+              "closed",
+              "part_refunded",
+              "refunded"
+            ],
+            "title": "Status",
+            "description": "订单状态：pending = 待支付；paid = 已支付；closed = 已关闭（超时未支付或用户取消）；part_refunded = 部分退款；refunded = 已全额退款",
+            "examples": [
+              "pending"
+            ]
+          },
+          "total_fen": {
+            "type": "integer",
+            "title": "Total Fen",
+            "description": "订单应付金额，单位：分",
+            "examples": [
+              3990
+            ]
+          },
+          "paid_fen": {
+            "type": "integer",
+            "title": "Paid Fen",
+            "description": "已支付金额，单位：分；未支付为 0",
+            "examples": [
+              0
+            ]
+          },
+          "refunded_fen": {
+            "type": "integer",
+            "title": "Refunded Fen",
+            "description": "已退款金额，单位：分；没有退款为 0",
+            "examples": [
+              0
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "下单时间（带时区）",
+            "examples": [
+              "2026-11-19T08:30:12Z"
+            ]
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid At",
+            "description": "支付成功时间（带时区）；未支付时为空",
+            "examples": [
+              "2026-11-19T08:31:00Z"
+            ]
+          },
+          "expire_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expire At",
+            "description": "支付截止时间（带时区），超过后订单自动关闭，需要重新下单",
+            "examples": [
+              "2026-11-19T09:00:12Z"
+            ]
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OrderItemOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "订单商品项"
+          }
+        },
+        "type": "object",
+        "required": [
+          "order_no",
+          "status",
+          "total_fen",
+          "paid_fen",
+          "refunded_fen",
+          "created_at",
+          "paid_at",
+          "expire_at",
+          "items"
+        ],
+        "title": "OrderOut",
+        "description": "订单。"
+      },
+      "OrderPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OrderOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本页数据，按创建时间从新到旧"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "下一页游标；为空表示没有更多了"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "OrderPage",
+        "description": "分页列表：订单。"
+      },
+      "PhotoCreate": {
+        "properties": {
+          "file_id": {
+            "type": "integer",
+            "title": "File Id",
+            "description": "上传接口返回的 file_id；必须是自己上传的、还没被其他照片使用的原图",
+            "examples": [
+              101
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "camera",
+              "upload"
+            ],
+            "title": "Source",
+            "description": "照片来源。camera = 小程序内拍照；upload = 从相册选择",
+            "examples": [
+              "camera"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "file_id",
+          "source"
+        ],
+        "title": "PhotoCreate",
+        "description": "创建照片的请求。"
+      },
+      "PhotoDetail": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "照片 ID",
+            "examples": [
+              12
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "camera",
+              "upload"
+            ],
+            "title": "Source",
+            "description": "来源。camera = 小程序内拍照；upload = 从相册选择",
+            "examples": [
+              "camera"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "expired",
+              "purged"
+            ],
+            "title": "Status",
+            "description": "照片状态。draft = 草稿；active = 正常；expired = 保管期已过；purged = 已删除（接口不会返回此状态的照片）",
+            "examples": [
+              "active"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间",
+            "examples": [
+              "2026-11-19T08:30:00Z"
+            ]
+          },
+          "original_url": {
+            "type": "string",
+            "title": "Original Url",
+            "description": "原图的临时访问链接，约 10 分钟内有效，过期后重新请求接口获取",
+            "examples": [
+              "https://api.example.com/files/..."
+            ]
+          },
+          "access": {
+            "$ref": "#/components/schemas/AccessOut",
+            "description": "权益状态，决定能否下载、能否换规格"
+          },
+          "renders": {
+            "items": {
+              "$ref": "#/components/schemas/RenderOut"
+            },
+            "type": "array",
+            "title": "Renders",
+            "description": "已生成的导出图，按生成时间从早到晚；保管期过后只保留带水印的预览图"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "status",
+          "created_at",
+          "original_url",
+          "access",
+          "renders"
+        ],
+        "title": "PhotoDetail",
+        "description": "照片详情：在照片基础上带上全部导出图。"
+      },
+      "PhotoOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "照片 ID",
+            "examples": [
+              12
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "camera",
+              "upload"
+            ],
+            "title": "Source",
+            "description": "来源。camera = 小程序内拍照；upload = 从相册选择",
+            "examples": [
+              "camera"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "expired",
+              "purged"
+            ],
+            "title": "Status",
+            "description": "照片状态。draft = 草稿；active = 正常；expired = 保管期已过；purged = 已删除（接口不会返回此状态的照片）",
+            "examples": [
+              "active"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间",
+            "examples": [
+              "2026-11-19T08:30:00Z"
+            ]
+          },
+          "original_url": {
+            "type": "string",
+            "title": "Original Url",
+            "description": "原图的临时访问链接，约 10 分钟内有效，过期后重新请求接口获取",
+            "examples": [
+              "https://api.example.com/files/..."
+            ]
+          },
+          "access": {
+            "$ref": "#/components/schemas/AccessOut",
+            "description": "权益状态，决定能否下载、能否换规格"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "status",
+          "created_at",
+          "original_url",
+          "access"
+        ],
+        "title": "PhotoOut",
+        "description": "一张照片（底片）。"
+      },
+      "PhotoPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PhotoOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本页数据，按创建时间从新到旧"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "下一页游标；为空表示没有更多了"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "PhotoPage",
+        "description": "分页列表：一张照片（底片）。"
+      },
+      "PlanBenefitsOut": {
+        "properties": {
+          "storage_days": {
+            "type": "integer",
+            "title": "Storage Days",
+            "description": "照片保管天数，从付款成功起算；0 表示套餐不含保管期",
+            "default": 0,
+            "examples": [
+              365
+            ]
+          },
+          "photo_scope": {
+            "type": "integer",
+            "title": "Photo Scope",
+            "description": "权益覆盖的照片范围：1 = 只覆盖下单时选的一张照片；0 = 覆盖用户全部照片",
+            "default": 0,
+            "examples": [
+              1
+            ]
+          },
+          "receipt_quota": {
+            "type": "integer",
+            "title": "Receipt Quota",
+            "description": "可办理回执的次数；0 表示不含回执",
+            "default": 0,
+            "examples": [
+              1
+            ]
+          },
+          "resubmit_limit": {
+            "type": "integer",
+            "title": "Resubmit Limit",
+            "description": "回执被驳回后可免费重新提交的次数",
+            "default": 0,
+            "examples": [
+              3
+            ]
+          },
+          "spec_change": {
+            "type": "integer",
+            "title": "Spec Change",
+            "description": "保管期内能否无限更换规格：1 = 可以，0 = 不可以",
+            "default": 0,
+            "examples": [
+              1
+            ]
+          },
+          "one_person": {
+            "type": "integer",
+            "title": "One Person",
+            "description": "是否一卡一人：1 = 首次办回执后只能给同一个人办，0 = 不限制",
+            "default": 0,
+            "examples": [
+              0
+            ]
+          },
+          "attach_to_parent": {
+            "type": "integer",
+            "title": "Attach To Parent",
+            "description": "是否加购项：1 = 加购项，下单时必须选一个已有权益作为主权益，到期时间跟主权益一致；0 = 独立套餐",
+            "default": 0,
+            "examples": [
+              0
+            ]
+          }
+        },
+        "type": "object",
+        "title": "PlanBenefitsOut",
+        "description": "套餐包含的权益。套餐没有某项权益时，该项为 0。"
+      },
+      "PlanOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "套餐编码，下单时传这个值",
+            "examples": [
+              "photo_year_39_9"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "套餐名称，可直接展示",
+            "examples": [
+              "单张照片年度保管"
+            ]
+          },
+          "price_fen": {
+            "type": "integer",
+            "title": "Price Fen",
+            "description": "价格，单位：分（3990 表示 39.9 元）",
+            "examples": [
+              3990
+            ]
+          },
+          "benefits": {
+            "$ref": "#/components/schemas/PlanBenefitsOut",
+            "description": "套餐包含的权益"
+          },
+          "display": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Display",
+            "description": "展示用的配置（卖点文案、角标等），由运营后台配置，原样返回；没有配置时为空对象",
+            "examples": [
+              {
+                "badge": "推荐",
+                "points": [
+                  "期内无限下载",
+                  "被驳回免费重提"
+                ]
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "price_fen",
+          "benefits",
+          "display"
+        ],
+        "title": "PlanOut",
+        "description": "在售套餐。"
+      },
+      "ReceiptCreate": {
+        "properties": {
+          "photo_id": {
+            "type": "integer",
+            "title": "Photo Id",
+            "description": "要办理回执的照片 ID，必须是自己的照片",
+            "examples": [
+              12
+            ]
+          },
+          "spec_code": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Spec Code",
+            "description": "回执规格编码，来自规格列表；该规格必须支持办理回执",
+            "examples": [
+              "gd_idcard"
+            ]
+          },
+          "form": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "maxProperties": 20,
+            "title": "Form",
+            "description": "办理表单，key 来自规格详情里的 form_schema（如 name 姓名、idcard 身份证号、city 城市），value 是用户填写的文字。必填项不能为空；idcard 必须是 18 位，最后一位可以是 X",
+            "examples": [
+              {
+                "city": "深圳市",
+                "idcard": "11010519491231002X",
+                "name": "张三"
+              }
+            ]
+          },
+          "region_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 12
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Code",
+            "description": "办理地区的行政区划码，用于选择有该地区采集系统的通道；不限地区的规格不传",
+            "examples": [
+              "440300"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "photo_id",
+          "spec_code",
+          "form"
+        ],
+        "title": "ReceiptCreate",
+        "description": "创建回执申请的请求。"
+      },
+      "RenderCreate": {
+        "properties": {
+          "spec_code": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Spec Code",
+            "description": "规格编码，来自规格列表",
+            "examples": [
+              "gd_idcard"
+            ]
+          },
+          "bg_color": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bg Color",
+            "description": "底色，必须是该规格 bg_colors 里的一个（不区分大小写）；不传取第一个",
+            "examples": [
+              "#FFFFFF"
+            ]
+          },
+          "beauty_level": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 0.0,
+            "title": "Beauty Level",
+            "description": "美颜档位，0 表示不美颜；不能超过该规格的 beauty_max",
+            "default": 0,
+            "examples": [
+              0
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "spec_code"
+        ],
+        "title": "RenderCreate",
+        "description": "生成导出图的请求。"
+      },
+      "RenderOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "导出图 ID",
+            "examples": [
+              7
+            ]
+          },
+          "spec_code": {
+            "type": "string",
+            "title": "Spec Code",
+            "description": "规格编码",
+            "examples": [
+              "gd_idcard"
+            ]
+          },
+          "spec_name": {
+            "type": "string",
+            "title": "Spec Name",
+            "description": "规格名称",
+            "examples": [
+              "广东省身份证"
+            ]
+          },
+          "bg_color": {
+            "type": "string",
+            "title": "Bg Color",
+            "description": "底色，十六进制颜色值",
+            "examples": [
+              "#FFFFFF"
+            ]
+          },
+          "beauty_level": {
+            "type": "integer",
+            "title": "Beauty Level",
+            "description": "美颜档位，0 表示不美颜",
+            "examples": [
+              0
+            ]
+          },
+          "watermarked": {
+            "type": "boolean",
+            "title": "Watermarked",
+            "description": "是否带水印。true 为预览图，不能下载；false 为正式图，权益有效期内可下载",
+            "examples": [
+              true
+            ]
+          },
+          "width_px": {
+            "type": "integer",
+            "title": "Width Px",
+            "description": "图片宽度，单位像素",
+            "examples": [
+              358
+            ]
+          },
+          "height_px": {
+            "type": "integer",
+            "title": "Height Px",
+            "description": "图片高度，单位像素",
+            "examples": [
+              441
+            ]
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes",
+            "description": "文件大小，单位字节",
+            "examples": [
+              48210
+            ]
+          },
+          "preview_url": {
+            "type": "string",
+            "title": "Preview Url",
+            "description": "图片的临时访问链接，约 10 分钟内有效，用于在页面上显示",
+            "examples": [
+              "https://api.example.com/files/..."
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "spec_code",
+          "spec_name",
+          "bg_color",
+          "beauty_level",
+          "watermarked",
+          "width_px",
+          "height_px",
+          "size_bytes",
+          "preview_url"
+        ],
+        "title": "RenderOut",
+        "description": "一张导出图：某张照片按某个规格、底色、美颜档位导出的结果。"
+      },
+      "ResubmitRequest": {
+        "properties": {
+          "photo_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Id",
+            "description": "换一张新照片重提时传入，必须是自己的照片；不传则沿用原来的照片重新提交",
+            "examples": [
+              15
+            ]
+          }
+        },
+        "type": "object",
+        "title": "ResubmitRequest",
+        "description": "驳回后重新提交的请求。"
+      },
+      "SimulateRequest": {
+        "properties": {
+          "result": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "rejected",
+              "failed"
+            ],
+            "title": "Result",
+            "description": "要模拟的结果。completed = 办理成功并出回执；rejected = 被驳回；failed = 办理失败（通道故障等）",
+            "examples": [
+              "completed"
+            ]
+          },
+          "reject_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reject Reason",
+            "description": "模拟驳回时的原因；只在 result 为 rejected 时有意义，不传用默认原因",
+            "examples": [
+              "照片不符合要求：背景不均匀"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "result"
+        ],
+        "title": "SimulateRequest",
+        "description": "联调：模拟服务商给出办理结果。仅开发和测试环境可用。"
+      },
+      "SpecDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "规格编码，唯一，接口里用它指定规格",
+            "examples": [
+              "gd_idcard"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "规格名称，直接展示给用户",
+            "examples": [
+              "广东省身份证"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "receipt",
+              "normal",
+              "exam"
+            ],
+            "title": "Category",
+            "description": "规格分类。receipt = 回执类（身份证、社保卡、驾驶证等，可办理官方照片回执）；normal = 普通证件照（一寸、二寸、签证等）；exam = 考试报名照（公务员、教资等）",
+            "examples": [
+              "receipt"
+            ]
+          },
+          "cert_type": {
+            "type": "string",
+            "title": "Cert Type",
+            "description": "证件类型标识，如 idcard、driver_license，前端可据此显示图标",
+            "examples": [
+              "idcard"
+            ]
+          },
+          "region_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Code",
+            "description": "适用地区的行政区划码；为空表示不限地区",
+            "examples": [
+              "440000"
+            ]
+          },
+          "width_px": {
+            "type": "integer",
+            "title": "Width Px",
+            "description": "成品宽度，单位像素",
+            "examples": [
+              358
+            ]
+          },
+          "height_px": {
+            "type": "integer",
+            "title": "Height Px",
+            "description": "成品高度，单位像素",
+            "examples": [
+              441
+            ]
+          },
+          "width_mm": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width Mm",
+            "description": "成品宽度，单位毫米；官方未规定时为空",
+            "examples": [
+              26
+            ]
+          },
+          "height_mm": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height Mm",
+            "description": "成品高度，单位毫米；官方未规定时为空",
+            "examples": [
+              32
+            ]
+          },
+          "dpi": {
+            "type": "integer",
+            "title": "Dpi",
+            "description": "成品分辨率，单位 dpi（每英寸像素数）",
+            "examples": [
+              300
+            ]
+          },
+          "bg_colors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Bg Colors",
+            "description": "可选底色列表，十六进制颜色值；制作时 bg_color 必须取自这里，第一项是默认底色",
+            "examples": [
+              [
+                "#FFFFFF",
+                "#438EDB"
+              ]
+            ]
+          },
+          "file_size_min_kb": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size Min Kb",
+            "description": "官方要求的文件大小下限，单位 KB；无要求时为空",
+            "examples": [
+              null
+            ]
+          },
+          "file_size_max_kb": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size Max Kb",
+            "description": "官方要求的文件大小上限，单位 KB；无要求时为空",
+            "examples": [
+              100
+            ]
+          },
+          "beauty_max": {
+            "type": "integer",
+            "title": "Beauty Max",
+            "description": "允许的最高美颜档位，0～5；0 表示该规格不允许美颜（如官方要求不得修图）",
+            "examples": [
+              3
+            ]
+          },
+          "form_schema": {
+            "items": {
+              "$ref": "#/components/schemas/SpecFormField"
+            },
+            "type": "array",
+            "title": "Form Schema",
+            "description": "办理回执时要用户填写的字段列表；不支持回执的规格通常为空列表"
+          },
+          "supports_receipt": {
+            "type": "boolean",
+            "title": "Supports Receipt",
+            "description": "当前是否能办理该规格的官方回执（有启用的服务商通道）；false 时不要展示办理入口",
+            "examples": [
+              true
+            ]
+          },
+          "official_valid_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Official Valid Days",
+            "description": "官方回执的有效天数；无明确期限时为空",
+            "examples": [
+              90
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "category",
+          "cert_type",
+          "width_px",
+          "height_px",
+          "dpi",
+          "bg_colors",
+          "beauty_max",
+          "form_schema",
+          "supports_receipt"
+        ],
+        "title": "SpecDetail",
+        "description": "规格详情：在摘要基础上增加底色、文件大小、美颜上限、回执表单等。"
+      },
+      "SpecFormField": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key",
+            "description": "字段标识，提交回执时作为表单键名",
+            "examples": [
+              "name"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "字段名称，直接展示给用户",
+            "examples": [
+              "姓名"
+            ]
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "description": "是否必填",
+            "default": true,
+            "examples": [
+              true
+            ]
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "SpecFormField",
+        "description": "办理回执时需要用户填写的一个字段。"
+      },
+      "SpecOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "规格编码，唯一，接口里用它指定规格",
+            "examples": [
+              "gd_idcard"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "规格名称，直接展示给用户",
+            "examples": [
+              "广东省身份证"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "receipt",
+              "normal",
+              "exam"
+            ],
+            "title": "Category",
+            "description": "规格分类。receipt = 回执类（身份证、社保卡、驾驶证等，可办理官方照片回执）；normal = 普通证件照（一寸、二寸、签证等）；exam = 考试报名照（公务员、教资等）",
+            "examples": [
+              "receipt"
+            ]
+          },
+          "cert_type": {
+            "type": "string",
+            "title": "Cert Type",
+            "description": "证件类型标识，如 idcard、driver_license，前端可据此显示图标",
+            "examples": [
+              "idcard"
+            ]
+          },
+          "region_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Code",
+            "description": "适用地区的行政区划码；为空表示不限地区",
+            "examples": [
+              "440000"
+            ]
+          },
+          "width_px": {
+            "type": "integer",
+            "title": "Width Px",
+            "description": "成品宽度，单位像素",
+            "examples": [
+              358
+            ]
+          },
+          "height_px": {
+            "type": "integer",
+            "title": "Height Px",
+            "description": "成品高度，单位像素",
+            "examples": [
+              441
+            ]
+          },
+          "width_mm": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width Mm",
+            "description": "成品宽度，单位毫米；官方未规定时为空",
+            "examples": [
+              26
+            ]
+          },
+          "height_mm": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height Mm",
+            "description": "成品高度，单位毫米；官方未规定时为空",
+            "examples": [
+              32
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "category",
+          "cert_type",
+          "width_px",
+          "height_px"
+        ],
+        "title": "SpecOut",
+        "description": "规格摘要：列表里每一项。"
+      },
+      "SpecPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SpecOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本页数据，按创建时间从新到旧"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "下一页游标；为空表示没有更多了"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "SpecPage",
+        "description": "分页列表：规格摘要：列表里每一项。"
+      },
+      "SubscriptionQuota": {
+        "properties": {
+          "quota": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Quota",
+            "description": "key 是模板 ID，value 是剩余可发送次数（一次授权发一条）；用户没有小程序身份时为空对象",
+            "examples": [
+              {
+                "TMPL_RECEIPT_REJECTED_PLACEHOLDER": 1
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "quota"
+        ],
+        "title": "SubscriptionQuota",
+        "description": "当前用户各订阅消息模板的剩余授权次数。"
+      },
+      "SubscriptionReport": {
+        "properties": {
+          "accepted": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Accepted",
+            "description": "用户点了“允许”的模板 ID 列表，来自 wx.requestSubscribeMessage 返回值里取值为 accept 的模板；不在模板列表里的 ID 会被忽略，重复的 ID 只计一次",
+            "examples": [
+              [
+                "TMPL_RECEIPT_REJECTED_PLACEHOLDER"
+              ]
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "title": "SubscriptionReport",
+        "description": "上报用户在订阅消息弹窗里点了“允许”的模板。"
+      },
+      "TemplateOut": {
+        "properties": {
+          "event": {
+            "type": "string",
+            "enum": [
+              "receipt_completed",
+              "receipt_rejected"
+            ],
+            "title": "Event",
+            "description": "这个模板对应的通知事件。receipt_completed = 回执办理成功；receipt_rejected = 回执被驳回",
+            "examples": [
+              "receipt_rejected"
+            ]
+          },
+          "template_id": {
+            "type": "string",
+            "title": "Template Id",
+            "description": "小程序订阅消息模板 ID，传给 wx.requestSubscribeMessage 的 tmplIds",
+            "examples": [
+              "TMPL_RECEIPT_REJECTED_PLACEHOLDER"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "模板名称，可展示在授权提示文案里",
+            "examples": [
+              "回执被驳回提醒"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "event",
+          "template_id",
+          "title"
+        ],
+        "title": "TemplateOut",
+        "description": "一个需要用户授权的订阅消息模板。"
+      },
+      "UpdateMeRequest": {
+        "properties": {
+          "nickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nickname",
+            "description": "新昵称，1～32 个字（首尾空格会去掉）；不传表示不修改",
+            "examples": [
+              "小明"
+            ]
+          },
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "pattern": "^https://\\S+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url",
+            "description": "新头像链接，必须是 https 开头，最长 500 个字符；不传表示不修改",
+            "examples": [
+              "https://example.com/a.png"
+            ]
+          }
+        },
+        "type": "object",
+        "title": "UpdateMeRequest",
+        "description": "修改个人资料。只会修改传了的字段，没传的保持不变。"
+      },
+      "UploadOut": {
+        "properties": {
+          "file_id": {
+            "type": "integer",
+            "title": "File Id",
+            "description": "上传文件的 ID，下一步创建照片时传入；未使用的上传会被定期清理",
+            "examples": [
+              101
+            ]
+          },
+          "width": {
+            "type": "integer",
+            "title": "Width",
+            "description": "图片宽度，单位像素",
+            "examples": [
+              600
+            ]
+          },
+          "height": {
+            "type": "integer",
+            "title": "Height",
+            "description": "图片高度，单位像素",
+            "examples": [
+              800
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "file_id",
+          "width",
+          "height"
+        ],
+        "title": "UploadOut",
+        "description": "上传结果。拿 file_id 去创建照片。"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "WechatMiniLoginRequest": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Code",
+            "description": "小程序调用 wx.login() 拿到的临时登录凭证，只能用一次、几分钟内有效",
+            "examples": [
+              "0a3Xyz1w3abcd2mQ"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "WechatMiniLoginRequest",
+        "description": "微信小程序登录请求。"
+      },
+      "WxpayAck": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "固定为 SUCCESS，表示通知已处理",
+            "examples": [
+              "SUCCESS"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "固定为 成功",
+            "examples": [
+              "成功"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "WxpayAck",
+        "description": "给微信支付的应答。微信要求支付通知处理成功时返回这个格式，否则会反复重发。"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "description": "小程序登录后拿到的令牌：Authorization: Bearer <token>",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "系统",
+      "description": "健康检查、文件下载等，不需要登录"
+    },
+    {
+      "name": "登录",
+      "description": "小程序登录、退出"
+    },
+    {
+      "name": "我的",
+      "description": "当前用户的资料、手机号、注销账号"
+    },
+    {
+      "name": "规格",
+      "description": "证件照规格库，不登录也能查"
+    },
+    {
+      "name": "照片",
+      "description": "上传、制作证件照、换规格、下载"
+    },
+    {
+      "name": "套餐与订单",
+      "description": "套餐列表、下单、支付、订单查询"
+    },
+    {
+      "name": "权益",
+      "description": "用户买到的权益：保管期、回执次数"
+    },
+    {
+      "name": "回执",
+      "description": "回执办理、驳回重提、查看回执"
+    },
+    {
+      "name": "通知",
+      "description": "订阅消息授权上报"
+    },
+    {
+      "name": "后台",
+      "description": "运营后台接口，需要后台账号登录"
+    },
+    {
+      "name": "回调",
+      "description": "支付和回执服务商的结果通知，由第三方调用"
+    },
+    {
+      "name": "联调",
+      "description": "仅开发和测试环境可用：模拟支付成功、模拟回执结果"
+    }
+  ]
+}
