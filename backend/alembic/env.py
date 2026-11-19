@@ -21,7 +21,8 @@ if config.config_file_name is not None:
 from app.config import settings
 from app.models import Base
 
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# alembic 的配置会把 % 当作特殊字符，密码里有 % 时要转义
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,

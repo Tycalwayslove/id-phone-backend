@@ -1,0 +1,35 @@
+# 服务器上的部署：同一台机器跑数据库和后端。用法见 docs/deploy.md。
+# 如果改用云数据库（RDS），删掉 db 服务，把 DATABASE_URL 指向云数据库即可。
+services:
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: idphone_prod
+      POSTGRES_USER: idphone_app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 deploy/.env 里设置 POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U idphone_app -d idphone_prod"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # 不映射端口：数据库只给同一台机器上的 api 用，不对外开放
+
+  api:
+    build: ../backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: prod
+      DATABASE_URL: postgresql+psycopg://idphone_app:${POSTGRES_PASSWORD}@db:5432/idphone_prod
+    # 只监听本机，外面由 HTTPS 反向代理转进来
+    ports:
+      - "127.0.0.1:8000:8000"
+
+volumes:
+  pgdata:

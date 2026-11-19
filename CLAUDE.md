@@ -34,6 +34,11 @@ Python 3.14 · uv · FastAPI · SQLAlchemy 2（同步）· Alembic · PostgreSQL
 - 删列、改名分多次发布；数据修复用单独脚本。
 - `scripts/seed_dev.py` 只能对名字以 `_dev` 结尾的库执行。
 
+## 环境与部署
+- 配置一律从环境变量读（`app/config.py`），代码里不写死地址、密码、环境判断以外的开关。
+- `APP_ENV`：dev 本机 / test 自动化测试 / prod 服务器。
+- 现在数据库在开发者 Mac 上；搬到服务器的步骤见 `docs/deploy.md`。不要让任何代码依赖“数据库在本机”。
+
 ## 安全（不可违反）
 - `.env` 不提交；新增配置项同步写进 `.env.example`。
 - 令牌只放请求头或 httpOnly Cookie，绝不放 URL。
