@@ -2699,6 +2699,2264 @@
           }
         ]
       }
+    },
+    "/api/v1/admin/auth/login": {
+      "post": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "后台登录",
+        "description": "用用户名和密码登录运营后台。不需要登录。成功后服务端通过 httpOnly Cookie（admin_session，仅 /api/v1/admin 路径、SameSite=Strict）下发会话，并在响应体返回 csrf_token，之后所有修改类请求在请求头 X-CSRF-Token 里带上它。账号不存在、密码错误、账号被停用都返回同一个 ADMIN_LOGIN_FAILED；同一用户名 15 分钟内失败 5 次后返回 RATE_LIMITED。会话闲置 2 小时、最长 12 小时失效（以服务端配置为准）。",
+        "operationId": "admin_login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminLoginIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "登录成功，返回 csrf_token 和账号信息，会话 Cookie 已写入",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminLoginOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：ADMIN_LOGIN_FAILED（账号或密码错误）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "错误码：RATE_LIMITED（操作太频繁，请稍后再试）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/auth/logout": {
+      "post": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "后台退出登录",
+        "description": "吊销当前会话并清除 Cookie。不需要登录态：没有登录、会话已失效也返回成功，可重复调用。",
+        "operationId": "admin_logout",
+        "parameters": [
+          {
+            "name": "admin_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "后台会话 Cookie，浏览器自动携带；前端不用手动传",
+              "title": "Admin Session"
+            },
+            "description": "后台会话 Cookie，浏览器自动携带；前端不用手动传"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "已退出",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/me": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "当前后台账号",
+        "description": "返回当前登录的后台账号、角色和全部权限点，前端用权限点决定显示哪些菜单和按钮。需要后台登录。",
+        "operationId": "admin_me",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前账号和权限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminMeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/users": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "用户列表",
+        "description": "按注册时间从新到旧列出用户，游标分页，条件之间是“并且”。权限点 user:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。手机号只返回打码后的；按手机号查询时传明文完整手机号，服务端用哈希匹配。",
+        "operationId": "admin_users_list",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按用户 ID 精确查找",
+              "examples": [
+                1024
+              ],
+              "title": "User Id"
+            },
+            "description": "按用户 ID 精确查找"
+          },
+          {
+            "name": "phone",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 5,
+                  "maxLength": 20
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按完整手机号精确查找（明文）",
+              "examples": [
+                "13800001234"
+              ],
+              "title": "Phone"
+            },
+            "description": "按完整手机号精确查找（明文）"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(active|disabled|cancelled)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按账号状态筛选：active = 正常；disabled = 已停用；cancelled = 已注销",
+              "examples": [
+                "active"
+              ],
+              "title": "Status"
+            },
+            "description": "按账号状态筛选：active = 正常；disabled = 已停用；cancelled = 已注销"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "title": "Cursor"
+            },
+            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数，1～100，默认 20",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，1～100，默认 20"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "用户分页列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/users/{user_id}": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "用户详情",
+        "description": "按用户 ID 查看用户资料、登录身份、订单统计。权限点 user:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "operationId": "admin_users_detail",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "用户 ID",
+              "examples": [
+                1024
+              ],
+              "title": "User Id"
+            },
+            "description": "用户 ID"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "用户详情",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：NOT_FOUND（资源不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/orders": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "订单列表",
+        "description": "按下单时间从新到旧列出订单，游标分页，条件之间是“并且”。权限点 order:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "operationId": "admin_orders_list",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(pending|paid|closed|part_refunded|refunded)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按订单状态筛选：pending = 待支付；paid = 已支付；closed = 已关闭；part_refunded = 部分退款；refunded = 已全额退款",
+              "examples": [
+                "paid"
+              ],
+              "title": "Status"
+            },
+            "description": "按订单状态筛选：pending = 待支付；paid = 已支付；closed = 已关闭；part_refunded = 部分退款；refunded = 已全额退款"
+          },
+          {
+            "name": "order_no",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按订单号精确查找",
+              "examples": [
+                "O20261119083012A1B2C3"
+              ],
+              "title": "Order No"
+            },
+            "description": "按订单号精确查找"
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按下单用户 ID 筛选",
+              "examples": [
+                1024
+              ],
+              "title": "User Id"
+            },
+            "description": "按下单用户 ID 筛选"
+          },
+          {
+            "name": "created_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "下单时间起点（含），带时区的 ISO 8601",
+              "examples": [
+                "2026-11-01T00:00:00Z"
+              ],
+              "title": "Created From"
+            },
+            "description": "下单时间起点（含），带时区的 ISO 8601"
+          },
+          {
+            "name": "created_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "下单时间终点（不含），带时区的 ISO 8601",
+              "examples": [
+                "2026-12-01T00:00:00Z"
+              ],
+              "title": "Created To"
+            },
+            "description": "下单时间终点（不含），带时区的 ISO 8601"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "title": "Cursor"
+            },
+            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数，1～100，默认 20",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，1～100，默认 20"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "订单分页列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOrderPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/orders/{order_no}": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "订单详情",
+        "description": "查看订单的商品项、支付流水和退款记录。权限点 order:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "operationId": "admin_orders_detail",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "order_no",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "订单号",
+              "examples": [
+                "O20261119083012A1B2C3"
+              ],
+              "title": "Order No"
+            },
+            "description": "订单号"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "订单详情",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOrderDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：ORDER_NOT_FOUND（订单不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/orders/{order_no}/refunds": {
+      "post": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "订单退款",
+        "description": "对已支付或部分退款的订单发起退款，原路退回。权限点 refund:create。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。退款金额必须大于 0 且不超过可退余额（已付 - 已退 - 处理中的退款），否则 REFUND_NOT_ALLOWED。退完（全额）后订单变 refunded，并撤销该订单发放的权益（用户不能再下载、换规格）；未退完变 part_refunded，权益保留。没有幂等键，请不要重复点击；重复提交会按剩余可退余额再退一次。",
+        "operationId": "admin_orders_refund",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "order_no",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "订单号",
+              "examples": [
+                "O20261119083012A1B2C3"
+              ],
+              "title": "Order No"
+            },
+            "description": "订单号"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminRefundIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "退款记录和退款后的订单状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRefundResultOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：ORDER_NOT_FOUND（订单不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：REFUND_NOT_ALLOWED（订单当前不能退款）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/receipt-applications": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "回执申请列表",
+        "description": "按创建时间从新到旧列出回执申请，游标分页，条件之间是“并且”。权限点 application:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "operationId": "admin_applications_list",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(pending|processing|rejected|completed|failed|cancelled)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按申请状态筛选：pending = 已创建未提交；processing = 办理中；rejected = 被驳回；completed = 已出回执；failed = 失败；cancelled = 已取消",
+              "examples": [
+                "rejected"
+              ],
+              "title": "Status"
+            },
+            "description": "按申请状态筛选：pending = 已创建未提交；processing = 办理中；rejected = 被驳回；completed = 已出回执；failed = 失败；cancelled = 已取消"
+          },
+          {
+            "name": "app_no",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按申请单号精确查找",
+              "examples": [
+                "R20261119083012A1B2C3"
+              ],
+              "title": "App No"
+            },
+            "description": "按申请单号精确查找"
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按申请人用户 ID 筛选",
+              "examples": [
+                1024
+              ],
+              "title": "User Id"
+            },
+            "description": "按申请人用户 ID 筛选"
+          },
+          {
+            "name": "spec_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按规格编码筛选",
+              "examples": [
+                "gd_idcard"
+              ],
+              "title": "Spec Code"
+            },
+            "description": "按规格编码筛选"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "title": "Cursor"
+            },
+            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数，1～100，默认 20",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，1～100，默认 20"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "回执申请分页列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminApplicationPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/receipt-applications/{app_no}": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "回执申请详情",
+        "description": "查看申请详情，包含全部服务商提交记录（服务商、状态、驳回原因、成本、时间）和打码后的办理表单。权限点 application:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。后台看不到姓名、身份证号明文。",
+        "operationId": "admin_applications_detail",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "app_no",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "回执申请单号",
+              "examples": [
+                "R20261119083012A1B2C3"
+              ],
+              "title": "App No"
+            },
+            "description": "回执申请单号"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "回执申请详情",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminApplicationDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：APPLICATION_NOT_FOUND（回执申请不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/receipt-applications/{app_no}/cancel": {
+      "post": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "取消回执申请",
+        "description": "代用户取消回执申请并退还回执次数。权限点 application:operate。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。只有 pending（未提交）和 rejected（被驳回）的申请可以取消，其他状态返回 APPLICATION_NOT_RESUBMITTABLE。",
+        "operationId": "admin_applications_cancel",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "app_no",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "回执申请单号",
+              "examples": [
+                "R20261119083012A1B2C3"
+              ],
+              "title": "App No"
+            },
+            "description": "回执申请单号"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "取消后的申请详情",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminApplicationDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：APPLICATION_NOT_FOUND（回执申请不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：APPLICATION_NOT_RESUBMITTABLE（当前状态不能重新提交）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/plans": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "套餐列表",
+        "description": "列出全部套餐（含草稿、已下架）及其权益配置，数量少所以不分页。权限点 plan:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "operationId": "admin_plans_list",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "全部套餐",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AdminPlanOut"
+                  },
+                  "title": "Response Admin Plans List"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "创建套餐",
+        "description": "创建一个套餐及其权益。权限点 plan:write（仅 owner）。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。权益类型必须是系统支持的类型，套餐编码不能重复，否则返回 VALIDATION_ERROR。",
+        "operationId": "admin_plans_create",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminPlanCreateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "创建后的套餐",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPlanOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/plans/{code}": {
+      "patch": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "修改套餐",
+        "description": "修改套餐的名称、价格、状态、排序、销售时间、展示配置、权益。权限点 plan:write（仅 owner）。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。只改传了的字段；传 benefits 表示整体替换权益。已售出的权益使用购买时的快照，修改套餐不影响已买的用户。",
+        "operationId": "admin_plans_update",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "套餐编码",
+              "examples": [
+                "photo_year_39_9"
+              ],
+              "title": "Code"
+            },
+            "description": "套餐编码"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminPlanUpdateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "修改后的套餐",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPlanOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：NOT_FOUND（资源不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/specs": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "规格列表",
+        "description": "列出全部规格（含已下架），按创建时间从新到旧，游标分页。权限点 spec:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "operationId": "admin_specs_list",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "title": "Cursor"
+            },
+            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数，1～100，默认 20",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，1～100，默认 20"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "规格分页列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSpecPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "创建规格",
+        "description": "创建一个证件照规格。权限点 spec:write。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。规格编码不能重复，父规格必须已存在，否则返回 VALIDATION_ERROR。",
+        "operationId": "admin_specs_create",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminSpecCreateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "创建后的规格",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSpecOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/specs/{code}": {
+      "patch": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "修改规格",
+        "description": "修改规格的名称、尺寸、底色、办理表单、状态等；下架用 status=inactive。权限点 spec:write。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。只改传了的字段；编码和父规格不可改。",
+        "operationId": "admin_specs_update",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "规格编码",
+              "examples": [
+                "gd_idcard"
+              ],
+              "title": "Code"
+            },
+            "description": "规格编码"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminSpecUpdateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "修改后的规格",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSpecOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：NOT_FOUND（资源不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/providers": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "服务商列表",
+        "description": "列出回执服务商及其能办理的规格、路由规则，不返回密钥。数量少所以不分页。权限点 provider:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "operationId": "admin_providers_list",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "全部服务商",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AdminProviderOut"
+                  },
+                  "title": "Response Admin Providers List"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/providers/{code}": {
+      "patch": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "修改服务商状态",
+        "description": "启用、停用或手动熔断一个服务商，路由会跳过非 enabled 的服务商。权限点 provider:write（仅 owner）。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。",
+        "operationId": "admin_providers_update",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "服务商编码",
+              "examples": [
+                "zheying"
+              ],
+              "title": "Code"
+            },
+            "description": "服务商编码"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminProviderUpdateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "修改后的服务商",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminProviderOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：NOT_FOUND（资源不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/audit-logs": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "审计日志",
+        "description": "按时间从新到旧列出后台操作记录，游标分页。权限点 audit:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "operationId": "admin_audit_logs",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "admin_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按操作人后台账号 ID 筛选",
+              "examples": [
+                3
+              ],
+              "title": "Admin Id"
+            },
+            "description": "按操作人后台账号 ID 筛选"
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按操作类型筛选，如 refund.create",
+              "examples": [
+                "refund.create"
+              ],
+              "title": "Action"
+            },
+            "description": "按操作类型筛选，如 refund.create"
+          },
+          {
+            "name": "target_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按操作对象类型筛选，如 order、plan",
+              "examples": [
+                "order"
+              ],
+              "title": "Target Type"
+            },
+            "description": "按操作对象类型筛选，如 order、plan"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "title": "Cursor"
+            },
+            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数，1～100，默认 20",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，1～100，默认 20"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "审计日志分页列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAuditLogPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2745,6 +5003,3238 @@
         ],
         "title": "AccessOut",
         "description": "这张照片当前的权益状态。"
+      },
+      "AdminApplicationDetail": {
+        "properties": {
+          "app_no": {
+            "type": "string",
+            "title": "App No",
+            "description": "申请单号",
+            "examples": [
+              "R20261119083012A1B2C3"
+            ]
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id",
+            "description": "申请人用户 ID",
+            "examples": [
+              1024
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "processing",
+              "rejected",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "description": "申请状态：pending = 已创建未提交；processing = 办理中；rejected = 被驳回，可重提或取消；completed = 已出回执；failed = 办理失败；cancelled = 已取消",
+            "examples": [
+              "processing"
+            ]
+          },
+          "spec_code": {
+            "type": "string",
+            "title": "Spec Code",
+            "description": "规格编码",
+            "examples": [
+              "gd_idcard"
+            ]
+          },
+          "spec_name": {
+            "type": "string",
+            "title": "Spec Name",
+            "description": "规格名称",
+            "examples": [
+              "广东省身份证"
+            ]
+          },
+          "photo_id": {
+            "type": "integer",
+            "title": "Photo Id",
+            "description": "当前使用的照片 ID",
+            "examples": [
+              12
+            ]
+          },
+          "entitlement_id": {
+            "type": "integer",
+            "title": "Entitlement Id",
+            "description": "占用回执次数的权益 ID",
+            "examples": [
+              88
+            ]
+          },
+          "resubmit_count": {
+            "type": "integer",
+            "title": "Resubmit Count",
+            "description": "已重新提交的次数，首次提交不算",
+            "examples": [
+              0
+            ]
+          },
+          "reject_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reject Reason",
+            "description": "当前驳回原因；只在 rejected 时有值",
+            "examples": [
+              "照片背景不均匀"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T08:30:00Z"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "最近更新时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T09:10:00Z"
+            ]
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At",
+            "description": "出回执时间；未完成为空",
+            "examples": [
+              "2026-11-19T09:10:00Z"
+            ]
+          },
+          "region_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Code",
+            "description": "办理地区行政区划码；不限地区为空",
+            "examples": [
+              "440300"
+            ]
+          },
+          "image_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Code",
+            "description": "回执图像号；只在 completed 时有值",
+            "examples": [
+              "IMG1A2B3C4D"
+            ]
+          },
+          "rejected_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejected At",
+            "description": "被驳回时间；只在 rejected 时有值",
+            "examples": [
+              "2026-11-19T09:10:00Z"
+            ]
+          },
+          "official_expire_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Official Expire At",
+            "description": "官方回执有效截止时间；未知或未出回执为空",
+            "examples": [
+              "2027-02-17T00:00:00Z"
+            ]
+          },
+          "form_masked": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Form Masked",
+            "description": "打码后的办理表单：姓名只显示姓，身份证号只显示前 3 后 4，手机号中间打码。后台看不到明文",
+            "examples": [
+              {
+                "idcard": "110***********0019",
+                "name": "张*"
+              }
+            ]
+          },
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/AdminAttemptOut"
+            },
+            "type": "array",
+            "title": "Attempts",
+            "description": "全部提交记录，按次序从早到晚"
+          }
+        },
+        "type": "object",
+        "required": [
+          "app_no",
+          "user_id",
+          "status",
+          "spec_code",
+          "spec_name",
+          "photo_id",
+          "entitlement_id",
+          "resubmit_count",
+          "reject_reason",
+          "created_at",
+          "updated_at",
+          "completed_at",
+          "region_code",
+          "image_code",
+          "rejected_at",
+          "official_expire_at",
+          "form_masked",
+          "attempts"
+        ],
+        "title": "AdminApplicationDetail",
+        "description": "回执申请详情：增加全部提交记录和打码后的办理表单。"
+      },
+      "AdminApplicationOut": {
+        "properties": {
+          "app_no": {
+            "type": "string",
+            "title": "App No",
+            "description": "申请单号",
+            "examples": [
+              "R20261119083012A1B2C3"
+            ]
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id",
+            "description": "申请人用户 ID",
+            "examples": [
+              1024
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "processing",
+              "rejected",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "description": "申请状态：pending = 已创建未提交；processing = 办理中；rejected = 被驳回，可重提或取消；completed = 已出回执；failed = 办理失败；cancelled = 已取消",
+            "examples": [
+              "processing"
+            ]
+          },
+          "spec_code": {
+            "type": "string",
+            "title": "Spec Code",
+            "description": "规格编码",
+            "examples": [
+              "gd_idcard"
+            ]
+          },
+          "spec_name": {
+            "type": "string",
+            "title": "Spec Name",
+            "description": "规格名称",
+            "examples": [
+              "广东省身份证"
+            ]
+          },
+          "photo_id": {
+            "type": "integer",
+            "title": "Photo Id",
+            "description": "当前使用的照片 ID",
+            "examples": [
+              12
+            ]
+          },
+          "entitlement_id": {
+            "type": "integer",
+            "title": "Entitlement Id",
+            "description": "占用回执次数的权益 ID",
+            "examples": [
+              88
+            ]
+          },
+          "resubmit_count": {
+            "type": "integer",
+            "title": "Resubmit Count",
+            "description": "已重新提交的次数，首次提交不算",
+            "examples": [
+              0
+            ]
+          },
+          "reject_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reject Reason",
+            "description": "当前驳回原因；只在 rejected 时有值",
+            "examples": [
+              "照片背景不均匀"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T08:30:00Z"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "最近更新时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T09:10:00Z"
+            ]
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At",
+            "description": "出回执时间；未完成为空",
+            "examples": [
+              "2026-11-19T09:10:00Z"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "app_no",
+          "user_id",
+          "status",
+          "spec_code",
+          "spec_name",
+          "photo_id",
+          "entitlement_id",
+          "resubmit_count",
+          "reject_reason",
+          "created_at",
+          "updated_at",
+          "completed_at"
+        ],
+        "title": "AdminApplicationOut",
+        "description": "回执申请摘要（后台列表用）。"
+      },
+      "AdminApplicationPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminApplicationOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本页数据，按创建时间从新到旧"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "下一页游标；为空表示没有更多了"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AdminApplicationPage",
+        "description": "分页列表：回执申请摘要（后台列表用）。"
+      },
+      "AdminAttemptOut": {
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "title": "Seq",
+            "description": "第几次提交，从 1 开始",
+            "examples": [
+              1
+            ]
+          },
+          "provider_code": {
+            "type": "string",
+            "title": "Provider Code",
+            "description": "服务商编码",
+            "examples": [
+              "zheying"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "created",
+              "submitted",
+              "unknown",
+              "processing",
+              "completed",
+              "rejected",
+              "failed",
+              "abandoned"
+            ],
+            "title": "Status",
+            "description": "提交状态：created = 已创建未发出；submitted = 已提交等待结果；unknown = 超时不确定，系统自动核对；processing = 对方办理中；completed = 已出回执；rejected = 被驳回；failed = 失败；abandoned = 已放弃",
+            "examples": [
+              "rejected"
+            ]
+          },
+          "is_current": {
+            "type": "boolean",
+            "title": "Is Current",
+            "description": "是否当前有效的提交；同一申请只有一条为 true",
+            "examples": [
+              true
+            ]
+          },
+          "reject_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reject Reason",
+            "description": "驳回原因；没被驳回为空",
+            "examples": [
+              "照片背景不均匀"
+            ]
+          },
+          "cost_fen": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Fen",
+            "description": "服务商收取的成本，单位：分；服务商只在成功时收费，未出结果为空",
+            "examples": [
+              300
+            ]
+          },
+          "submitted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted At",
+            "description": "提交成功时间；还没提交成功为空",
+            "examples": [
+              "2026-11-19T08:30:00Z"
+            ]
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At",
+            "description": "出结果时间；还没出结果为空",
+            "examples": [
+              "2026-11-19T09:10:00Z"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "seq",
+          "provider_code",
+          "status",
+          "is_current",
+          "reject_reason",
+          "cost_fen",
+          "submitted_at",
+          "finished_at"
+        ],
+        "title": "AdminAttemptOut",
+        "description": "一次提交给服务商的记录。"
+      },
+      "AdminAuditLogOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "日志 ID",
+            "examples": [
+              501
+            ]
+          },
+          "admin_id": {
+            "type": "integer",
+            "title": "Admin Id",
+            "description": "操作人后台账号 ID",
+            "examples": [
+              3
+            ]
+          },
+          "admin_username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admin Username",
+            "description": "操作人用户名",
+            "examples": [
+              "fin_li"
+            ]
+          },
+          "action": {
+            "type": "string",
+            "title": "Action",
+            "description": "操作类型，如 refund.create、plan.update、application.cancel、auth.login",
+            "examples": [
+              "refund.create"
+            ]
+          },
+          "target_type": {
+            "type": "string",
+            "title": "Target Type",
+            "description": "操作对象类型，如 order、plan、spec、provider、receipt_application、admin_session",
+            "examples": [
+              "order"
+            ]
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id",
+            "description": "操作对象的内部 ID；没有具体对象为空",
+            "examples": [
+              88
+            ]
+          },
+          "before": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before",
+            "description": "操作前的关键字段；新建类操作为空",
+            "examples": [
+              {
+                "refunded_fen": 0,
+                "status": "paid"
+              }
+            ]
+          },
+          "after": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After",
+            "description": "操作后的关键字段",
+            "examples": [
+              {
+                "refunded_fen": 3990,
+                "status": "refunded"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "操作时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T09:00:00Z"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "admin_id",
+          "admin_username",
+          "action",
+          "target_type",
+          "target_id",
+          "before",
+          "after",
+          "created_at"
+        ],
+        "title": "AdminAuditLogOut",
+        "description": "一条后台操作审计日志。"
+      },
+      "AdminAuditLogPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminAuditLogOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本页数据，按创建时间从新到旧"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "下一页游标；为空表示没有更多了"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AdminAuditLogPage",
+        "description": "分页列表：一条后台操作审计日志。"
+      },
+      "AdminBriefOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "后台账号 ID",
+            "examples": [
+              3
+            ]
+          },
+          "username": {
+            "type": "string",
+            "title": "Username",
+            "description": "用户名",
+            "examples": [
+              "ops_zhang"
+            ]
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "operator",
+              "finance"
+            ],
+            "title": "Role",
+            "description": "角色：owner = 所有者，拥有全部权限；operator = 运营，管用户/回执/规格，不能退款和改套餐；finance = 财务，可退款、看订单和用户",
+            "examples": [
+              "operator"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "username",
+          "role"
+        ],
+        "title": "AdminBriefOut",
+        "description": "后台账号的简要信息。"
+      },
+      "AdminLoginIn": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Username",
+            "description": "后台账号用户名，区分大小写",
+            "examples": [
+              "ops_zhang"
+            ]
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Password",
+            "description": "登录密码",
+            "examples": [
+              "a-long-password-123"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "AdminLoginIn",
+        "description": "后台登录请求。"
+      },
+      "AdminLoginOut": {
+        "properties": {
+          "csrf_token": {
+            "type": "string",
+            "title": "Csrf Token",
+            "description": "防跨站请求伪造令牌。之后所有 POST/PATCH/DELETE 请求都必须在请求头 X-CSRF-Token 里带上它；GET 请求不需要",
+            "examples": [
+              "3f2a9c7e1b5d4a6f8e0c2b4d6a8f0e1c"
+            ]
+          },
+          "admin": {
+            "$ref": "#/components/schemas/AdminBriefOut",
+            "description": "当前登录的后台账号"
+          }
+        },
+        "type": "object",
+        "required": [
+          "csrf_token",
+          "admin"
+        ],
+        "title": "AdminLoginOut",
+        "description": "登录成功的返回。会话令牌通过 httpOnly Cookie（admin_session）下发，前端拿不到也不需要拿。"
+      },
+      "AdminMeOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "后台账号 ID",
+            "examples": [
+              3
+            ]
+          },
+          "username": {
+            "type": "string",
+            "title": "Username",
+            "description": "用户名",
+            "examples": [
+              "ops_zhang"
+            ]
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "operator",
+              "finance"
+            ],
+            "title": "Role",
+            "description": "角色：owner = 所有者，拥有全部权限；operator = 运营，管用户/回执/规格，不能退款和改套餐；finance = 财务，可退款、看订单和用户",
+            "examples": [
+              "operator"
+            ]
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Permissions",
+            "description": "该账号拥有的全部权限点，格式 资源:动作（如 refund:create）。前端按它显示或隐藏菜单和按钮；owner 返回全部权限点",
+            "examples": [
+              [
+                "user:read",
+                "order:read",
+                "application:read"
+              ]
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "username",
+          "role",
+          "permissions"
+        ],
+        "title": "AdminMeOut",
+        "description": "当前后台账号及其权限。"
+      },
+      "AdminOrderDetail": {
+        "properties": {
+          "order_no": {
+            "type": "string",
+            "title": "Order No",
+            "description": "订单号",
+            "examples": [
+              "O20261119083012A1B2C3"
+            ]
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id",
+            "description": "下单用户 ID",
+            "examples": [
+              1024
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "paid",
+              "closed",
+              "part_refunded",
+              "refunded"
+            ],
+            "title": "Status",
+            "description": "订单状态：pending = 待支付；paid = 已支付；closed = 已关闭（超时或取消）；part_refunded = 部分退款；refunded = 已全额退款",
+            "examples": [
+              "paid"
+            ]
+          },
+          "total_fen": {
+            "type": "integer",
+            "title": "Total Fen",
+            "description": "订单应付金额，单位：分",
+            "examples": [
+              3990
+            ]
+          },
+          "paid_fen": {
+            "type": "integer",
+            "title": "Paid Fen",
+            "description": "已支付金额，单位：分；未支付为 0",
+            "examples": [
+              3990
+            ]
+          },
+          "refunded_fen": {
+            "type": "integer",
+            "title": "Refunded Fen",
+            "description": "已退款金额，单位：分",
+            "examples": [
+              0
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "下单时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T08:30:12Z"
+            ]
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid At",
+            "description": "支付成功时间；未支付时为空",
+            "examples": [
+              "2026-11-19T08:31:00Z"
+            ]
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OrderItemOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "订单商品项"
+          },
+          "payments": {
+            "items": {
+              "$ref": "#/components/schemas/AdminPaymentOut"
+            },
+            "type": "array",
+            "title": "Payments",
+            "description": "支付流水，按创建先后排列"
+          },
+          "refunds": {
+            "items": {
+              "$ref": "#/components/schemas/AdminRefundOut"
+            },
+            "type": "array",
+            "title": "Refunds",
+            "description": "退款记录，按发起先后排列；没有退款为空列表"
+          }
+        },
+        "type": "object",
+        "required": [
+          "order_no",
+          "user_id",
+          "status",
+          "total_fen",
+          "paid_fen",
+          "refunded_fen",
+          "created_at",
+          "paid_at",
+          "items",
+          "payments",
+          "refunds"
+        ],
+        "title": "AdminOrderDetail",
+        "description": "订单详情：在摘要基础上增加支付流水和退款记录。"
+      },
+      "AdminOrderOut": {
+        "properties": {
+          "order_no": {
+            "type": "string",
+            "title": "Order No",
+            "description": "订单号",
+            "examples": [
+              "O20261119083012A1B2C3"
+            ]
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id",
+            "description": "下单用户 ID",
+            "examples": [
+              1024
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "paid",
+              "closed",
+              "part_refunded",
+              "refunded"
+            ],
+            "title": "Status",
+            "description": "订单状态：pending = 待支付；paid = 已支付；closed = 已关闭（超时或取消）；part_refunded = 部分退款；refunded = 已全额退款",
+            "examples": [
+              "paid"
+            ]
+          },
+          "total_fen": {
+            "type": "integer",
+            "title": "Total Fen",
+            "description": "订单应付金额，单位：分",
+            "examples": [
+              3990
+            ]
+          },
+          "paid_fen": {
+            "type": "integer",
+            "title": "Paid Fen",
+            "description": "已支付金额，单位：分；未支付为 0",
+            "examples": [
+              3990
+            ]
+          },
+          "refunded_fen": {
+            "type": "integer",
+            "title": "Refunded Fen",
+            "description": "已退款金额，单位：分",
+            "examples": [
+              0
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "下单时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T08:30:12Z"
+            ]
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid At",
+            "description": "支付成功时间；未支付时为空",
+            "examples": [
+              "2026-11-19T08:31:00Z"
+            ]
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OrderItemOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "订单商品项"
+          }
+        },
+        "type": "object",
+        "required": [
+          "order_no",
+          "user_id",
+          "status",
+          "total_fen",
+          "paid_fen",
+          "refunded_fen",
+          "created_at",
+          "paid_at",
+          "items"
+        ],
+        "title": "AdminOrderOut",
+        "description": "订单摘要（后台列表用）。"
+      },
+      "AdminOrderPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminOrderOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本页数据，按创建时间从新到旧"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "下一页游标；为空表示没有更多了"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AdminOrderPage",
+        "description": "分页列表：订单摘要（后台列表用）。"
+      },
+      "AdminPaymentOut": {
+        "properties": {
+          "channel": {
+            "type": "string",
+            "title": "Channel",
+            "description": "支付渠道：wxpay = 微信支付；alipay = 支付宝；douyin_pay = 抖音支付",
+            "examples": [
+              "wxpay"
+            ]
+          },
+          "out_trade_no": {
+            "type": "string",
+            "title": "Out Trade No",
+            "description": "商户支付单号",
+            "examples": [
+              "P20261119083012A1B2C3"
+            ]
+          },
+          "transaction_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transaction Id",
+            "description": "渠道交易号；未支付成功时为空",
+            "examples": [
+              "4200001234202611190001"
+            ]
+          },
+          "amount_fen": {
+            "type": "integer",
+            "title": "Amount Fen",
+            "description": "支付金额，单位：分",
+            "examples": [
+              3990
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "success",
+              "failed",
+              "closed"
+            ],
+            "title": "Status",
+            "description": "流水状态：pending = 待支付；success = 支付成功；failed = 支付失败；closed = 已关闭",
+            "examples": [
+              "success"
+            ]
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid At",
+            "description": "支付成功时间（UTC，带时区）；未成功时为空",
+            "examples": [
+              "2026-11-19T08:31:00Z"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "channel",
+          "out_trade_no",
+          "transaction_id",
+          "amount_fen",
+          "status",
+          "paid_at"
+        ],
+        "title": "AdminPaymentOut",
+        "description": "订单的一条支付流水。"
+      },
+      "AdminPlanCreateIn": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]{2,64}$",
+            "title": "Code",
+            "description": "套餐编码，2～64 位小写字母、数字、下划线；全局唯一，创建后不可改",
+            "examples": [
+              "photo_year_39_9"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "description": "套餐名称",
+            "examples": [
+              "单张照片年度保管"
+            ]
+          },
+          "price_fen": {
+            "type": "integer",
+            "maximum": 100000000.0,
+            "minimum": 0.0,
+            "title": "Price Fen",
+            "description": "价格，单位：分",
+            "examples": [
+              3990
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "on_sale",
+              "off_sale"
+            ],
+            "title": "Status",
+            "description": "套餐状态，默认 draft：draft = 草稿，用户看不到；on_sale = 在售（还要在销售时间窗口内才能买）；off_sale = 已下架，不能再买，已买的权益不受影响",
+            "default": "draft",
+            "examples": [
+              "draft"
+            ]
+          },
+          "sort": {
+            "type": "integer",
+            "maximum": 10000.0,
+            "minimum": -10000.0,
+            "title": "Sort",
+            "description": "排序值，越小越靠前",
+            "default": 0,
+            "examples": [
+              20
+            ]
+          },
+          "sale_starts_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sale Starts At",
+            "description": "开售时间（带时区）；不传表示不限",
+            "examples": [
+              null
+            ]
+          },
+          "sale_ends_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sale Ends At",
+            "description": "停售时间（带时区），必须晚于开售时间；不传表示不限",
+            "examples": [
+              null
+            ]
+          },
+          "display": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Display",
+            "description": "展示配置，原样返回给小程序",
+            "examples": [
+              {
+                "badge": "推荐"
+              }
+            ]
+          },
+          "benefits": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Benefits",
+            "description": "权益配置：权益类型 → 非负整数。类型必须是 storage_days、photo_scope、receipt_quota、resubmit_limit、spec_change、one_person、attach_to_parent 之一",
+            "examples": [
+              {
+                "photo_scope": 1,
+                "receipt_quota": 1,
+                "storage_days": 365
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "price_fen",
+          "benefits"
+        ],
+        "title": "AdminPlanCreateIn",
+        "description": "创建套餐的请求。"
+      },
+      "AdminPlanOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "套餐编码，唯一，创建后不可改",
+            "examples": [
+              "photo_year_39_9"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "套餐名称",
+            "examples": [
+              "单张照片年度保管"
+            ]
+          },
+          "price_fen": {
+            "type": "integer",
+            "title": "Price Fen",
+            "description": "价格，单位：分（3990 = 39.9 元）",
+            "examples": [
+              3990
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "on_sale",
+              "off_sale"
+            ],
+            "title": "Status",
+            "description": "套餐状态：draft = 草稿，用户看不到；on_sale = 在售（还要在销售时间窗口内才能买）；off_sale = 已下架，不能再买，已买的权益不受影响",
+            "examples": [
+              "on_sale"
+            ]
+          },
+          "sort": {
+            "type": "integer",
+            "title": "Sort",
+            "description": "排序值，越小越靠前",
+            "examples": [
+              20
+            ]
+          },
+          "sale_starts_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sale Starts At",
+            "description": "开售时间；为空表示不限",
+            "examples": [
+              "2026-11-01T00:00:00Z"
+            ]
+          },
+          "sale_ends_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sale Ends At",
+            "description": "停售时间；为空表示不限",
+            "examples": [
+              null
+            ]
+          },
+          "display": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Display",
+            "description": "展示配置（卖点、角标等），原样返回给小程序",
+            "examples": [
+              {
+                "badge": "推荐"
+              }
+            ]
+          },
+          "benefits": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Benefits",
+            "description": "权益配置：权益类型 → 数值。类型：storage_days 保管天数；photo_scope 1=单张照片 0=全部照片；receipt_quota 回执次数；resubmit_limit 驳回后免费重提次数；spec_change 1=可换规格；one_person 1=一卡一人；attach_to_parent 1=加购项",
+            "examples": [
+              {
+                "photo_scope": 1,
+                "receipt_quota": 1,
+                "storage_days": 365
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间（UTC，带时区）",
+            "examples": [
+              "2026-11-01T00:00:00Z"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "最近修改时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T00:00:00Z"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "price_fen",
+          "status",
+          "sort",
+          "sale_starts_at",
+          "sale_ends_at",
+          "display",
+          "benefits",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminPlanOut",
+        "description": "套餐（含草稿和已下架）。"
+      },
+      "AdminPlanUpdateIn": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "新名称；不传表示不改",
+            "examples": [
+              "单张照片年度保管"
+            ]
+          },
+          "price_fen": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 100000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Fen",
+            "description": "新价格，单位：分；不传表示不改",
+            "examples": [
+              3490
+            ]
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "draft",
+                  "on_sale",
+                  "off_sale"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status",
+            "description": "新状态；不传表示不改。draft = 草稿，用户看不到；on_sale = 在售（还要在销售时间窗口内才能买）；off_sale = 已下架，不能再买，已买的权益不受影响",
+            "examples": [
+              "off_sale"
+            ]
+          },
+          "sort": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10000.0,
+                "minimum": -10000.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort",
+            "description": "新排序值；不传表示不改",
+            "examples": [
+              10
+            ]
+          },
+          "sale_starts_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sale Starts At",
+            "description": "新开售时间；不传表示不改，传 null 表示清除限制",
+            "examples": [
+              null
+            ]
+          },
+          "sale_ends_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sale Ends At",
+            "description": "新停售时间；不传表示不改，传 null 表示清除限制",
+            "examples": [
+              null
+            ]
+          },
+          "display": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display",
+            "description": "新展示配置，整体替换；不传表示不改",
+            "examples": [
+              {
+                "badge": "限时"
+              }
+            ]
+          },
+          "benefits": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benefits",
+            "description": "新权益配置，传了就整体替换（没写的权益类型会被删除）；不传表示不改。类型和取值同创建套餐",
+            "examples": [
+              {
+                "photo_scope": 1,
+                "receipt_quota": 1,
+                "storage_days": 365
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "AdminPlanUpdateIn",
+        "description": "修改套餐的请求。只改传了的字段；已售出的权益用购买时的快照，修改套餐不影响已买的。"
+      },
+      "AdminProviderOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "服务商编码，唯一",
+            "examples": [
+              "zheying"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "服务商名称",
+            "examples": [
+              "鹧应"
+            ]
+          },
+          "adapter": {
+            "type": "string",
+            "title": "Adapter",
+            "description": "代码里使用的适配器名",
+            "examples": [
+              "zheying"
+            ]
+          },
+          "upstream_group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upstream Group",
+            "description": "上游分组；相同取值的服务商是同一个上游，不会互为备份。无分组为空",
+            "examples": [
+              "zheying"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled",
+              "circuit_open"
+            ],
+            "title": "Status",
+            "description": "状态：enabled = 启用；disabled = 手动停用，不再接新单；circuit_open = 已熔断（连续故障自动暂停），排查后可改回 enabled",
+            "examples": [
+              "enabled"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "最近修改时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T00:00:00Z"
+            ]
+          },
+          "provider_specs": {
+            "items": {
+              "$ref": "#/components/schemas/AdminProviderSpecOut"
+            },
+            "type": "array",
+            "title": "Provider Specs",
+            "description": "该服务商能办理的规格"
+          },
+          "route_rules": {
+            "items": {
+              "$ref": "#/components/schemas/AdminRouteRuleOut"
+            },
+            "type": "array",
+            "title": "Route Rules",
+            "description": "该服务商参与的路由规则"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "adapter",
+          "upstream_group",
+          "status",
+          "updated_at",
+          "provider_specs",
+          "route_rules"
+        ],
+        "title": "AdminProviderOut",
+        "description": "回执服务商。不返回密钥等配置。"
+      },
+      "AdminProviderSpecOut": {
+        "properties": {
+          "spec_code": {
+            "type": "string",
+            "title": "Spec Code",
+            "description": "规格编码",
+            "examples": [
+              "gd_idcard"
+            ]
+          },
+          "spec_name": {
+            "type": "string",
+            "title": "Spec Name",
+            "description": "规格名称",
+            "examples": [
+              "广东省身份证"
+            ]
+          },
+          "provider_item_id": {
+            "type": "string",
+            "title": "Provider Item Id",
+            "description": "服务商那边的规格 ID",
+            "examples": [
+              "713"
+            ]
+          },
+          "cost_fen": {
+            "type": "integer",
+            "title": "Cost Fen",
+            "description": "办理一次的成本，单位：分",
+            "examples": [
+              300
+            ]
+          },
+          "is_enabled": {
+            "type": "boolean",
+            "title": "Is Enabled",
+            "description": "该服务商是否启用此规格",
+            "examples": [
+              true
+            ]
+          },
+          "last_synced_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Synced At",
+            "description": "最近一次同步覆盖范围的时间；从未同步为空",
+            "examples": [
+              null
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "spec_code",
+          "spec_name",
+          "provider_item_id",
+          "cost_fen",
+          "is_enabled",
+          "last_synced_at"
+        ],
+        "title": "AdminProviderSpecOut",
+        "description": "服务商能办理的一个规格（覆盖矩阵的一行）。"
+      },
+      "AdminProviderUpdateIn": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled",
+              "circuit_open"
+            ],
+            "title": "Status",
+            "description": "新状态：enabled = 启用；disabled = 停用，不再接新单；circuit_open = 手动熔断，同 disabled 效果，路由会跳过它",
+            "examples": [
+              "disabled"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "AdminProviderUpdateIn",
+        "description": "修改服务商状态的请求。"
+      },
+      "AdminRefundIn": {
+        "properties": {
+          "amount_fen": {
+            "type": "integer",
+            "maximum": 100000000.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Amount Fen",
+            "description": "退款金额，单位：分，必须大于 0 且不超过订单可退余额（已付 - 已退）",
+            "examples": [
+              3990
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Reason",
+            "description": "退款原因，1～200 字，会记入退款记录和审计日志。不要填手机号、身份证号",
+            "examples": [
+              "用户重复购买"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "amount_fen",
+          "reason"
+        ],
+        "title": "AdminRefundIn",
+        "description": "发起退款的请求。"
+      },
+      "AdminRefundOut": {
+        "properties": {
+          "out_refund_no": {
+            "type": "string",
+            "title": "Out Refund No",
+            "description": "商户退款单号",
+            "examples": [
+              "F20261119090000A1B2C3"
+            ]
+          },
+          "amount_fen": {
+            "type": "integer",
+            "title": "Amount Fen",
+            "description": "退款金额，单位：分",
+            "examples": [
+              3990
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "退款原因（操作人填写）",
+            "examples": [
+              "用户重复购买"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "success",
+              "failed"
+            ],
+            "title": "Status",
+            "description": "退款状态：pending = 处理中，等待渠道结果；success = 退款成功；failed = 退款失败，订单金额不变",
+            "examples": [
+              "success"
+            ]
+          },
+          "operator": {
+            "type": "string",
+            "title": "Operator",
+            "description": "操作人：后台账号用户名，系统自动退款时为 system",
+            "examples": [
+              "fin_li"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "发起退款的时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T09:00:00Z"
+            ]
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At",
+            "description": "退款出结果的时间；处理中为空",
+            "examples": [
+              "2026-11-19T09:00:01Z"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "out_refund_no",
+          "amount_fen",
+          "reason",
+          "status",
+          "operator",
+          "created_at",
+          "finished_at"
+        ],
+        "title": "AdminRefundOut",
+        "description": "一条退款记录。"
+      },
+      "AdminRefundResultOut": {
+        "properties": {
+          "out_refund_no": {
+            "type": "string",
+            "title": "Out Refund No",
+            "description": "商户退款单号",
+            "examples": [
+              "F20261119090000A1B2C3"
+            ]
+          },
+          "amount_fen": {
+            "type": "integer",
+            "title": "Amount Fen",
+            "description": "退款金额，单位：分",
+            "examples": [
+              3990
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "退款原因（操作人填写）",
+            "examples": [
+              "用户重复购买"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "success",
+              "failed"
+            ],
+            "title": "Status",
+            "description": "退款状态：pending = 处理中，等待渠道结果；success = 退款成功；failed = 退款失败，订单金额不变",
+            "examples": [
+              "success"
+            ]
+          },
+          "operator": {
+            "type": "string",
+            "title": "Operator",
+            "description": "操作人：后台账号用户名，系统自动退款时为 system",
+            "examples": [
+              "fin_li"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "发起退款的时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T09:00:00Z"
+            ]
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At",
+            "description": "退款出结果的时间；处理中为空",
+            "examples": [
+              "2026-11-19T09:00:01Z"
+            ]
+          },
+          "order_no": {
+            "type": "string",
+            "title": "Order No",
+            "description": "订单号",
+            "examples": [
+              "O20261119083012A1B2C3"
+            ]
+          },
+          "order_status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "paid",
+              "closed",
+              "part_refunded",
+              "refunded"
+            ],
+            "title": "Order Status",
+            "description": "退款后的订单状态：part_refunded = 部分退款；refunded = 已全额退款；退款处理中或失败时保持原状态",
+            "examples": [
+              "refunded"
+            ]
+          },
+          "order_refunded_fen": {
+            "type": "integer",
+            "title": "Order Refunded Fen",
+            "description": "退款后订单累计已退金额，单位：分",
+            "examples": [
+              3990
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "out_refund_no",
+          "amount_fen",
+          "reason",
+          "status",
+          "operator",
+          "created_at",
+          "finished_at",
+          "order_no",
+          "order_status",
+          "order_refunded_fen"
+        ],
+        "title": "AdminRefundResultOut",
+        "description": "发起退款的结果：退款记录加上订单退款后的状态。"
+      },
+      "AdminRouteRuleOut": {
+        "properties": {
+          "spec_code": {
+            "type": "string",
+            "title": "Spec Code",
+            "description": "规格编码",
+            "examples": [
+              "gd_idcard"
+            ]
+          },
+          "region_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Code",
+            "description": "适用地区行政区划码；为空 = 不限地区",
+            "examples": [
+              null
+            ]
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority",
+            "description": "优先级，数字越小越优先",
+            "examples": [
+              10
+            ]
+          },
+          "is_enabled": {
+            "type": "boolean",
+            "title": "Is Enabled",
+            "description": "规则是否启用",
+            "examples": [
+              true
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "spec_code",
+          "region_code",
+          "priority",
+          "is_enabled"
+        ],
+        "title": "AdminRouteRuleOut",
+        "description": "路由规则的一行：某规格（可限地区）下的一个候选服务商。"
+      },
+      "AdminSpecCreateIn": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]{2,64}$",
+            "title": "Code",
+            "description": "规格编码，2～64 位小写字母、数字、下划线；全局唯一，创建后不可改",
+            "examples": [
+              "gd_idcard"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "description": "规格名称，展示给用户",
+            "examples": [
+              "广东省身份证"
+            ]
+          },
+          "parent_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Code",
+            "description": "父规格编码，必须已存在；顶级规格不传",
+            "examples": [
+              null
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "receipt",
+              "normal",
+              "exam"
+            ],
+            "title": "Category",
+            "description": "分类：receipt = 回执类；normal = 普通证件照；exam = 考试报名照",
+            "examples": [
+              "receipt"
+            ]
+          },
+          "cert_type": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Cert Type",
+            "description": "证件类型标识，如 idcard",
+            "examples": [
+              "idcard"
+            ]
+          },
+          "region_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 12
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Code",
+            "description": "适用地区行政区划码；不限地区不传",
+            "examples": [
+              "440000"
+            ]
+          },
+          "width_px": {
+            "type": "integer",
+            "maximum": 10000.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Width Px",
+            "description": "成品宽度，像素",
+            "examples": [
+              358
+            ]
+          },
+          "height_px": {
+            "type": "integer",
+            "maximum": 10000.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Height Px",
+            "description": "成品高度，像素",
+            "examples": [
+              441
+            ]
+          },
+          "width_mm": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width Mm",
+            "description": "成品宽度，毫米；官方未规定不传",
+            "examples": [
+              26
+            ]
+          },
+          "height_mm": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height Mm",
+            "description": "成品高度，毫米；官方未规定不传",
+            "examples": [
+              32
+            ]
+          },
+          "dpi": {
+            "type": "integer",
+            "maximum": 1200.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Dpi",
+            "description": "分辨率，默认 300",
+            "default": 300,
+            "examples": [
+              300
+            ]
+          },
+          "bg_colors": {
+            "items": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Bg Colors",
+            "description": "可选底色，十六进制如 #FFFFFF，至少一个，第一项为默认",
+            "examples": [
+              [
+                "#FFFFFF",
+                "#438EDB"
+              ]
+            ]
+          },
+          "file_size_min_kb": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size Min Kb",
+            "description": "文件大小下限，KB；无要求不传",
+            "examples": [
+              null
+            ]
+          },
+          "file_size_max_kb": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size Max Kb",
+            "description": "文件大小上限，KB，不能小于下限；无要求不传",
+            "examples": [
+              100
+            ]
+          },
+          "beauty_max": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 0.0,
+            "title": "Beauty Max",
+            "description": "允许的最高美颜档位 0～5，默认 0 = 不允许美颜",
+            "default": 0,
+            "examples": [
+              3
+            ]
+          },
+          "form_schema": {
+            "items": {
+              "$ref": "#/components/schemas/SpecFormField"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Form Schema",
+            "description": "办理回执时用户要填写的字段；不办回执不传"
+          },
+          "official_valid_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Official Valid Days",
+            "description": "官方回执有效天数；无明确期限不传",
+            "examples": [
+              90
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "inactive"
+            ],
+            "title": "Status",
+            "description": "状态：active = 上架（默认）；inactive = 下架",
+            "default": "active",
+            "examples": [
+              "active"
+            ]
+          },
+          "sort": {
+            "type": "integer",
+            "maximum": 10000.0,
+            "minimum": -10000.0,
+            "title": "Sort",
+            "description": "排序值，越小越靠前",
+            "default": 0,
+            "examples": [
+              0
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "category",
+          "cert_type",
+          "width_px",
+          "height_px",
+          "bg_colors"
+        ],
+        "title": "AdminSpecCreateIn",
+        "description": "创建规格的请求。"
+      },
+      "AdminSpecOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "规格编码，唯一，创建后不可改",
+            "examples": [
+              "gd_idcard"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "规格名称",
+            "examples": [
+              "广东省身份证"
+            ]
+          },
+          "parent_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Code",
+            "description": "父规格编码；顶级规格为空",
+            "examples": [
+              null
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "receipt",
+              "normal",
+              "exam"
+            ],
+            "title": "Category",
+            "description": "分类：receipt = 回执类；normal = 普通证件照；exam = 考试报名照",
+            "examples": [
+              "receipt"
+            ]
+          },
+          "cert_type": {
+            "type": "string",
+            "title": "Cert Type",
+            "description": "证件类型标识",
+            "examples": [
+              "idcard"
+            ]
+          },
+          "region_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Code",
+            "description": "适用地区行政区划码；不限地区为空",
+            "examples": [
+              "440000"
+            ]
+          },
+          "width_px": {
+            "type": "integer",
+            "title": "Width Px",
+            "description": "成品宽度，像素",
+            "examples": [
+              358
+            ]
+          },
+          "height_px": {
+            "type": "integer",
+            "title": "Height Px",
+            "description": "成品高度，像素",
+            "examples": [
+              441
+            ]
+          },
+          "width_mm": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width Mm",
+            "description": "成品宽度，毫米；官方未规定为空",
+            "examples": [
+              26
+            ]
+          },
+          "height_mm": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height Mm",
+            "description": "成品高度，毫米；官方未规定为空",
+            "examples": [
+              32
+            ]
+          },
+          "dpi": {
+            "type": "integer",
+            "title": "Dpi",
+            "description": "分辨率，dpi",
+            "examples": [
+              300
+            ]
+          },
+          "bg_colors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Bg Colors",
+            "description": "可选底色（十六进制），第一项为默认底色",
+            "examples": [
+              [
+                "#FFFFFF",
+                "#438EDB"
+              ]
+            ]
+          },
+          "file_size_min_kb": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size Min Kb",
+            "description": "文件大小下限，KB；无要求为空",
+            "examples": [
+              null
+            ]
+          },
+          "file_size_max_kb": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size Max Kb",
+            "description": "文件大小上限，KB；无要求为空",
+            "examples": [
+              100
+            ]
+          },
+          "beauty_max": {
+            "type": "integer",
+            "title": "Beauty Max",
+            "description": "允许的最高美颜档位 0～5；0 = 不允许美颜",
+            "examples": [
+              3
+            ]
+          },
+          "form_schema": {
+            "items": {
+              "$ref": "#/components/schemas/SpecFormField"
+            },
+            "type": "array",
+            "title": "Form Schema",
+            "description": "办理回执时用户要填写的字段；不办回执的规格为空列表"
+          },
+          "official_valid_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Official Valid Days",
+            "description": "官方回执有效天数；无明确期限为空",
+            "examples": [
+              90
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "inactive"
+            ],
+            "title": "Status",
+            "description": "状态：active = 上架；inactive = 下架（用户端看不到，已有申请不受影响）",
+            "examples": [
+              "active"
+            ]
+          },
+          "sort": {
+            "type": "integer",
+            "title": "Sort",
+            "description": "排序值，越小越靠前",
+            "examples": [
+              0
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间（UTC，带时区）",
+            "examples": [
+              "2026-11-01T00:00:00Z"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "最近修改时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T00:00:00Z"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "parent_code",
+          "category",
+          "cert_type",
+          "region_code",
+          "width_px",
+          "height_px",
+          "width_mm",
+          "height_mm",
+          "dpi",
+          "bg_colors",
+          "file_size_min_kb",
+          "file_size_max_kb",
+          "beauty_max",
+          "form_schema",
+          "official_valid_days",
+          "status",
+          "sort",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminSpecOut",
+        "description": "规格（含已下架）。"
+      },
+      "AdminSpecPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminSpecOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本页数据，按创建时间从新到旧"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "下一页游标；为空表示没有更多了"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AdminSpecPage",
+        "description": "分页列表：规格（含已下架）。"
+      },
+      "AdminSpecUpdateIn": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "新名称；不传表示不改",
+            "examples": [
+              "广东省身份证"
+            ]
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "receipt",
+                  "normal",
+                  "exam"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category",
+            "description": "新分类；不传表示不改",
+            "examples": [
+              "receipt"
+            ]
+          },
+          "cert_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cert Type",
+            "description": "新证件类型；不传表示不改",
+            "examples": [
+              "idcard"
+            ]
+          },
+          "region_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 12
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Code",
+            "description": "新地区码；不传表示不改，传 null 表示不限地区",
+            "examples": [
+              "440000"
+            ]
+          },
+          "width_px": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width Px",
+            "description": "新宽度，像素；不传表示不改",
+            "examples": [
+              358
+            ]
+          },
+          "height_px": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height Px",
+            "description": "新高度，像素；不传表示不改",
+            "examples": [
+              441
+            ]
+          },
+          "width_mm": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width Mm",
+            "description": "新宽度，毫米；不传表示不改，传 null 表示清空",
+            "examples": [
+              26
+            ]
+          },
+          "height_mm": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height Mm",
+            "description": "新高度，毫米；不传表示不改，传 null 表示清空",
+            "examples": [
+              32
+            ]
+          },
+          "dpi": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1200.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dpi",
+            "description": "新分辨率；不传表示不改",
+            "examples": [
+              300
+            ]
+          },
+          "bg_colors": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "pattern": "^#[0-9A-Fa-f]{6}$"
+                },
+                "type": "array",
+                "maxItems": 10,
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bg Colors",
+            "description": "新底色列表，整体替换；不传表示不改",
+            "examples": [
+              [
+                "#FFFFFF"
+              ]
+            ]
+          },
+          "file_size_min_kb": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size Min Kb",
+            "description": "新文件大小下限 KB；不传表示不改，传 null 表示清空",
+            "examples": [
+              null
+            ]
+          },
+          "file_size_max_kb": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size Max Kb",
+            "description": "新文件大小上限 KB；不传表示不改，传 null 表示清空",
+            "examples": [
+              100
+            ]
+          },
+          "beauty_max": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beauty Max",
+            "description": "新美颜上限 0～5；不传表示不改",
+            "examples": [
+              3
+            ]
+          },
+          "form_schema": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SpecFormField"
+                },
+                "type": "array",
+                "maxItems": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Form Schema",
+            "description": "新办理表单字段，整体替换；不传表示不改"
+          },
+          "official_valid_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Official Valid Days",
+            "description": "新官方有效天数；不传表示不改，传 null 表示清空",
+            "examples": [
+              90
+            ]
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "inactive"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status",
+            "description": "新状态：active = 上架；inactive = 下架；不传表示不改",
+            "examples": [
+              "inactive"
+            ]
+          },
+          "sort": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10000.0,
+                "minimum": -10000.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort",
+            "description": "新排序值；不传表示不改",
+            "examples": [
+              0
+            ]
+          }
+        },
+        "type": "object",
+        "title": "AdminSpecUpdateIn",
+        "description": "修改规格的请求。只改传了的字段（可空字段传 null 表示清空）；编码和父规格不可改。"
+      },
+      "AdminUserDetail": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "用户 ID",
+            "examples": [
+              1024
+            ]
+          },
+          "nickname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nickname",
+            "description": "昵称；用户还没设置时为空",
+            "examples": [
+              "小明"
+            ]
+          },
+          "phone_masked": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone Masked",
+            "description": "打码后的手机号；没绑定或已注销时为空",
+            "examples": [
+              "138****1234"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled",
+              "cancelled"
+            ],
+            "title": "Status",
+            "description": "账号状态：active = 正常；disabled = 已停用，不能登录；cancelled = 用户已注销",
+            "examples": [
+              "active"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "注册时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T08:30:12Z"
+            ]
+          },
+          "last_active_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Active At",
+            "description": "最近活跃时间（UTC，带时区）；从未活跃时为空",
+            "examples": [
+              "2026-11-19T09:00:00Z"
+            ]
+          },
+          "identities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Identities",
+            "description": "该用户绑定的登录身份类型：wx_mini = 微信小程序；wx_mp = 公众号；alipay_mini = 支付宝小程序；douyin_mini = 抖音小程序；h5 = 网页",
+            "examples": [
+              [
+                "wx_mini"
+              ]
+            ]
+          },
+          "orders_count": {
+            "type": "integer",
+            "title": "Orders Count",
+            "description": "已支付过的订单数（含后来退款的订单；待支付和已关闭的不算）",
+            "examples": [
+              2
+            ]
+          },
+          "paid_fen_total": {
+            "type": "integer",
+            "title": "Paid Fen Total",
+            "description": "累计实付金额，单位：分；是各订单已支付金额之和，不扣除退款",
+            "examples": [
+              3990
+            ]
+          },
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url",
+            "description": "头像链接；没设置时为空",
+            "examples": [
+              "https://example.com/a.png"
+            ]
+          },
+          "applications_count": {
+            "type": "integer",
+            "title": "Applications Count",
+            "description": "该用户提交过的回执申请总数（含已取消）",
+            "examples": [
+              1
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "nickname",
+          "phone_masked",
+          "status",
+          "created_at",
+          "last_active_at",
+          "identities",
+          "orders_count",
+          "paid_fen_total",
+          "avatar_url",
+          "applications_count"
+        ],
+        "title": "AdminUserDetail",
+        "description": "用户详情：在摘要基础上增加头像和回执申请数。"
+      },
+      "AdminUserOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "用户 ID",
+            "examples": [
+              1024
+            ]
+          },
+          "nickname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nickname",
+            "description": "昵称；用户还没设置时为空",
+            "examples": [
+              "小明"
+            ]
+          },
+          "phone_masked": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone Masked",
+            "description": "打码后的手机号；没绑定或已注销时为空",
+            "examples": [
+              "138****1234"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled",
+              "cancelled"
+            ],
+            "title": "Status",
+            "description": "账号状态：active = 正常；disabled = 已停用，不能登录；cancelled = 用户已注销",
+            "examples": [
+              "active"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "注册时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T08:30:12Z"
+            ]
+          },
+          "last_active_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Active At",
+            "description": "最近活跃时间（UTC，带时区）；从未活跃时为空",
+            "examples": [
+              "2026-11-19T09:00:00Z"
+            ]
+          },
+          "identities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Identities",
+            "description": "该用户绑定的登录身份类型：wx_mini = 微信小程序；wx_mp = 公众号；alipay_mini = 支付宝小程序；douyin_mini = 抖音小程序；h5 = 网页",
+            "examples": [
+              [
+                "wx_mini"
+              ]
+            ]
+          },
+          "orders_count": {
+            "type": "integer",
+            "title": "Orders Count",
+            "description": "已支付过的订单数（含后来退款的订单；待支付和已关闭的不算）",
+            "examples": [
+              2
+            ]
+          },
+          "paid_fen_total": {
+            "type": "integer",
+            "title": "Paid Fen Total",
+            "description": "累计实付金额，单位：分；是各订单已支付金额之和，不扣除退款",
+            "examples": [
+              3990
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "nickname",
+          "phone_masked",
+          "status",
+          "created_at",
+          "last_active_at",
+          "identities",
+          "orders_count",
+          "paid_fen_total"
+        ],
+        "title": "AdminUserOut",
+        "description": "用户摘要（后台列表用）。手机号只返回打码后的。"
+      },
+      "AdminUserPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminUserOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本页数据，按创建时间从新到旧"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "下一页游标；为空表示没有更多了"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AdminUserPage",
+        "description": "分页列表：用户摘要（后台列表用）。手机号只返回打码后的。"
       },
       "ApplicationOut": {
         "properties": {
@@ -5236,6 +10726,12 @@
         "type": "http",
         "description": "小程序登录后拿到的令牌：Authorization: Bearer <token>",
         "scheme": "bearer"
+      },
+      "APIKeyCookie": {
+        "type": "apiKey",
+        "description": "后台登录后写入的 Cookie",
+        "in": "cookie",
+        "name": "admin_session"
       }
     }
   },
