@@ -61,3 +61,11 @@ tests/<m>/test_*.py
 
 - `cancel_application(db, *, user_id, app_no) -> ReceiptApplication`：pending/rejected 的申请可取消，释放额度。
 - `apply_provider_status(db, attempt, status: ProviderStatus) -> str`：把服务商结果应用到尝试和申请上，返回处理结果（applied/stale/duplicate）。轮询、回调、联调接口共用。
+
+## orders（补充）
+
+- `refund_order(db, *, order_no, amount_fen, reason, operator) -> Refund`：后台退款。可退余额 = 已付 − 已退 − 处理中退款；全额退完撤销该订单的权益。不 commit。
+
+## admin（后台）例外
+
+- admin 模块的列表/详情查询可以直接只读查询各业务表（后台需要跨用户、跨模块的视图）；写操作仍调用对应模块的 service。

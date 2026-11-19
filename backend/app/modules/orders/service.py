@@ -8,13 +8,14 @@ import json
 import secrets
 from datetime import timedelta
 
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError, ErrorCode
 from app.core.idempotency import run_idempotent
 from app.core.utils import decode_cursor, encode_cursor, new_no, utcnow
 from app.integrations.payment import get_payment
-from app.models import Order, OrderItem, Payment, Plan
+from app.models import Entitlement, Order, OrderItem, Payment, Plan, Refund
 from app.modules.entitlements import service as entitlement_service
 from app.modules.orders import repo
 from app.modules.orders.schemas import (
@@ -304,3 +305,83 @@ def simulate_paid(db: Session, user_id: int, order_no: str) -> OrderOut:
     )
     db.commit()
     return _orders_out(db, [order])[0]
+
+
+# ---------- 后台退款 ----------
+
+
+def refund_order(db: Session, *, order_no: str, amount_fen: int, reason: str, operator: str) -> Refund:
+    """后台退款（跨模块约定，给 admin 用）。只 flush，不 commit，由调用方统一提交。
+
+    - 订单必须是 paid 或 part_refunded；0 < amount_fen <= 已付 - 已退 - 处理中的退款，否则 REFUND_NOT_ALLOWED。
+    - 渠道返回 success：退款成功，累加 order.refunded_fen；退完变 refunded，否则 part_refunded。
+    - 全额退款时，该订单各订单项生成的权益置为 revoked。
+    - 渠道返回 failed：退款记为 failed，订单不变；返回其他值：保持 pending（占用可退额度），
+      TODO: 真实微信支付需要等退款结果通知后再入账。
+    """
+    order_id = db.scalar(select(Order.id).where(Order.order_no == order_no))
+    if order_id is None:
+        raise AppError(ErrorCode.ORDER_NOT_FOUND)
+    order = repo.lock_order(db, order_id)  # 先订单、后支付流水，和 mark_paid 的加锁顺序一致
+    if order.status not in ("paid", "part_refunded"):
+        raise AppError(ErrorCode.REFUND_NOT_ALLOWED, "只有已支付或部分退款的订单可以退款")
+    payment_id = db.scalar(
+        select(Payment.id)
+        .where(Payment.order_id == order.id, Payment.status == "success")
+        .order_by(Payment.id.desc())
+        .limit(1)
+    )
+    if payment_id is None:
+        raise AppError(ErrorCode.REFUND_NOT_ALLOWED, "订单没有支付成功的流水")
+    payment = repo.lock_payment(db, payment_id)
+
+    in_flight = db.scalar(
+        select(func.coalesce(func.sum(Refund.amount_fen), 0)).where(
+            Refund.order_id == order.id, Refund.status == "pending"
+        )
+    )
+    refundable = order.paid_fen - order.refunded_fen - int(in_flight or 0)
+    if amount_fen <= 0 or amount_fen > refundable:
+        raise AppError(
+            ErrorCode.REFUND_NOT_ALLOWED, f"退款金额必须大于 0 且不超过可退余额（{refundable} 分）"
+        )
+
+    refund = Refund(
+        payment_id=payment.id,
+        order_id=order.id,
+        out_refund_no=new_no("F"),
+        amount_fen=amount_fen,
+        reason=reason,
+        status="pending",
+        operator=operator,
+    )
+    db.add(refund)
+    db.flush()
+
+    result = get_payment().refund(
+        out_trade_no=payment.out_trade_no,
+        out_refund_no=refund.out_refund_no,
+        refund_fen=amount_fen,
+        total_fen=payment.amount_fen,
+        reason=reason,
+    )
+    now = utcnow()
+    if result == "success":
+        refund.status = "success"
+        refund.finished_at = now
+        order.refunded_fen += amount_fen
+        order.status = "refunded" if order.refunded_fen >= order.paid_fen else "part_refunded"
+        if order.status == "refunded":
+            item_ids = select(OrderItem.id).where(OrderItem.order_id == order.id)
+            db.execute(
+                update(Entitlement)
+                .where(Entitlement.order_item_id.in_(item_ids), Entitlement.status != "revoked")
+                .values(status="revoked")
+                .execution_options(synchronize_session=False)
+            )
+    elif result == "failed":
+        refund.status = "failed"
+        refund.finished_at = now
+    db.flush()
+    db.refresh(refund)
+    return refund
