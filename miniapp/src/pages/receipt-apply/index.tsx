@@ -28,7 +28,10 @@ const IS_WEAPP = Taro.getEnv() === Taro.ENV_TYPE.WEAPP
 async function askSubscribe(templates: TemplateOut[]): Promise<string[]> {
   if (!IS_WEAPP || templates.length === 0) return []
   try {
-    const res = await Taro.requestSubscribeMessage({ tmplIds: templates.map((t) => t.template_id) })
+    const res = await Taro.requestSubscribeMessage({
+      tmplIds: templates.map((t) => t.template_id),
+      entityIds: [], // 支付宝小程序用的字段，微信忽略
+    })
     return templates.map((t) => t.template_id).filter((id) => (res as unknown as Record<string, unknown>)[id] === 'accept')
   } catch {
     // 用户拒绝或弹窗异常都不影响提交
