@@ -60,5 +60,5 @@ Python 3.14 · uv · FastAPI · SQLAlchemy 2（同步）· Alembic · PostgreSQL
   3. 影响长期的设计决定写进 `docs/adr/`。
 - **分工**：架构、跨模块设计、评审由高级模型（Opus）负责；按模块的实现可交给 Sonnet 子代理，每个子代理只改自己模块目录和对应测试目录，共享文件（`app/core`、`app/main.py`、`app/models/__init__.py`、迁移）由主会话统一修改。
 - **验证靠 CI**：本地改完先 `ruff check` / `ruff format`；推送后看 GitHub Actions（迁移、`alembic check`、测试、接口文档检查）全部通过才算完成。
-- **提交**：一次提交做一件事，提交信息说明“做了什么、为什么”。代码在 `/Users/mac/id-phone`（用户 Mac），推送到 GitHub `Tycalwayslove/id-phone-backend` 的 main。
+- **提交**：一次提交做一件事，提交信息说明“做了什么、为什么”。推送到 GitHub `Tycalwayslove/id-phone-backend` 的 main；用户 Mac 上的仓库在 `/Users/mac/id-phone`，推送后同步过去（或用户自己 `git pull`）。CI 机器人会自动提交 uv.lock、pnpm-lock.yaml、docs/api/openapi.json，推送前先 `git pull --rebase`。
 - **用户本机才能做的事**（数据库在用户 Mac 上）：迁移、seed、启动服务。写成命令交给用户，输出存到 `backend/logs/`。
