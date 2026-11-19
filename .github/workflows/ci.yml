@@ -110,6 +110,52 @@ jobs:
           git commit -m "chore: 更新接口文档快照 docs/api/openapi.json"
           for i in 1 2 3; do git pull --rebase -q && git push && break; sleep 3; done
 
+  frontend:
+    # 小程序和运营后台：从接口文档生成类型 → 类型检查 → 构建
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [miniapp, admin-web]
+    defaults:
+      run:
+        working-directory: ${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: exists
+        working-directory: .
+        run: |
+          if [ -f "${{ matrix.app }}/package.json" ]; then echo "yes=1" >> "$GITHUB_OUTPUT"; else echo "目录不存在，跳过"; fi
+      - if: steps.exists.outputs.yes == '1'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - if: steps.exists.outputs.yes == '1'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        if: steps.exists.outputs.yes == '1'
+        run: pnpm install --no-frozen-lockfile
+      - name: Generate API types
+        if: steps.exists.outputs.yes == '1'
+        run: pnpm run gen:api
+      - name: Typecheck
+        if: steps.exists.outputs.yes == '1'
+        run: pnpm run typecheck
+      - name: Build
+        if: steps.exists.outputs.yes == '1'
+        run: pnpm run build
+      - name: Commit lockfile
+        if: steps.exists.outputs.yes == '1' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          if git diff --quiet -- pnpm-lock.yaml && git ls-files --error-unmatch pnpm-lock.yaml >/dev/null 2>&1; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pnpm-lock.yaml
+          git commit -m "chore: 自动更新 ${{ matrix.app }}/pnpm-lock.yaml"
+          for i in 1 2 3; do git pull --rebase -q && git push && break; sleep 5; done
+
   apifox:
     # 测试全部通过、推送到 main 时，把接口文档同步到 Apifox
     needs: test
