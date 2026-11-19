@@ -25,6 +25,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      - name: Check API docs are complete
+        env:
+          DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/ci_placeholder
+        run: uv run python -m scripts.check_api_docs
+
       - name: Export OpenAPI
         env:
           # 导出文档只读代码，不连数据库；这里给一个占位地址让配置能加载

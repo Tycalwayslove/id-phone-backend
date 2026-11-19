@@ -24,7 +24,12 @@ Python 3.14 · uv · FastAPI · SQLAlchemy 2（同步）· Alembic · PostgreSQL
 - 金额用整数分，字段名带 `_fen`；时间用 timestamptz，库里一律 UTC。
 - 列表用游标分页，limit 上限 100。
 - 下单、提交回执等接口支持 `Idempotency-Key` 请求头。
-- 每个接口写 `summary`、`tags`、固定的 `operation_id`；请求和响应都用 schemas.py 里的模型，并在 `responses` 里声明错误码。
+- 接口文档必须写全，`scripts/check_api_docs.py` 在 CI 里检查，不全就不同步到 Apifox：
+  - 每个接口：`tags`、固定的 `operation_id`（如 `photos_list`）、`summary`、`description`（说明用途、是否要登录、关键业务规则）、`response_description`。
+  - 可能返回的错误都在 `responses` 里用 `error_doc("…，错误码 XXX")` 声明。
+  - 请求和响应都用 schemas.py 里的 Pydantic 模型，不返回裸字典；模型写 docstring。
+  - 每个字段和每个路径、查询、请求头参数都写 `description`，有意义的给 `examples`；枚举值在 description 里逐个解释含义。
+  - 说明用中文，写给前端看：这个字段是什么、单位、取值范围、什么时候为空。
 - 生产环境关闭 `/docs` 和 `/openapi.json`。
 
 ## 数据库与迁移
