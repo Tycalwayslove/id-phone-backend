@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core import security
 from app.core.config import settings
-from app.core.deps import ROLE_PERMISSIONS, CurrentAdmin, PageParams, csrf_for
+from app.core.deps import ALL_PERMISSIONS, ROLE_PERMISSIONS, CurrentAdmin, PageParams, csrf_for
 from app.core.errors import AppError, ErrorCode
 from app.core.schemas import OkResponse
 from app.core.utils import decode_cursor, encode_cursor, utcnow
@@ -227,11 +227,7 @@ def logout(db: Session, *, token: str | None) -> OkResponse:
 
 
 def all_permissions() -> list[str]:
-    perms: set[str] = set()
-    for p in ROLE_PERMISSIONS.values():
-        perms |= p
-    perms.discard("*")
-    return sorted(perms)
+    return sorted(ALL_PERMISSIONS)
 
 
 def me(admin: CurrentAdmin) -> AdminMeOut:
@@ -760,7 +756,7 @@ def list_providers(db: Session) -> list[AdminProviderOut]:
     pspecs = repo.provider_specs(db)
     rules = repo.route_rules(db)
     codes = repo.spec_codes(db, [p.spec_id for p in pspecs] + [r.spec_id for r in rules])
-    names = {s.id: s.name for s in repo.specs_by_ids(db, codes.keys())}
+    names = {sid: s.name for sid, s in repo.specs_by_ids(db, codes.keys()).items()}
     out = []
     for p in providers:
         out.append(

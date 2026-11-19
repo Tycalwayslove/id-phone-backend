@@ -79,6 +79,22 @@ MaybeMe = Annotated[CurrentUser | None, Depends(optional_user)]
 
 # ---------- 后台 ----------
 
+# 全部权限点。新增权限点先加在这里，再分配给角色；owner 拥有全部
+ALL_PERMISSIONS: set[str] = {
+    "user:read",
+    "order:read",
+    "refund:create",
+    "application:read",
+    "application:operate",
+    "plan:read",
+    "plan:write",
+    "spec:read",
+    "spec:write",
+    "provider:read",
+    "provider:write",
+    "audit:read",
+}
+
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "owner": {"*"},
     "operator": {
