@@ -50,3 +50,14 @@ tests/<m>/test_*.py
 ## specs（规格）
 
 - `get_active_spec(db, code) -> Spec`：不存在或已下架 → `SPEC_NOT_FOUND`。
+
+## notify（通知）
+
+- `create_task(db, *, user_id, event, application_id=None, entitlement_id=None) -> NotifyTask`
+  event ∈ receipt_rejected / receipt_completed / entitlement_expiring / receipt_expiring。
+  同一目标同一事件已有 step=1 的任务时：若已发送过，重置为 pending 并更新 scheduled_at（再次驳回需要再通知）；否则直接返回已有任务。
+
+## receipts（回执）
+
+- `cancel_application(db, *, user_id, app_no) -> ReceiptApplication`：pending/rejected 的申请可取消，释放额度。
+- `apply_provider_status(db, attempt, status: ProviderStatus) -> str`：把服务商结果应用到尝试和申请上，返回处理结果（applied/stale/duplicate）。轮询、回调、联调接口共用。
