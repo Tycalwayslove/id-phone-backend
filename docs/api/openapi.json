@@ -1356,7 +1356,7 @@
             }
           },
           "409": {
-            "description": "错误码：PLAN_NOT_AVAILABLE（这个套餐暂不可购买）、IDEMPOTENCY_CONFLICT（同一个请求正在处理或参数不一致）",
+            "description": "错误码：PLAN_NOT_AVAILABLE（这个套餐暂不可购买）、IDEMPOTENCY_CONFLICT（同一个请求正在处理或参数不一致）、ORDER_NOT_PAYABLE（订单当前不能支付）",
             "content": {
               "application/json": {
                 "schema": {
@@ -1377,6 +1377,16 @@
           },
           "403": {
             "description": "错误码：ENTITLEMENT_EXPIRED（权益已过期）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "错误码：INTERNAL_ERROR（服务开小差了，请稍后再试）",
             "content": {
               "application/json": {
                 "schema": {
@@ -1473,7 +1483,7 @@
           "套餐与订单"
         ],
         "summary": "订单详情",
-        "description": "按订单号查询当前用户的订单，支付后前端用它确认订单是否已变为 paid。需要登录。别人的订单或不存在的订单号都返回 ORDER_NOT_FOUND。待支付但已超时的订单会被自动改为已关闭。",
+        "description": "按订单号查询当前用户的订单，支付后前端用它确认订单是否已变为 paid。需要登录。真实支付模式下，查询待支付订单时会向微信确认支付结果。别人的订单或不存在的订单号都返回 ORDER_NOT_FOUND。待支付但已超时的订单会被自动改为已关闭。",
         "operationId": "orders_detail",
         "security": [
           {
@@ -1536,6 +1546,26 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "错误码：ORDER_NOT_PAYABLE（订单当前不能支付）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "错误码：INTERNAL_ERROR（服务开小差了，请稍后再试）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1546,7 +1576,7 @@
           "套餐与订单"
         ],
         "summary": "取消订单",
-        "description": "取消当前用户的待支付订单，取消后订单变为已关闭。需要登录。只有待支付的订单能取消，已支付或已关闭的返回 ORDER_NOT_CANCELLABLE。",
+        "description": "取消当前用户的待支付订单。需要登录。真实支付模式下先在微信关单，再将本地订单改为已关闭。已支付或已关闭的订单返回 ORDER_NOT_CANCELLABLE，微信关单暂未确认时可以重试。",
         "operationId": "orders_cancel",
         "security": [
           {
@@ -1619,6 +1649,16 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "错误码：INTERNAL_ERROR（服务开小差了，请稍后再试）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1629,25 +1669,18 @@
           "回调"
         ],
         "summary": "微信支付结果通知",
-        "description": "由微信支付服务器调用，前端不要调用。不需要登录，靠签名验证来源：签名不对返回 PAYMENT_SIGNATURE_INVALID。处理是幂等的，重复通知不会重复发放权益。处理成功返回 {code: SUCCESS, message: 成功}。订单已关闭时自动发起全额退款，保留系统退款记录，不发放权益。联调（fake）模式下，签名放在 X-Fake-Signature 请求头，请求体是 JSON。",
+        "description": "由微信支付服务器调用，无需登录。服务端验证签名并解密原始报文。重复通知不会重复发放权益。订单已关闭时自动发起全额退款，保留系统退款记录，不发放权益。联调（fake）模式下，签名放在 X-Fake-Signature 请求头，请求体是 JSON。回调使用微信支付协议。成功返回 HTTP 204 空响应。失败固定返回 {\"code\":\"FAIL\",\"message\":\"失败原因\"}，各状态码对应的内部错误仅供排查。",
         "operationId": "callbacks_wxpay",
         "responses": {
-          "200": {
-            "description": "通知已处理",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WxpayAck"
-                }
-              }
-            }
+          "204": {
+            "description": "通知已处理"
           },
           "401": {
             "description": "错误码：PAYMENT_SIGNATURE_INVALID（支付通知签名不正确）",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/WxpayFailure"
                 }
               }
             }
@@ -1657,7 +1690,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/WxpayFailure"
                 }
               }
             }
@@ -1667,7 +1700,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/WxpayFailure"
                 }
               }
             }
@@ -1677,7 +1710,82 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/WxpayFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "错误码：INTERNAL_ERROR（服务开小差了，请稍后再试）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WxpayFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/callbacks/wxpay/refund": {
+      "post": {
+        "tags": [
+          "回调"
+        ],
+        "summary": "微信退款结果通知",
+        "description": "由微信支付服务器调用，无需登录。验签解密后核对商户单号、微信支付单号和金额。成功退款入账一次，退款关闭释放预占余额。退款异常继续预占，等待商户处理。回调使用微信支付协议。成功返回 HTTP 204 空响应。失败固定返回 {\"code\":\"FAIL\",\"message\":\"失败原因\"}，各状态码对应的内部错误仅供排查。",
+        "operationId": "callbacks_wxpay_refund",
+        "responses": {
+          "204": {
+            "description": "退款通知已处理"
+          },
+          "401": {
+            "description": "错误码：PAYMENT_SIGNATURE_INVALID（支付通知签名不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WxpayFailure"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：NOT_FOUND（资源不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WxpayFailure"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：REFUND_NOT_ALLOWED（订单当前不能退款）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WxpayFailure"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WxpayFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "错误码：INTERNAL_ERROR（服务开小差了，请稍后再试）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WxpayFailure"
                 }
               }
             }
@@ -2015,6 +2123,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "错误码：PROVIDER_UNAVAILABLE（回执通道暂时不可用，请稍后再试）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       },
@@ -2311,6 +2429,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "错误码：PROVIDER_UNAVAILABLE（回执通道暂时不可用，请稍后再试）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -2415,7 +2543,7 @@
           "回调"
         ],
         "summary": "回执服务商回调",
-        "description": "供回执服务商推送办理结果，不需要登录，靠签名验证来源。签名不正确返回 CALLBACK_SIGNATURE_INVALID；同一条回调重复发送只处理一次，仍返回成功。请求体格式由各服务商决定，不在这里展开。前端不要调用此接口。",
+        "description": "供回执服务商推送办理结果，无需登录。鹧应和黔微云提交表单，系统验证签名、nonce 和单号归属，配置来源白名单时也检查来源 IP。校验失败返回 CALLBACK_SIGNATURE_INVALID。同一单号的同一状态只处理一次，重复通知仍返回成功。",
         "operationId": "callbacks_receipt_provider",
         "parameters": [
           {
@@ -2432,15 +2560,44 @@
               "title": "Provider Code"
             },
             "description": "服务商编码，对应后台配置的服务商 code"
+          },
+          {
+            "name": "nonce",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "提交时生成的回调校验串，真实通道必填",
+              "examples": [
+                "example-callback-nonce"
+              ],
+              "title": "Nonce"
+            },
+            "description": "提交时生成的回调校验串，真实通道必填"
           }
         ],
         "responses": {
           "200": {
-            "description": "已收到回调（含重复回调）",
+            "description": "回调已处理（含重复回调）。真实通道返回同步完成，假通道返回 ok",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OkResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OkResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ReceiptProviderAck"
+                    }
+                  ],
+                  "title": "Response Callbacks Receipt Provider"
                 }
               }
             }
@@ -2467,6 +2624,16 @@
           },
           "422": {
             "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "错误码：PROVIDER_UNAVAILABLE（回执通道暂时不可用，请稍后再试）",
             "content": {
               "application/json": {
                 "schema": {
@@ -2706,7 +2873,7 @@
           "后台"
         ],
         "summary": "后台登录",
-        "description": "用用户名和密码登录运营后台。不需要登录。成功后服务端通过 httpOnly Cookie（admin_session，仅 /api/v1/admin 路径、SameSite=Strict）下发会话，并在响应体返回 csrf_token，之后所有修改类请求在请求头 X-CSRF-Token 里带上它。账号不存在、密码错误、账号被停用都返回同一个 ADMIN_LOGIN_FAILED；同一用户名 15 分钟内失败 5 次后返回 RATE_LIMITED。会话闲置 2 小时、最长 12 小时失效（以服务端配置为准）。",
+        "description": "用用户名和密码登录运营后台。不需要登录。成功后服务端通过 httpOnly Cookie（admin_session，仅 /api/v1/admin 路径、SameSite=Strict）下发会话，并在响应体返回 csrf_token，之后所有修改类请求在请求头 X-CSRF-Token 里带上它。账号不存在、密码错误、账号被停用都返回同一个 ADMIN_LOGIN_FAILED；同一用户名 15 分钟内失败 5 次后返回 RATE_LIMITED。会话闲置 2 小时、最长 12 小时失效（以服务端配置为准）。使用重置获得的临时密码登录时，必须同时提供不同的 new_password。登录成功后临时密码失效。",
         "operationId": "admin_login",
         "requestBody": {
           "content": {
@@ -3653,6 +3820,16 @@
           },
           "409": {
             "description": "错误码：REFUND_NOT_ALLOWED（订单当前不能退款）、IDEMPOTENCY_CONFLICT（同一个请求正在处理或参数不一致）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "错误码：INTERNAL_ERROR（服务开小差了，请稍后再试）",
             "content": {
               "application/json": {
                 "schema": {
@@ -4867,6 +5044,1425 @@
         }
       }
     },
+    "/api/v1/admin/provider-specs": {
+      "post": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "新增服务商规格",
+        "description": "配置服务商可办理的规格、服务商侧规格 ID 和成本。同一服务商与规格只能有一条配置。权限点 provider:write。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。",
+        "operationId": "admin_provider_specs_create",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminProviderSpecCreateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "新建的服务商规格配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminProviderSpecOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：NOT_FOUND（资源不存在）、SPEC_NOT_FOUND（规格不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：CONFLICT（数据已存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/provider-specs/{entry_id}": {
+      "patch": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "修改服务商规格",
+        "description": "按服务商列表提供的记录 ID 更新配置。省略的字段保持原值，字段值不能为 null。权限点 provider:write。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。",
+        "operationId": "admin_provider_specs_update",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "description": "服务商规格记录 ID",
+              "examples": [
+                71
+              ],
+              "title": "Entry Id"
+            },
+            "description": "服务商规格记录 ID"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminProviderSpecUpdateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "修改后的服务商规格配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminProviderSpecOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：NOT_FOUND（资源不存在）、SPEC_NOT_FOUND（规格不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：CONFLICT（数据已存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "删除服务商规格",
+        "description": "删除服务商规格配置后，引用该服务商和规格的规则无法匹配此配置。权限点 provider:write。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。",
+        "operationId": "admin_provider_specs_delete",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "description": "服务商规格记录 ID",
+              "examples": [
+                71
+              ],
+              "title": "Entry Id"
+            },
+            "description": "服务商规格记录 ID"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "服务商规格配置已删除",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：NOT_FOUND（资源不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/route-rules": {
+      "post": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "新增路由规则",
+        "description": "配置规格在指定地区的候选服务商。地区为空表示不限。同一规格、地区与服务商只能有一条规则。实际路由还需匹配已启用的服务商规格。权限点 provider:write。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。",
+        "operationId": "admin_route_rules_create",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminRouteRuleCreateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "新建的路由规则",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRouteRuleOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：NOT_FOUND（资源不存在）、SPEC_NOT_FOUND（规格不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：CONFLICT（数据已存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/route-rules/{rule_id}": {
+      "patch": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "修改路由规则",
+        "description": "按服务商列表提供的规则 ID 修改配置。省略的字段保持原值，地区可传 null 改为不限。权限点 provider:write。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。",
+        "operationId": "admin_route_rules_update",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "description": "路由规则 ID",
+              "examples": [
+                86
+              ],
+              "title": "Rule Id"
+            },
+            "description": "路由规则 ID"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminRouteRuleUpdateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "修改后的路由规则",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRouteRuleOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：NOT_FOUND（资源不存在）、SPEC_NOT_FOUND（规格不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：CONFLICT（数据已存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "删除路由规则",
+        "description": "删除一个候选服务商规则，后续路由不再根据该规则选取服务商。权限点 provider:write。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。",
+        "operationId": "admin_route_rules_delete",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "description": "路由规则 ID",
+              "examples": [
+                86
+              ],
+              "title": "Rule Id"
+            },
+            "description": "路由规则 ID"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "路由规则已删除",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：NOT_FOUND（资源不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/stats/overview": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "后台数据看板",
+        "description": "查询累计用户数、订单数、支付过的订单数、实付总额和回执各状态数量。实付金额单位为分，包含已退款的原实付额。权限点 stats:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "operationId": "admin_stats_overview",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "累计业务指标",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminStatsOverviewOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/notify-tasks": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "通知任务列表",
+        "description": "按通知任务 ID 从大到小查询，可按状态筛选和游标翻页。返回任务状态、渠道、时间及关联记录 ID。权限点 notify:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "operationId": "admin_notify_tasks_list",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "sent",
+                    "failed",
+                    "skipped",
+                    "cancelled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按状态筛选。pending = 待发送；sent = 已发送；failed = 发送失败；skipped = 跳过；cancelled = 已取消",
+              "examples": [
+                "pending"
+              ],
+              "title": "Status"
+            },
+            "description": "按状态筛选。pending = 待发送；sent = 已发送；failed = 发送失败；skipped = 跳过；cancelled = 已取消"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "title": "Cursor"
+            },
+            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数，1～100，默认 20",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，1～100，默认 20"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "通知任务分页列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminNotifyTaskPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/admin-users": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "管理员账号列表",
+        "description": "按账号 ID 从大到小分页，返回管理员角色和启用状态。权限点 admin:read（仅 owner）。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "operationId": "admin_accounts_list",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "title": "Cursor"
+            },
+            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数，1～100，默认 20",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，1～100，默认 20"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "管理员账号分页列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccountPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "新建管理员账号",
+        "description": "按用户名、初始密码和角色创建一个启用的后台账号。用户名区分大小写且唯一。权限点 admin:write（仅 owner）。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。",
+        "operationId": "admin_accounts_create",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminAccountCreateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "新建的后台账号资料",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccountOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：CONFLICT（数据已存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/admin-users/{admin_id}/disable": {
+      "post": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "停用管理员账号",
+        "description": "停用账号并吊销其所有会话，账号再次停用仍返回成功。不能停用自己或最后一个启用的 owner。权限点 admin:write（仅 owner）。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。",
+        "operationId": "admin_accounts_disable",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "admin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "description": "管理员账号 ID",
+              "examples": [
+                3
+              ],
+              "title": "Admin Id"
+            },
+            "description": "管理员账号 ID"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "停用后的后台账号资料",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccountOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：NOT_FOUND（资源不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：CONFLICT（数据已存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/admin-users/{admin_id}/role": {
+      "patch": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "修改管理员角色",
+        "description": "替换账号的角色，后续请求使用该角色的权限。不能降低自己或最后一个启用的 owner 的角色。权限点 admin:write（仅 owner）。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。",
+        "operationId": "admin_accounts_update_role",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "admin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "description": "管理员账号 ID",
+              "examples": [
+                3
+              ],
+              "title": "Admin Id"
+            },
+            "description": "管理员账号 ID"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminAccountRoleIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "角色变更后的后台账号资料",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccountOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：NOT_FOUND（资源不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：CONFLICT（数据已存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/admin-users/{admin_id}/reset-password": {
+      "post": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "重置管理员密码",
+        "description": "为启用的账号生成一次性临时密码并吊销其所有会话。临时密码仅随本次响应返回，使用时须先在登录请求中设置正式密码。权限点 admin:write（仅 owner）。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。",
+        "operationId": "admin_accounts_reset_password",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "admin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "description": "管理员账号 ID",
+              "examples": [
+                3
+              ],
+              "title": "Admin Id"
+            },
+            "description": "管理员账号 ID"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "临时密码，成功使用一次即失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPasswordResetOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）、ACCOUNT_DISABLED（账号已被停用）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：NOT_FOUND（资源不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/audit-logs": {
       "get": {
         "tags": [
@@ -5087,6 +6683,179 @@
         ],
         "title": "AccessOut",
         "description": "这张照片当前的权益状态。"
+      },
+      "AdminAccountCreateIn": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^\\S+$",
+            "title": "Username",
+            "description": "后台用户名，1～64 字符，区分大小写，不含空白字符",
+            "examples": [
+              "ops_zhang"
+            ]
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 12,
+            "title": "Password",
+            "description": "初始登录密码，12～128 字符",
+            "examples": [
+              "a-long-password-123"
+            ]
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "operator",
+              "finance"
+            ],
+            "title": "Role",
+            "description": "角色：owner = 所有者，拥有全部权限；operator = 运营，管用户/回执/规格，不能退款和改套餐；finance = 财务，可退款、看订单和用户",
+            "examples": [
+              "operator"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password",
+          "role"
+        ],
+        "title": "AdminAccountCreateIn",
+        "description": "新建启用的后台账号。"
+      },
+      "AdminAccountOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "后台账号 ID",
+            "examples": [
+              3
+            ]
+          },
+          "username": {
+            "type": "string",
+            "title": "Username",
+            "description": "用户名",
+            "examples": [
+              "ops_zhang"
+            ]
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "operator",
+              "finance"
+            ],
+            "title": "Role",
+            "description": "角色：owner = 所有者，拥有全部权限；operator = 运营，管用户/回执/规格，不能退款和改套餐；finance = 财务，可退款、看订单和用户",
+            "examples": [
+              "operator"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled"
+            ],
+            "title": "Status",
+            "description": "active = 正常；disabled = 已停用",
+            "examples": [
+              "active"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T09:00:00Z"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "更新时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T09:00:00Z"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "username",
+          "role",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminAccountOut",
+        "description": "用于账号管理的管理员资料。"
+      },
+      "AdminAccountPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminAccountOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本页数据，按创建时间从新到旧"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "下一页游标；为空表示没有更多了"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AdminAccountPage",
+        "description": "分页列表：用于账号管理的管理员资料。"
+      },
+      "AdminAccountRoleIn": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "operator",
+              "finance"
+            ],
+            "title": "Role",
+            "description": "角色：owner = 所有者，拥有全部权限；operator = 运营，管用户/回执/规格，不能退款和改套餐；finance = 财务，可退款、看订单和用户",
+            "examples": [
+              "finance"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "role"
+        ],
+        "title": "AdminAccountRoleIn",
+        "description": "修改后台账号角色。"
       },
       "AdminApplicationDetail": {
         "properties": {
@@ -5649,7 +7418,7 @@
           "action": {
             "type": "string",
             "title": "Action",
-            "description": "操作类型，如 refund.create、plan.update、application.cancel、auth.login",
+            "description": "操作类型，如 refund.create、route_rule.update、provider_spec.create、admin_user.disable",
             "examples": [
               "refund.create"
             ]
@@ -5657,7 +7426,7 @@
           "target_type": {
             "type": "string",
             "title": "Target Type",
-            "description": "操作对象类型，如 order、plan、spec、provider、receipt_application、admin_session",
+            "description": "操作对象类型，如 order、plan、provider_spec、route_rule、receipt_application、admin_user",
             "examples": [
               "order"
             ]
@@ -5688,7 +7457,7 @@
               }
             ],
             "title": "Before",
-            "description": "操作前的关键字段；新建类操作为空",
+            "description": "操作前的关键字段；新建和密码重置时为空",
             "examples": [
               {
                 "refunded_fen": 0,
@@ -5707,7 +7476,7 @@
               }
             ],
             "title": "After",
-            "description": "操作后的关键字段",
+            "description": "操作后的关键字段；删除和密码重置时为空",
             "examples": [
               {
                 "refunded_fen": 3990,
@@ -5832,6 +7601,23 @@
             "examples": [
               "a-long-password-123"
             ]
+          },
+          "new_password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 12
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Password",
+            "description": "使用重置得到的临时密码时必填，设置 12～128 字符且不同于临时密码的正式密码",
+            "examples": [
+              "another-long-password-456"
+            ]
           }
         },
         "type": "object",
@@ -5921,6 +7707,189 @@
         ],
         "title": "AdminMeOut",
         "description": "当前后台账号及其权限。"
+      },
+      "AdminNotifyTaskOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "通知任务 ID",
+            "examples": [
+              76
+            ]
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id",
+            "description": "接收通知的用户 ID",
+            "examples": [
+              1024
+            ]
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id",
+            "description": "关联回执申请 ID，关联权益时为空",
+            "examples": [
+              81
+            ]
+          },
+          "entitlement_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entitlement Id",
+            "description": "关联权益 ID，关联回执申请时为空",
+            "examples": [
+              null
+            ]
+          },
+          "event": {
+            "type": "string",
+            "enum": [
+              "receipt_rejected",
+              "receipt_completed",
+              "entitlement_expiring",
+              "receipt_expiring"
+            ],
+            "title": "Event",
+            "description": "receipt_rejected = 回执驳回；receipt_completed = 回执办理完成；entitlement_expiring = 权益即将到期；receipt_expiring = 回执即将到期",
+            "examples": [
+              "receipt_completed"
+            ]
+          },
+          "step": {
+            "type": "integer",
+            "title": "Step",
+            "description": "通知档位，用于区分升级步骤或到期提醒档次",
+            "examples": [
+              1
+            ]
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "mini_subscribe",
+              "mp_template",
+              "wecom",
+              "sms",
+              "voice",
+              "manual_call"
+            ],
+            "title": "Channel",
+            "description": "mini_subscribe = 小程序订阅消息；mp_template = 公众号模板消息；wecom = 企业微信；sms = 短信；voice = 语音；manual_call = 人工电话",
+            "examples": [
+              "mini_subscribe"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "sent",
+              "failed",
+              "skipped",
+              "cancelled"
+            ],
+            "title": "Status",
+            "description": "pending = 待发送；sent = 已发送；failed = 发送失败；skipped = 跳过；cancelled = 已取消",
+            "examples": [
+              "pending"
+            ]
+          },
+          "scheduled_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Scheduled At",
+            "description": "计划发送时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T09:00:00Z"
+            ]
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At",
+            "description": "实际发送时间（UTC，带时区），未发送时为空",
+            "examples": [
+              null
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T09:00:00Z"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "application_id",
+          "entitlement_id",
+          "event",
+          "step",
+          "channel",
+          "status",
+          "scheduled_at",
+          "sent_at",
+          "created_at"
+        ],
+        "title": "AdminNotifyTaskOut",
+        "description": "通知任务的状态信息。"
+      },
+      "AdminNotifyTaskPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminNotifyTaskOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本页数据，按创建时间从新到旧"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "下一页游标；为空表示没有更多了"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AdminNotifyTaskPage",
+        "description": "分页列表：通知任务的状态信息。"
       },
       "AdminOrderDetail": {
         "properties": {
@@ -6181,6 +8150,24 @@
         ],
         "title": "AdminOrderPage",
         "description": "分页列表：订单摘要（后台列表用）。"
+      },
+      "AdminPasswordResetOut": {
+        "properties": {
+          "temporary_password": {
+            "type": "string",
+            "title": "Temporary Password",
+            "description": "临时密码，只在此响应提供。登录时须同时设置正式密码，成功后临时密码失效",
+            "examples": [
+              "example-temporary-password"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "temporary_password"
+        ],
+        "title": "AdminPasswordResetOut",
+        "description": "密码重置后仅本次响应提供的登录凭据。"
       },
       "AdminPaymentOut": {
         "properties": {
@@ -6776,8 +8763,99 @@
         "title": "AdminProviderOut",
         "description": "回执服务商。不返回密钥等配置。"
       },
+      "AdminProviderSpecCreateIn": {
+        "properties": {
+          "provider_code": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Provider Code",
+            "description": "已存在的服务商编码",
+            "examples": [
+              "zheying"
+            ]
+          },
+          "spec_code": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Spec Code",
+            "description": "已存在的规格编码，同一服务商只能配置一次",
+            "examples": [
+              "gd_idcard"
+            ]
+          },
+          "provider_item_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Provider Item Id",
+            "description": "服务商侧的规格 ID",
+            "examples": [
+              "713"
+            ]
+          },
+          "param_mapping": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Param Mapping",
+            "description": "办理字段到服务商字段名的映射，默认空对象",
+            "examples": [
+              {
+                "name": "text_name"
+              }
+            ]
+          },
+          "cost_fen": {
+            "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
+            "title": "Cost Fen",
+            "description": "办理一次的成本，单位分",
+            "examples": [
+              300
+            ]
+          },
+          "is_enabled": {
+            "type": "boolean",
+            "title": "Is Enabled",
+            "description": "是否启用此服务商规格，默认启用",
+            "default": true,
+            "examples": [
+              true
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_code",
+          "spec_code",
+          "provider_item_id",
+          "cost_fen"
+        ],
+        "title": "AdminProviderSpecCreateIn",
+        "description": "新增一项服务商规格配置。"
+      },
       "AdminProviderSpecOut": {
         "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "服务商规格记录 ID",
+            "examples": [
+              71
+            ]
+          },
+          "provider_code": {
+            "type": "string",
+            "title": "Provider Code",
+            "description": "服务商编码",
+            "examples": [
+              "zheying"
+            ]
+          },
           "spec_code": {
             "type": "string",
             "title": "Spec Code",
@@ -6800,6 +8878,17 @@
             "description": "服务商那边的规格 ID",
             "examples": [
               "713"
+            ]
+          },
+          "param_mapping": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Param Mapping",
+            "description": "办理字段到服务商字段名的映射，空对象表示未配置",
+            "examples": [
+              {
+                "name": "text_name"
+              }
             ]
           },
           "cost_fen": {
@@ -6837,15 +8926,128 @@
         },
         "type": "object",
         "required": [
+          "id",
+          "provider_code",
           "spec_code",
           "spec_name",
           "provider_item_id",
+          "param_mapping",
           "cost_fen",
           "is_enabled",
           "last_synced_at"
         ],
         "title": "AdminProviderSpecOut",
         "description": "服务商能办理的一个规格（覆盖矩阵的一行）。"
+      },
+      "AdminProviderSpecUpdateIn": {
+        "properties": {
+          "provider_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Code",
+            "description": "新的服务商编码",
+            "examples": [
+              "zheying"
+            ]
+          },
+          "spec_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spec Code",
+            "description": "新的规格编码",
+            "examples": [
+              "gd_idcard"
+            ]
+          },
+          "provider_item_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Item Id",
+            "description": "新的服务商侧规格 ID",
+            "examples": [
+              "714"
+            ]
+          },
+          "param_mapping": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Param Mapping",
+            "description": "新的办理字段映射，传空对象清空",
+            "examples": [
+              {
+                "name": "text_name"
+              }
+            ]
+          },
+          "cost_fen": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Fen",
+            "description": "新的办理成本，单位分",
+            "examples": [
+              350
+            ]
+          },
+          "is_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Enabled",
+            "description": "是否启用此服务商规格",
+            "examples": [
+              false
+            ]
+          }
+        },
+        "type": "object",
+        "title": "AdminProviderSpecUpdateIn",
+        "description": "修改服务商规格配置。省略字段保持原值。"
       },
       "AdminProviderUpdateIn": {
         "properties": {
@@ -7117,8 +9319,92 @@
         "title": "AdminRefundResultOut",
         "description": "发起退款的结果：退款记录加上订单退款后的状态。"
       },
+      "AdminRouteRuleCreateIn": {
+        "properties": {
+          "provider_code": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Provider Code",
+            "description": "候选服务商编码",
+            "examples": [
+              "zheying"
+            ]
+          },
+          "spec_code": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Spec Code",
+            "description": "适用规格编码",
+            "examples": [
+              "gd_idcard"
+            ]
+          },
+          "region_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Code",
+            "description": "适用地区行政区划码，空值表示不限地区",
+            "examples": [
+              "440300"
+            ]
+          },
+          "priority": {
+            "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": -2147483648.0,
+            "title": "Priority",
+            "description": "候选顺序，数字越小越优先，默认 100",
+            "default": 100,
+            "examples": [
+              10
+            ]
+          },
+          "is_enabled": {
+            "type": "boolean",
+            "title": "Is Enabled",
+            "description": "是否启用此规则，默认启用",
+            "default": true,
+            "examples": [
+              true
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_code",
+          "spec_code"
+        ],
+        "title": "AdminRouteRuleCreateIn",
+        "description": "新增一条路由规则。"
+      },
       "AdminRouteRuleOut": {
         "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "路由规则 ID",
+            "examples": [
+              86
+            ]
+          },
+          "provider_code": {
+            "type": "string",
+            "title": "Provider Code",
+            "description": "服务商编码",
+            "examples": [
+              "zheying"
+            ]
+          },
           "spec_code": {
             "type": "string",
             "title": "Spec Code",
@@ -7161,6 +9447,8 @@
         },
         "type": "object",
         "required": [
+          "id",
+          "provider_code",
           "spec_code",
           "region_code",
           "priority",
@@ -7168,6 +9456,96 @@
         ],
         "title": "AdminRouteRuleOut",
         "description": "路由规则的一行：某规格（可限地区）下的一个候选服务商。"
+      },
+      "AdminRouteRuleUpdateIn": {
+        "properties": {
+          "provider_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Code",
+            "description": "新的候选服务商编码",
+            "examples": [
+              "zheying"
+            ]
+          },
+          "spec_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spec Code",
+            "description": "新的适用规格编码",
+            "examples": [
+              "gd_idcard"
+            ]
+          },
+          "region_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Code",
+            "description": "新的行政区划码，显式传 null 改为不限地区",
+            "examples": [
+              null
+            ]
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": -2147483648.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority",
+            "description": "新的优先级，数字越小越优先",
+            "examples": [
+              20
+            ]
+          },
+          "is_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Enabled",
+            "description": "是否启用此规则",
+            "examples": [
+              false
+            ]
+          }
+        },
+        "type": "object",
+        "title": "AdminRouteRuleUpdateIn",
+        "description": "修改路由规则。省略字段保持原值。"
       },
       "AdminSpecCreateIn": {
         "properties": {
@@ -8029,6 +10407,89 @@
         "title": "AdminSpecUpdateIn",
         "description": "修改规格的请求。只改传了的字段（可空字段传 null 表示清空）；编码和父规格不可改。"
       },
+      "AdminStatsOverviewOut": {
+        "properties": {
+          "user_count": {
+            "type": "integer",
+            "title": "User Count",
+            "description": "用户总数，含已停用和已注销的用户",
+            "examples": [
+              120
+            ]
+          },
+          "order_count": {
+            "type": "integer",
+            "title": "Order Count",
+            "description": "全部订单数，含未支付和关闭的订单",
+            "examples": [
+              95
+            ]
+          },
+          "paid_order_count": {
+            "type": "integer",
+            "title": "Paid Order Count",
+            "description": "成功支付过的订单数，含部分退款和全额退款订单",
+            "examples": [
+              80
+            ]
+          },
+          "paid_total_fen": {
+            "type": "integer",
+            "title": "Paid Total Fen",
+            "description": "订单累计实付金额，单位分，未扣减退款",
+            "examples": [
+              319200
+            ]
+          },
+          "receipt_count": {
+            "type": "integer",
+            "title": "Receipt Count",
+            "description": "回执申请总数",
+            "examples": [
+              25
+            ]
+          },
+          "receipt_counts_by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "enum": [
+                "pending",
+                "processing",
+                "rejected",
+                "completed",
+                "failed",
+                "cancelled"
+              ]
+            },
+            "type": "object",
+            "title": "Receipt Counts By Status",
+            "description": "各状态的回执申请数量，缺少记录的状态为 0。pending = 已创建未提交；processing = 办理中；rejected = 已驳回；completed = 已完成；failed = 办理失败；cancelled = 已取消",
+            "examples": [
+              {
+                "cancelled": 1,
+                "completed": 20,
+                "failed": 1,
+                "pending": 0,
+                "processing": 2,
+                "rejected": 1
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_count",
+          "order_count",
+          "paid_order_count",
+          "paid_total_fen",
+          "receipt_count",
+          "receipt_counts_by_status"
+        ],
+        "title": "AdminStatsOverviewOut",
+        "description": "后台数据看板的全量累计指标。"
+      },
       "AdminUserDetail": {
         "properties": {
           "id": {
@@ -8546,7 +11007,7 @@
               }
             ],
             "title": "Receipt Url",
-            "description": "回执图片的临时链接，约 10 分钟有效，过期后重新请求接口获取；只在 completed 时有值",
+            "description": "已转存回执图片的临时链接，约 10 分钟有效。正在转存或未出回执时为空，过期后重新查询",
             "examples": [
               "https://api.example.com/files/..."
             ]
@@ -8686,7 +11147,7 @@
               "abandoned"
             ],
             "title": "Status",
-            "description": "这次提交的状态。created = 已创建还没发出；submitted = 已提交等待结果；unknown = 网络超时还不确定是否提交成功，系统会自动核对；processing = 对方办理中；completed = 已出回执；rejected = 被驳回；failed = 办理失败；abandoned = 已放弃",
+            "description": "这次提交的状态。created = 已创建还没发出；submitted = 已提交等待结果；unknown = 提交结果未知或需人工核对；processing = 对方办理中；completed = 已出回执；rejected = 被驳回；failed = 办理失败；abandoned = 已放弃",
             "examples": [
               "rejected"
             ]
@@ -10054,6 +12515,42 @@
         "title": "ReceiptCreate",
         "description": "创建回执申请的请求。"
       },
+      "ReceiptProviderAck": {
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Data",
+            "description": "固定为空对象",
+            "examples": [
+              {}
+            ]
+          },
+          "code": {
+            "type": "integer",
+            "const": 0,
+            "title": "Code",
+            "description": "固定为 0，表示同步成功",
+            "default": 0,
+            "examples": [
+              0
+            ]
+          },
+          "msg": {
+            "type": "string",
+            "const": "同步完成",
+            "title": "Msg",
+            "description": "固定为同步完成",
+            "default": "同步完成",
+            "examples": [
+              "同步完成"
+            ]
+          }
+        },
+        "type": "object",
+        "title": "ReceiptProviderAck",
+        "description": "鹧应和黔微云收到此响应后，确认回调已处理。"
+      },
       "RenderCreate": {
         "properties": {
           "spec_code": {
@@ -10873,22 +13370,23 @@
         "title": "WechatMiniLoginRequest",
         "description": "微信小程序登录请求。"
       },
-      "WxpayAck": {
+      "WxpayFailure": {
         "properties": {
           "code": {
             "type": "string",
+            "const": "FAIL",
             "title": "Code",
-            "description": "固定为 SUCCESS，表示通知已处理",
+            "description": "固定为 FAIL，表示通知处理失败",
             "examples": [
-              "SUCCESS"
+              "FAIL"
             ]
           },
           "message": {
             "type": "string",
             "title": "Message",
-            "description": "固定为 成功",
+            "description": "通知处理失败的原因",
             "examples": [
-              "成功"
+              "支付通知签名不正确"
             ]
           }
         },
@@ -10897,8 +13395,8 @@
           "code",
           "message"
         ],
-        "title": "WxpayAck",
-        "description": "给微信支付的应答。微信要求支付通知处理成功时返回这个格式，否则会反复重发。"
+        "title": "WxpayFailure",
+        "description": "微信支付通知处理失败时的应答。"
       }
     },
     "securitySchemes": {

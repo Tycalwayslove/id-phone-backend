@@ -310,6 +310,7 @@ def get_order(order_no: OrderNoPath, _: OrderRead, db: DB):
         ErrorCode.ORDER_NOT_FOUND,
         ErrorCode.REFUND_NOT_ALLOWED,
         ErrorCode.IDEMPOTENCY_CONFLICT,
+        ErrorCode.INTERNAL_ERROR,
     ),
 )
 def refund_order(order_no: OrderNoPath, body: AdminRefundIn, admin: RefundCreate, db: DB):

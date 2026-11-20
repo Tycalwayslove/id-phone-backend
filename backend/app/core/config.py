@@ -72,6 +72,8 @@ class Settings(BaseSettings):
     clipimg_api_base: str = "https://www.qwyun.top"
     clipimg_app_key: str = ""
     clipimg_app_secret: str = ""
+    # 真实回执回调的来源 IP 或 CIDR，逗号分隔，留空则不限
+    receipt_callback_ip_allowlist: str = ""
 
     # 通知渠道与按事件配置的服务商模板
     notify_channels: str = "mini_subscribe"
@@ -114,9 +116,6 @@ class Settings(BaseSettings):
     @property
     def is_prod(self) -> bool:
         return self.app_env == "prod"
-
-    # 真实回执回调的来源 IP 或 CIDR，逗号分隔，留空则不限。
-    receipt_callback_ip_allowlist: str = ""
 
 
 settings = Settings()
