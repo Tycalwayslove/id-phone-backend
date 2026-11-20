@@ -98,7 +98,7 @@ def test_stats_overview(client: TestClient, db: Session):
     }
 
 
-def test_notify_tasks_filter_and_cursor(client: TestClient, db: Session):
+def test_notify_tasks_filter(client: TestClient, db: Session):
     world = make_world(client, db)
     receipt = get_application(db, create_app(client, world)["app_no"])
     tasks = [
@@ -118,18 +118,14 @@ def test_notify_tasks_filter_and_cursor(client: TestClient, db: Session):
     db.flush()
     admin_login(client, db, role="operator")
     url = f"{API}/notify-tasks"
-    response = client.get(url, params={"status": "failed", "limit": 1})
+    response = client.get(url, params={"status": "failed", "page_size": 10})
     assert response.status_code == 200
     first = response.json()
-    assert first["next_cursor"]
-    assert [item["id"] for item in first["items"]] == [tasks[1].id]
+    assert first["total"] == 2
+    assert [item["id"] for item in first["items"]] == [tasks[1].id, tasks[0].id]
     assert first["items"][0]["application_id"] == receipt.id
     assert "result" not in first["items"][0]
     assert "private-test-value" not in response.text
-    second = client.get(url, params={"status": "failed", "limit": 1, "cursor": first["next_cursor"]})
-    assert second.status_code == 200
-    assert [item["id"] for item in second.json()["items"]] == [tasks[0].id]
-    assert second.json()["next_cursor"] is None
     assert_error(client.get(url, params={"status": "unknown"}), 422, "VALIDATION_ERROR")
 
 
@@ -225,11 +221,10 @@ def test_admin_account_lifecycle(client: TestClient, db: Session):
     stored = db.get(AdminUser, account["id"])
     assert stored.password_hash != PASSWORD and verify_password(stored.password_hash, PASSWORD)
     assert_error(client.post(url, headers=csrf, json=ACCOUNT_BODY), 409, "CONFLICT")
-    assert_error(client.get(url, params={"limit": 0}), 422, "VALIDATION_ERROR")
-    first_page = client.get(url, params={"limit": 1}).json()
-    assert first_page["items"] == [account]
-    second_page = client.get(url, params={"limit": 1, "cursor": first_page["next_cursor"]}).json()
-    assert second_page["items"][0]["username"] == "boss"
+    assert_error(client.get(url, params={"page_size": 0}), 422, "VALIDATION_ERROR")
+    first_page = client.get(url, params={"page_size": 10}).json()
+    assert first_page["total"] == 2 and first_page["items"][0] == account
+    assert first_page["items"][1]["username"] == "boss"
 
     with TestClient(app) as target:
         assert (

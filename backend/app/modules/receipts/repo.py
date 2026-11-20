@@ -7,6 +7,7 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.pagination import OffsetPageParams, paginate
 from app.models import (
     Entitlement,
     File,
@@ -67,17 +68,14 @@ def list_applications(
 # ---------- 内部（回调、轮询、联调用，不带用户） ----------
 
 
-def list_admin_applications(
-    db: Session,
+def _admin_applications_query(
     *,
-    before_id: int | None,
-    limit: int,
     status: str | None = None,
     app_no: str | None = None,
     user_id: int | None = None,
     spec_code: str | None = None,
     manual_review: bool | None = None,
-) -> list[tuple[ReceiptApplication, Spec, bool]]:
+):
     flagged_attempt = (
         select(ReceiptAttempt.id)
         .where(
@@ -100,9 +98,31 @@ def list_admin_applications(
         stmt = stmt.where(Spec.code == spec_code)
     if manual_review is not None:
         stmt = stmt.where(needs_review.is_(manual_review))
-    if before_id is not None:
-        stmt = stmt.where(ReceiptApplication.id < before_id)
-    return list(db.execute(stmt.order_by(ReceiptApplication.id.desc()).limit(limit)).tuples())
+    return stmt
+
+
+def list_admin_applications(
+    db: Session,
+    *,
+    page: OffsetPageParams,
+    status: str | None = None,
+    app_no: str | None = None,
+    user_id: int | None = None,
+    spec_code: str | None = None,
+    manual_review: bool | None = None,
+) -> tuple[list[tuple[ReceiptApplication, Spec, bool]], int]:
+    stmt = _admin_applications_query(
+        status=status, app_no=app_no, user_id=user_id, spec_code=spec_code, manual_review=manual_review
+    ).order_by(ReceiptApplication.id.desc())
+    return paginate(db, stmt, page)
+
+
+def get_admin_application_summary(db: Session, app_no: str) -> tuple[ReceiptApplication, Spec, bool] | None:
+    row = db.execute(_admin_applications_query(app_no=app_no)).one_or_none()
+    if row is None:
+        return None
+    application, spec, needs_review = row
+    return application, spec, needs_review
 
 
 def get_admin_application_by_no(

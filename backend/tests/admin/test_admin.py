@@ -379,11 +379,9 @@ def test_orders_list_filters_and_pagination(client: TestClient, db: Session):
     future = client.get(f"{API}/orders", params={"created_from": "2999-01-01T00:00:00Z"})
     assert future.json()["items"] == []
 
-    first = client.get(f"{API}/orders", params={"limit": 1}).json()
-    assert len(first["items"]) == 1 and first["next_cursor"]
-    second = client.get(f"{API}/orders", params={"limit": 1, "cursor": first["next_cursor"]}).json()
-    assert second["next_cursor"] is None
-    assert {first["items"][0]["order_no"], second["items"][0]["order_no"]} == {order_a, order_b}
+    first = client.get(f"{API}/orders").json()
+    assert first["total"] == 2 and first["page"] == 1 and first["page_size"] == 20
+    assert [row["order_no"] for row in first["items"]] == [order_b, order_a]
     assert client.get(f"{API}/orders/NOPE").json()["code"] == "ORDER_NOT_FOUND"
 
 
@@ -413,10 +411,9 @@ def test_users_search_by_phone_masked(client: TestClient, db: Session):
         client.post(url, json={"phone": "13800001234", "status": "disabled"}, headers=csrf).json()["items"]
         == []
     )
-    first = client.post(url, json={"limit": 1, "status": "active"}, headers=csrf).json()
-    assert len(first["items"]) == 1 and first["next_cursor"]
-    second = client.post(url, json={"cursor": first["next_cursor"], "limit": 1}, headers=csrf).json()
-    assert [u["id"] for u in second["items"]] == [uid] and second["next_cursor"] is None
+    first = client.post(url, json={"page_size": 10, "status": "active"}, headers=csrf).json()
+    assert len(first["items"]) == first["total"] == 2
+    assert first["items"][-1]["id"] == uid
     assert len(client.get(f"{API}/users", params={"user_id": uid}).json()["items"]) == 1
     assert len(client.get(f"{API}/users", params={"status": "active"}).json()["items"]) == 2
 
@@ -505,9 +502,9 @@ def test_manual_review_filters_and_applies_conclusion(client, db, result, used, 
     assert client.post(f"{base}/NOPE/manual-review", headers=csrf, json=body).status_code == 404
     assert _audit(client, action="application.manual_review") == []
 
-    flagged = client.get(base, params={"manual_review": "true", "status": "processing", "limit": 1}).json()
+    flagged = client.get(base, params={"manual_review": "true", "status": "processing"}).json()
     assert [(row["app_no"], row["manual_review_required"]) for row in flagged["items"]] == [(app_no, True)]
-    assert flagged["next_cursor"] is None
+    assert flagged["total"] == 1
     unflagged = client.get(base, params={"manual_review": "false"}).json()["items"]
     assert [(row["app_no"], row["manual_review_required"]) for row in unflagged] == [(other["app_no"], False)]
     assert client.get(detail_path).json()["manual_review_required"] is True
@@ -596,12 +593,7 @@ def test_spec_list_filters_and_pages(client: TestClient, db: Session):
     ]
     assert codes(keyword="%") == []  # 通配符被转义
 
-    first = client.get(f"{API}/specs", params={"keyword": "flt", "limit": 3}).json()
-    assert [s["code"] for s in first["items"]] == ["flt_exam", "flt_city", "flt_c"] and first["next_cursor"]
-    second = client.get(
-        f"{API}/specs", params={"keyword": "flt", "limit": 3, "cursor": first["next_cursor"]}
-    ).json()
-    assert [s["code"] for s in second["items"]] == ["flt_b", "flt_a"] and second["next_cursor"] is None
+    assert client.get(f"{API}/specs", params={"keyword": "flt"}).json()["total"] == 5
     assert client.get(f"{API}/specs", params={"status": "bogus"}).status_code == 422
 
 
@@ -633,10 +625,7 @@ def test_provider_specs_list_filters_and_pages(client: TestClient, db: Session):
     assert [e["spec_code"] for e in page(provider_code="ps_prov", keyword="91")["items"]] == ["ps_2"]
     assert page(provider_code="nobody")["items"] == []
 
-    first = page(provider_code="ps_prov", limit=2)
-    second = page(provider_code="ps_prov", limit=2, cursor=first["next_cursor"])
-    assert [e["spec_code"] for e in first["items"] + second["items"]] == ["ps_2", "ps_1", "ps_0"]
-    assert second["next_cursor"] is None
+    assert page(provider_code="ps_prov")["total"] == 3
 
     rules = client.get(f"{API}/route-rules", params={"spec_code": "ps_1"}).json()["items"]
     assert [r["provider_code"] for r in rules] == ["ps_other"]
@@ -665,7 +654,7 @@ def test_providers_list_and_update(client: TestClient, db: Session):
     assert "provider_specs" not in p and "config" not in str(p).lower()
     entries = client.get(f"{API}/provider-specs", params={"provider_code": "prov_a"}).json()
     assert [(e["spec_code"], e["cost_fen"]) for e in entries["items"]] == [("prov_spec", 300)]
-    assert entries["next_cursor"] is None
+    assert entries["total"] == 1
     rules = client.get(f"{API}/route-rules", params={"provider_code": "prov_a"}).json()["items"]
     assert [(r["spec_code"], r["priority"]) for r in rules] == [("prov_spec", 10)]
 
@@ -737,6 +726,6 @@ def test_admin_api_docs_complete():
         "user_id",
         "source_app_id",
         "status",
-        "cursor",
-        "limit",
+        "page",
+        "page_size",
     }

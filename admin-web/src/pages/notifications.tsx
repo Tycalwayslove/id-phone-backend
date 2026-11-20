@@ -1,25 +1,24 @@
 import { Form, Select } from 'antd'
 import { adminApi, type NotifyFilters } from '../api/admin'
 import type { Schema } from '../api/client'
-import { CursorTable, FilterForm, PageHeading, Status, useCursorList, useFilters } from '../components/ui'
+import { PagedTable, FilterForm, PageHeading, Status, usePagedList } from '../components/ui'
 import { dateText, enumOptions, notifyChannel, notifyEvent, notifyStatus } from '../format'
 
 type NotifyTask = Schema['AdminNotifyTaskOut']
 type Filters = Pick<NotifyFilters, 'status'>
 
 export default function Notifications() {
-  const search = useFilters<Filters>()
-  const query = useCursorList('notify-tasks', (cursor, signal) => adminApi.notifyTasks({ ...search.filters, cursor }, signal), search.version)
+  const query = usePagedList('notify-tasks', adminApi.notifyTasks, {} satisfies Filters)
 
   return (
     <>
       <PageHeading title="通知任务" />
-      <FilterForm<Filters> onFinish={search.apply}>
+      <FilterForm<Filters> onFinish={query.apply}>
         <Form.Item label="任务状态" name="status">
           <Select className="filter-select" allowClear options={enumOptions(notifyStatus)} />
         </Form.Item>
       </FilterForm>
-      <CursorTable<NotifyTask> query={query} rowKey="id" columns={[
+      <PagedTable<NotifyTask> query={query} rowKey="id" columns={[
         { title: '任务 ID', dataIndex: 'id' },
         { title: '用户 ID', dataIndex: 'user_id' },
         { title: '事件', render: (_, row) => notifyEvent[row.event] },

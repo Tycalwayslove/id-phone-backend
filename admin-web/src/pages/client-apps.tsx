@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { adminApi } from '../api/admin'
 import type { Schema } from '../api/client'
 import { changedFields, useEditorSave } from '../components/editor'
-import { CursorTable, PageHeading, Status, useCursorList } from '../components/ui'
+import { PagedTable, PageHeading, Status, usePagedList } from '../components/ui'
 import { clientAppPlatforms, clientAppStatus, enumOptions } from '../format'
 
 type ClientApp = Schema['AdminClientAppOut']
@@ -39,13 +39,13 @@ function AppEditor({ app, onClose }: { app: ClientApp; onClose: () => void }) {
 }
 
 export default function ClientApps() {
-  const query = useCursorList('client-apps', (cursor, signal) => adminApi.clientApps({ cursor }, signal))
+  const query = usePagedList('client-apps', adminApi.clientApps, {})
   const [editing, setEditing] = useState<ClientApp>()
 
   return (
     <>
       <PageHeading title="应用" />
-      <CursorTable<ClientApp> query={query} rowKey="id" columns={[
+      <PagedTable<ClientApp> query={query} rowKey="id" columns={[
         { title: '应用名称', dataIndex: 'name' },
         { title: '平台', render: (_, app) => clientAppPlatforms[app.platform] },
         { title: 'AppID', dataIndex: 'app_id' },

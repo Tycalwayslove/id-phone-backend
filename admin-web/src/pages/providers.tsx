@@ -6,7 +6,7 @@ import { adminApi, type ProviderSpecFilters } from '../api/admin'
 import type { Schema } from '../api/client'
 import { useConfirmChange } from '../components/confirm'
 import { useSpecSync } from '../components/spec-sync'
-import { CursorTable, DataTable, FilterForm, PageHeading, Problem, Section, Status, TextFilter, useCursorList, useFilters } from '../components/ui'
+import { DataTable, FilterForm, PagedTable, PageHeading, Problem, Section, Status, TextFilter, usePagedList } from '../components/ui'
 import { dateText, money, providerStatus } from '../format'
 import { usePermission } from '../session'
 import { ProviderSpecEditor, RouteRuleEditor } from './provider-editors'
@@ -29,26 +29,24 @@ const enabledOptions = [{ value: true, label: '启用' }, { value: false, label:
 function ProviderDetails({ provider, edit, busy }: { provider: Provider; edit?: (value: Edit) => void; busy: boolean }) {
   const confirm = useConfirmChange('providers')
   // 列表 key 以 'providers' 开头：编辑、删除、同步后统一刷新
-  const specSearch = useFilters<ProviderSpecSearch>()
-  const specs = useCursorList('providers', (cursor, signal) => adminApi.providerSpecs(
-    { ...specSearch.filters, provider_code: provider.code, cursor }, signal,
-  ), specSearch.version)
-  const rules = useCursorList('providers', (cursor, signal) => adminApi.routeRules(
-    { provider_code: provider.code, cursor }, signal,
-  ))
+  const specFilters: ProviderSpecFilters = { provider_code: provider.code }
+  const specs = usePagedList('providers', adminApi.providerSpecs, specFilters, { prefix: `spec_${provider.code}_` })
+  const rules = usePagedList('providers', adminApi.routeRules, { provider_code: provider.code }, { prefix: `rule_${provider.code}_` })
   return (
     <>
       <Section title="支持的规格" action={edit && (
         <Button size="small" icon={<PlusOutlined />} disabled={busy}
           onClick={() => edit({ type: 'spec', providerCode: provider.code, entry: null })}>新增规格</Button>
       )}>
-        <FilterForm<ProviderSpecSearch> onFinish={(values) => specSearch.apply({ ...values, keyword: values.keyword?.trim() || undefined })}>
+        <FilterForm<ProviderSpecSearch> onFinish={(values) => specs.apply({
+          ...values, provider_code: provider.code, keyword: values.keyword?.trim() || undefined,
+        })}>
           <TextFilter name="keyword" label="规格名称、编码或服务商规格 ID" maxLength={64} />
           <Form.Item label="状态" name="is_enabled">
             <Select className="filter-select" allowClear options={enabledOptions} placeholder="全部" />
           </Form.Item>
         </FilterForm>
-        <CursorTable<ProviderSpec> query={specs} rowKey="id" columns={[
+        <PagedTable<ProviderSpec> query={specs} rowKey="id" columns={[
           { title: '规格', dataIndex: 'spec_name' },
           { title: '规格编码', dataIndex: 'spec_code' },
           { title: '服务商规格 ID', dataIndex: 'provider_item_id' },
@@ -75,7 +73,7 @@ function ProviderDetails({ provider, edit, busy }: { provider: Provider; edit?: 
         <Button size="small" icon={<PlusOutlined />} disabled={busy}
           onClick={() => edit({ type: 'rule', providerCode: provider.code, rule: null })}>新增规则</Button>
       )}>
-        <CursorTable<RouteRule>
+        <PagedTable<RouteRule>
           query={rules}
           rowKey="id"
           columns={[

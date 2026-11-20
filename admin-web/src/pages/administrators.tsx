@@ -6,7 +6,7 @@ import { adminApi } from '../api/admin'
 import { errorText, type Schema } from '../api/client'
 import { useConfirmChange } from '../components/confirm'
 import { useEditorSave } from '../components/editor'
-import { CursorTable, PageHeading, Status, useCursorList } from '../components/ui'
+import { PagedTable, PageHeading, Status, usePagedList } from '../components/ui'
 import { adminAccountStatus, adminRole, dateText, enumOptions } from '../format'
 import { usePermission, useSession } from '../session'
 
@@ -128,14 +128,14 @@ export default function Administrators() {
   const [resetting, setResetting] = useState<Account>()
   // 重置本账号会撤销当前会话，复制临时密码前暂停列表请求。
   const resettingSelf = resetting !== undefined && resetting.id === currentId
-  const query = useCursorList(resource, (cursor, signal) => adminApi.adminAccounts({ cursor }, signal), 0, !resettingSelf)
+  const query = usePagedList(resource, adminApi.adminAccounts, {}, { enabled: !resettingSelf })
 
   return (
     <>
       <PageHeading title="管理员账号" action={canWrite && (
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditing(null)}>新建账号</Button>
       )} />
-      <CursorTable<Account> query={query} rowKey="id" columns={[
+      <PagedTable<Account> query={query} rowKey="id" columns={[
         { title: '账号 ID', dataIndex: 'id' },
         { title: '用户名', dataIndex: 'username' },
         { title: '角色', render: (_, account) => <Tag>{adminRole[account.role]}</Tag> },

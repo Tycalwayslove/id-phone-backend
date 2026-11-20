@@ -1,12 +1,12 @@
 import { Alert, Button, Descriptions, Drawer, Empty, Form, Input, Modal, Select, Space, Tag, Timeline } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { Link, useMatch, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useMatch, useNavigate } from 'react-router-dom'
 import { adminApi, type ReceiptFilters } from '../api/admin'
 import type { Schema } from '../api/client'
 import { useConfirmChange } from '../components/confirm'
 import { useEditorSave } from '../components/editor'
-import { CursorTable, FilterForm, IdFilter, Loading, PageHeading, Problem, Section, Status, TextFilter, useCursorList, useFilters } from '../components/ui'
+import { PagedTable, FilterForm, IdFilter, Loading, PageHeading, Problem, Section, Status, TextFilter, usePagedList } from '../components/ui'
 import { attemptStatus, dateText, enumOptions, labelFor, money, receiptStatus } from '../format'
 import { usePermission } from '../session'
 
@@ -119,15 +119,15 @@ function ReceiptDetail({ appNo }: { appNo: string }) {
 }
 
 export default function Receipts() {
-  const search = useFilters<ReceiptFilters>()
-  const query = useCursorList('receipts', (cursor, signal) => adminApi.receipts({ ...search.filters, cursor }, signal), search.version)
+  const query = usePagedList('receipts', adminApi.receipts, {} satisfies ReceiptFilters)
   const appNo = useMatch('/receipts/:appNo')?.params.appNo
   const navigate = useNavigate()
+  const { search } = useLocation()
 
   return (
     <>
       <PageHeading title="回执" />
-      <FilterForm<ReceiptFilterForm> onFinish={(values) => search.apply({
+      <FilterForm<ReceiptFilterForm> onFinish={(values) => query.apply({
         ...values, app_no: values.app_no?.trim() || undefined, spec_code: values.spec_code?.trim() || undefined,
         manual_review: values.manual_review == null ? undefined : values.manual_review === 'true',
       })}>
@@ -144,8 +144,8 @@ export default function Receipts() {
           ]} />
         </Form.Item>
       </FilterForm>
-      <CursorTable<Schema['AdminApplicationOut']> query={query} rowKey="app_no" columns={[
-        { title: '申请单号', render: (_, row) => <Link to={`/receipts/${encodeURIComponent(row.app_no)}`}>{row.app_no}</Link> },
+      <PagedTable<Schema['AdminApplicationOut']> query={query} rowKey="app_no" columns={[
+        { title: '申请单号', render: (_, row) => <Link to={{ pathname: `/receipts/${encodeURIComponent(row.app_no)}`, search }}>{row.app_no}</Link> },
         { title: '用户 ID', dataIndex: 'user_id' },
         { title: '规格', dataIndex: 'spec_name' },
         { title: '状态', render: (_, row) => <Space wrap>
@@ -157,7 +157,7 @@ export default function Receipts() {
         { title: '最近更新', dataIndex: 'updated_at', render: dateText },
       ]} />
       {appNo && (
-        <Drawer open title="回执详情" width="min(100vw, 780px)" onClose={() => navigate('/receipts', { replace: true })}>
+        <Drawer open title="回执详情" width="min(100vw, 780px)" onClose={() => navigate({ pathname: '/receipts', search }, { replace: true })}>
           <ReceiptDetail key={appNo} appNo={appNo} />
         </Drawer>
       )}

@@ -2,10 +2,10 @@ import { Alert, App, Button, DatePicker, Descriptions, Drawer, Form, Input, Inpu
 import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Dayjs } from 'dayjs'
 import { useRef, useState } from 'react'
-import { Link, useMatch, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useMatch, useNavigate } from 'react-router-dom'
 import { adminApi, type OrderFilters } from '../api/admin'
 import { errorText, type Schema } from '../api/client'
-import { CursorTable, DataTable, FilterForm, IdFilter, Loading, PageHeading, Problem, Section, Status, TextFilter, useCursorList, useFilters } from '../components/ui'
+import { PagedTable, DataTable, FilterForm, IdFilter, Loading, PageHeading, Problem, Section, Status, TextFilter, usePagedList } from '../components/ui'
 import { dateText, enumOptions, labelFor, money, orderItem, orderStatus, paymentChannels, paymentStatus, refundStatus, yuanToFen } from '../format'
 import { usePermission } from '../session'
 
@@ -169,15 +169,15 @@ function OrderDetail({ orderNo }: { orderNo: string }) {
 }
 
 export default function Orders() {
-  const search = useFilters<OrderFilters>()
-  const query = useCursorList('orders', (cursor, signal) => adminApi.orders({ ...search.filters, cursor }, signal), search.version)
+  const query = usePagedList('orders', adminApi.orders, {} satisfies OrderFilters)
   const orderNo = useMatch('/orders/:orderNo')?.params.orderNo
   const navigate = useNavigate()
+  const { search } = useLocation()
 
   return (
     <>
       <PageHeading title="订单" />
-      <FilterForm<Filters> onFinish={({ created, ...values }) => search.apply({
+      <FilterForm<Filters> onFinish={({ created, ...values }) => query.apply({
         ...values,
         order_no: values.order_no?.trim() || undefined,
         created_from: created?.[0]?.toISOString(),
@@ -195,8 +195,8 @@ export default function Orders() {
           <DatePicker.RangePicker showTime allowEmpty={[true, true]} />
         </Form.Item>
       </FilterForm>
-      <CursorTable<Schema['AdminOrderOut']> query={query} rowKey="order_no" columns={[
-        { title: '订单号', render: (_, row) => <Link to={`/orders/${encodeURIComponent(row.order_no)}`}>{row.order_no}</Link> },
+      <PagedTable<Schema['AdminOrderOut']> query={query} rowKey="order_no" columns={[
+        { title: '订单号', render: (_, row) => <Link to={{ pathname: `/orders/${encodeURIComponent(row.order_no)}`, search }}>{row.order_no}</Link> },
         { title: '用户 ID', dataIndex: 'user_id' },
         { title: '状态', render: (_, row) => <Status value={row.status} labels={orderStatus} /> },
         { title: '应付', dataIndex: 'total_fen', align: 'right', className: 'amount', render: money },
@@ -206,7 +206,7 @@ export default function Orders() {
         { title: '支付时间', dataIndex: 'paid_at', render: dateText },
       ]} />
       {orderNo && (
-        <Drawer open title="订单详情" width="min(100vw, 960px)" onClose={() => navigate('/orders', { replace: true })}>
+        <Drawer open title="订单详情" width="min(100vw, 960px)" onClose={() => navigate({ pathname: '/orders', search }, { replace: true })}>
           <OrderDetail key={orderNo} orderNo={orderNo} />
         </Drawer>
       )}

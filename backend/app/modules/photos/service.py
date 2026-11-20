@@ -21,7 +21,7 @@ from app.core.colors import normalize_bg_color, require_bg_color
 from app.core.config import settings
 from app.core.db import SessionLocal
 from app.core.errors import AppError, ErrorCode
-from app.core.pagination import PageParams
+from app.core.pagination import OffsetPageParams, PageParams
 from app.core.utils import utcnow
 from app.integrations import wechat
 from app.integrations.matting import FineMatting, get_matting
@@ -123,22 +123,25 @@ def get_photo_for_user(db: Session, user_id: int, photo_id: int) -> Photo:
 def list_admin_photos(
     db: Session,
     *,
-    before_id: int | None,
-    limit: int,
+    page: OffsetPageParams,
     user_id: int | None = None,
     status: str | None = None,
     matting_level: str | None = None,
     quality_level: str | None = None,
-) -> list[tuple[Photo, File | None]]:
+) -> tuple[list[tuple[Photo, File | None]], int]:
     return repo.list_admin_photos(
         db,
-        before_id=before_id,
-        limit=limit,
+        page=page,
         user_id=user_id,
         status=status,
         matting_level=matting_level,
         quality_level=quality_level,
     )
+
+
+def list_recent_admin_photos(db: Session, *, user_id: int, limit: int) -> list[tuple[Photo, File | None]]:
+    """供后台用户详情展示最近的照片。"""
+    return repo.list_recent_admin_photos(db, user_id=user_id, limit=limit)
 
 
 def get_admin_photo_detail(

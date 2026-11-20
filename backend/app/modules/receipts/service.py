@@ -25,7 +25,7 @@ from app.core import security
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.idempotency import run_idempotent
-from app.core.pagination import PageParams
+from app.core.pagination import OffsetPageParams, PageParams
 from app.core.schemas import OkResponse
 from app.core.utils import new_no, utcnow
 from app.integrations.receipt_providers import build_callback_url, get_provider
@@ -174,19 +174,17 @@ def _get_owned(db: Session, user_id: int, app_no: str, *, for_update: bool = Fal
 def list_admin_applications(
     db: Session,
     *,
-    before_id: int | None,
-    limit: int,
+    page: OffsetPageParams,
     status: str | None = None,
     app_no: str | None = None,
     user_id: int | None = None,
     spec_code: str | None = None,
     manual_review: bool | None = None,
-) -> list[tuple[ReceiptApplication, Spec, bool]]:
+) -> tuple[list[tuple[ReceiptApplication, Spec, bool]], int]:
     """查询后台申请摘要及当前提交的人工核对标记。"""
     return repo.list_admin_applications(
         db,
-        before_id=before_id,
-        limit=limit,
+        page=page,
         status=status,
         app_no=app_no,
         user_id=user_id,
@@ -199,10 +197,10 @@ def get_admin_application_detail(
     db: Session, *, app_no: str
 ) -> tuple[ReceiptApplication, Spec, bool, dict[str, str], list[tuple[ReceiptAttempt, str]]]:
     """读取申请摘要、脱敏表单及附有服务商编码的全部提交记录。"""
-    rows = list_admin_applications(db, app_no=app_no, before_id=None, limit=1)
-    if not rows:
+    summary = repo.get_admin_application_summary(db, app_no)
+    if summary is None:
         raise AppError(ErrorCode.APPLICATION_NOT_FOUND)
-    app, spec, needs_review = rows[0]
+    app, spec, needs_review = summary
     return app, spec, needs_review, mask_form(_load_form(app)), repo.admin_attempts(db, app.id)
 
 

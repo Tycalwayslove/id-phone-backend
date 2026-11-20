@@ -53,7 +53,7 @@ body {
 .filter-actions { margin-block: 0 2px; }
 .data-surface { background: #fff; border: 1px solid #e1e9e6; border-radius: 8px; overflow: hidden; }
 .data-surface > .ant-alert { margin: 12px; }
-.table-footer { display: flex; justify-content: space-between; align-items: center; min-height: 56px; padding: 10px 16px; color: #526563; }
+.photo-pagination { justify-content: flex-end; margin-top: 16px; }
 .detail-section { margin-top: 24px; }
 .detail-section-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .detail-section h3 { font-size: 15px; margin: 0; }

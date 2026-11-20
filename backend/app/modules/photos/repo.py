@@ -6,6 +6,7 @@ from datetime import datetime
 from sqlalchemy import exists, func, or_, select, update
 from sqlalchemy.orm import Session
 
+from app.core.pagination import OffsetPageParams, paginate
 from app.models import File, Photo, PhotoRender, Spec
 
 
@@ -53,16 +54,13 @@ def list_photos(db: Session, user_id: int, *, before_id: int | None, limit: int)
     return list(db.scalars(q.order_by(Photo.id.desc()).limit(limit)))
 
 
-def list_admin_photos(
-    db: Session,
+def _admin_photos_query(
     *,
-    before_id: int | None,
-    limit: int,
     user_id: int | None,
-    status: str | None,
-    matting_level: str | None,
-    quality_level: str | None,
-) -> list[tuple[Photo, File | None]]:
+    status: str | None = None,
+    matting_level: str | None = None,
+    quality_level: str | None = None,
+):
     preview = (
         select(File.id.label("file_id"))
         .join(PhotoRender, PhotoRender.file_id == File.id)
@@ -84,8 +82,6 @@ def list_admin_photos(
         & (File.status == "active")
         & (Photo.status != "purged"),
     )
-    if before_id is not None:
-        stmt = stmt.where(Photo.id < before_id)
     if user_id is not None:
         stmt = stmt.where(Photo.user_id == user_id)
     if status is not None:
@@ -94,9 +90,27 @@ def list_admin_photos(
         stmt = stmt.where(Photo.matting_level == matting_level)
     if quality_level is not None:
         stmt = stmt.where(Photo.quality["level"].astext == quality_level)
-    return [
-        (photo, thumbnail) for photo, thumbnail in db.execute(stmt.order_by(Photo.id.desc()).limit(limit))
-    ]
+    return stmt.order_by(Photo.id.desc())
+
+
+def list_admin_photos(
+    db: Session,
+    *,
+    page: OffsetPageParams,
+    user_id: int | None,
+    status: str | None,
+    matting_level: str | None,
+    quality_level: str | None,
+) -> tuple[list[tuple[Photo, File | None]], int]:
+    stmt = _admin_photos_query(
+        user_id=user_id, status=status, matting_level=matting_level, quality_level=quality_level
+    )
+    return paginate(db, stmt, page)
+
+
+def list_recent_admin_photos(db: Session, *, user_id: int, limit: int) -> list[tuple[Photo, File | None]]:
+    stmt = _admin_photos_query(user_id=user_id).limit(limit)
+    return [(photo, thumbnail) for photo, thumbnail in db.execute(stmt)]
 
 
 def get_admin_photo(db: Session, photo_id: int) -> Photo | None:

@@ -6,6 +6,7 @@ from datetime import datetime
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, defer
 
+from app.core.pagination import OffsetPageParams, paginate
 from app.core.utils import contains_pattern, utcnow
 from app.models import (
     AdminSession,
@@ -37,11 +38,10 @@ def get_admin_by_username(db: Session, username: str) -> AdminUser | None:
     return db.scalar(select(AdminUser).where(AdminUser.username == username))
 
 
-def list_admin_accounts(db: Session, *, before_id: int | None, limit: int) -> list[AdminUser]:
+def list_admin_accounts(db: Session, *, page: OffsetPageParams) -> tuple[list[AdminUser], int]:
     stmt = select(AdminUser).options(defer(AdminUser.password_hash))
-    if before_id is not None:
-        stmt = stmt.where(AdminUser.id < before_id)
-    return list(db.scalars(stmt.order_by(AdminUser.id.desc()).limit(limit)))
+    rows, total = paginate(db, stmt.order_by(AdminUser.id.desc()), page)
+    return [row for (row,) in rows], total
 
 
 def lock_admin_for_login(db: Session, admin_id: int) -> AdminUser | None:
@@ -94,15 +94,14 @@ def overview_counts(db: Session) -> tuple[int, int, int, int]:
 
 
 def list_notify_tasks(
-    db: Session, *, status: str | None, before_id: int | None, limit: int
-) -> list[NotifyTask]:
+    db: Session, *, status: str | None, page: OffsetPageParams
+) -> tuple[list[NotifyTask], int]:
     # notify 目前没有后台列表 service，使用后台只读查询例外。
     stmt = select(NotifyTask).options(defer(NotifyTask.result))
     if status is not None:
         stmt = stmt.where(NotifyTask.status == status)
-    if before_id is not None:
-        stmt = stmt.where(NotifyTask.id < before_id)
-    return list(db.scalars(stmt.order_by(NotifyTask.id.desc()).limit(limit)))
+    rows, total = paginate(db, stmt.order_by(NotifyTask.id.desc()), page)
+    return [row for (row,) in rows], total
 
 
 # ---------- 用户 ----------
@@ -115,9 +114,8 @@ def list_users(
     phone_hash: str | None,
     status: str | None,
     source_app_id: int | None,
-    before_id: int | None,
-    limit: int,
-) -> list[User]:
+    page: OffsetPageParams,
+) -> tuple[list[User], int]:
     stmt = select(User)
     if user_id is not None:
         stmt = stmt.where(User.id == user_id)
@@ -127,9 +125,8 @@ def list_users(
         stmt = stmt.where(User.status == status)
     if source_app_id is not None:
         stmt = stmt.where(User.source_app_id == source_app_id)
-    if before_id is not None:
-        stmt = stmt.where(User.id < before_id)
-    return list(db.scalars(stmt.order_by(User.id.desc()).limit(limit)))
+    rows, total = paginate(db, stmt.order_by(User.id.desc()), page)
+    return [row for (row,) in rows], total
 
 
 def get_user(db: Session, user_id: int) -> User | None:
@@ -148,11 +145,10 @@ def user_sources(db: Session, user_ids: list[int]) -> dict[int, tuple[ClientApp 
     return {user_id: (app, channel_name) for user_id, app, channel_name in db.execute(stmt)}
 
 
-def list_client_apps(db: Session, *, before_id: int | None, limit: int) -> list[ClientApp]:
+def list_client_apps(db: Session, *, page: OffsetPageParams) -> tuple[list[ClientApp], int]:
     stmt = select(ClientApp)
-    if before_id is not None:
-        stmt = stmt.where(ClientApp.id < before_id)
-    return list(db.scalars(stmt.order_by(ClientApp.id.desc()).limit(limit)))
+    rows, total = paginate(db, stmt.order_by(ClientApp.id.desc()), page)
+    return [row for (row,) in rows], total
 
 
 def client_app_user_counts(db: Session, app_ids: list[int]) -> dict[int, int]:
@@ -209,9 +205,8 @@ def list_orders(
     user_id: int | None,
     created_from: datetime | None,
     created_to: datetime | None,
-    before_id: int | None,
-    limit: int,
-) -> list[Order]:
+    page: OffsetPageParams,
+) -> tuple[list[Order], int]:
     stmt = select(Order)
     if status is not None:
         stmt = stmt.where(Order.status == status)
@@ -223,9 +218,8 @@ def list_orders(
         stmt = stmt.where(Order.created_at >= created_from)
     if created_to is not None:
         stmt = stmt.where(Order.created_at < created_to)
-    if before_id is not None:
-        stmt = stmt.where(Order.id < before_id)
-    return list(db.scalars(stmt.order_by(Order.id.desc()).limit(limit)))
+    rows, total = paginate(db, stmt.order_by(Order.id.desc()), page)
+    return [row for (row,) in rows], total
 
 
 def get_order_by_no(db: Session, order_no: str) -> Order | None:
@@ -289,9 +283,8 @@ def list_specs(
     status: str | None,
     category: str | None,
     region_code: str | None,
-    before_id: int | None,
-    limit: int,
-) -> list[Spec]:
+    page: OffsetPageParams,
+) -> tuple[list[Spec], int]:
     stmt = select(Spec)
     if keyword:
         pattern = contains_pattern(keyword)
@@ -302,9 +295,8 @@ def list_specs(
         stmt = stmt.where(Spec.category == category)
     if region_code:
         stmt = stmt.where(Spec.region_code == region_code)
-    if before_id is not None:
-        stmt = stmt.where(Spec.id < before_id)
-    return list(db.scalars(stmt.order_by(Spec.id.desc()).limit(limit)))
+    rows, total = paginate(db, stmt.order_by(Spec.id.desc()), page)
+    return [row for (row,) in rows], total
 
 
 def get_spec_by_code(db: Session, code: str, *, for_update: bool = False) -> Spec | None:
@@ -356,9 +348,8 @@ def list_provider_specs(
     provider_code: str | None,
     keyword: str | None,
     is_enabled: bool | None,
-    before_id: int | None,
-    limit: int,
-) -> list[tuple[ProviderSpec, str, Spec]]:
+    page: OffsetPageParams,
+) -> tuple[list[tuple[ProviderSpec, str, Spec]], int]:
     """服务商规格映射，按 id 倒序；返回 (映射, 服务商编码, 规格)。"""
     stmt = (
         select(ProviderSpec, Provider.code, Spec)
@@ -378,9 +369,7 @@ def list_provider_specs(
         )
     if is_enabled is not None:
         stmt = stmt.where(ProviderSpec.is_enabled.is_(is_enabled))
-    if before_id is not None:
-        stmt = stmt.where(ProviderSpec.id < before_id)
-    return list(db.execute(stmt.order_by(ProviderSpec.id.desc()).limit(limit)).tuples())
+    return paginate(db, stmt.order_by(ProviderSpec.id.desc()), page)
 
 
 def list_route_rules(
@@ -388,9 +377,8 @@ def list_route_rules(
     *,
     provider_code: str | None,
     spec_code: str | None,
-    before_id: int | None,
-    limit: int,
-) -> list[tuple[RouteRule, str, Spec]]:
+    page: OffsetPageParams,
+) -> tuple[list[tuple[RouteRule, str, Spec]], int]:
     """路由规则，按 id 倒序；返回 (规则, 服务商编码, 规格)。"""
     stmt = (
         select(RouteRule, Provider.code, Spec)
@@ -401,9 +389,7 @@ def list_route_rules(
         stmt = stmt.where(Provider.code == provider_code)
     if spec_code:
         stmt = stmt.where(Spec.code == spec_code)
-    if before_id is not None:
-        stmt = stmt.where(RouteRule.id < before_id)
-    return list(db.execute(stmt.order_by(RouteRule.id.desc()).limit(limit)).tuples())
+    return paginate(db, stmt.order_by(RouteRule.id.desc()), page)
 
 
 def lock_provider_spec(db: Session, entry_id: int) -> ProviderSpec | None:
@@ -435,9 +421,8 @@ def list_audit_logs(
     admin_id: int | None,
     action: str | None,
     target_type: str | None,
-    before_id: int | None,
-    limit: int,
-) -> list[tuple[AuditLog, str | None]]:
+    page: OffsetPageParams,
+) -> tuple[list[tuple[AuditLog, str | None]], int]:
     stmt = select(AuditLog, AdminUser.username).outerjoin(AdminUser, AdminUser.id == AuditLog.admin_id)
     if admin_id is not None:
         stmt = stmt.where(AuditLog.admin_id == admin_id)
@@ -445,6 +430,4 @@ def list_audit_logs(
         stmt = stmt.where(AuditLog.action == action)
     if target_type is not None:
         stmt = stmt.where(AuditLog.target_type == target_type)
-    if before_id is not None:
-        stmt = stmt.where(AuditLog.id < before_id)
-    return [(a, u) for a, u in db.execute(stmt.order_by(AuditLog.id.desc()).limit(limit))]
+    return paginate(db, stmt.order_by(AuditLog.id.desc()), page)

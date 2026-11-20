@@ -3464,7 +3464,7 @@
           "后台"
         ],
         "summary": "用户列表",
-        "description": "按注册时间从新到旧列出用户，游标分页，条件之间是“并且”。权限点 user:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。包含首次注册应用和推广渠道。手机号只返回打码后的；按手机号筛选请调用 POST /api/v1/admin/users/search。",
+        "description": "按用户 ID 从大到小列出用户，页码分页，条件之间是“并且”。权限点 user:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。包含首次注册应用和推广渠道。手机号只返回打码后的；按手机号筛选请调用 POST /api/v1/admin/users/search。",
         "operationId": "admin_users_list",
         "security": [
           {
@@ -3540,42 +3540,41 @@
             "description": "按首次注册的应用记录 ID 筛选"
           },
           {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
-              "examples": [
-                "eyJpIjoxMDI0fQ"
-              ],
-              "title": "Cursor"
-            },
-            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
-          },
-          {
-            "name": "limit",
+            "name": "page",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
               "minimum": 1,
-              "description": "每页条数，1～100，默认 20",
+              "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表",
+              "examples": [
+                2
+              ],
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                10,
+                20,
+                50,
+                100
+              ],
+              "type": "integer",
+              "description": "每页条数，只能选 10、20、50 或 100，默认 20",
               "examples": [
                 20
               ],
               "default": 20,
-              "title": "Limit"
+              "title": "Page Size"
             },
-            "description": "每页条数，1～100，默认 20"
+            "description": "每页条数，只能选 10、20、50 或 100，默认 20"
           },
           {
             "name": "x-csrf-token",
@@ -3646,7 +3645,7 @@
           "后台"
         ],
         "summary": "按条件查询用户",
-        "description": "按注册时间从新到旧查询用户，游标分页，条件之间是“并且”。权限点 user:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。请求头需带登录时返回的 X-CSRF-Token。按手机号筛选时在请求体传完整手机号，服务端用哈希匹配，响应仅返回打码后的手机号。包含首次注册应用和推广渠道。",
+        "description": "按用户 ID 从大到小查询用户，页码分页，条件之间是“并且”。权限点 user:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。请求头需带登录时返回的 X-CSRF-Token。按手机号筛选时在请求体传完整手机号，服务端用哈希匹配，响应仅返回打码后的手机号。包含首次注册应用和推广渠道。",
         "operationId": "admin_users_search",
         "security": [
           {
@@ -3844,42 +3843,41 @@
         ],
         "parameters": [
           {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
-              "examples": [
-                "eyJpIjoxMDI0fQ"
-              ],
-              "title": "Cursor"
-            },
-            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
-          },
-          {
-            "name": "limit",
+            "name": "page",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
               "minimum": 1,
-              "description": "每页条数，1～100，默认 20",
+              "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表",
+              "examples": [
+                2
+              ],
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                10,
+                20,
+                50,
+                100
+              ],
+              "type": "integer",
+              "description": "每页条数，只能选 10、20、50 或 100，默认 20",
               "examples": [
                 20
               ],
               "default": 20,
-              "title": "Limit"
+              "title": "Page Size"
             },
-            "description": "每页条数，1～100，默认 20"
+            "description": "每页条数，只能选 10、20、50 或 100，默认 20"
           },
           {
             "name": "x-csrf-token",
@@ -4063,7 +4061,7 @@
           "后台"
         ],
         "summary": "照片列表",
-        "description": "按照片 ID 从新到旧游标分页，可组合筛选用户、照片状态、抠图精度和拍后检测等级。权限点 photo:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。缩略图链接有效期 10 分钟，缺少有效预览图时用原图。查询列表不写审计。",
+        "description": "按照片 ID 从新到旧页码分页，可组合筛选用户、照片状态、抠图精度和拍后检测等级。权限点 photo:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。缩略图链接有效期 10 分钟，缺少有效预览图时用原图。查询列表不写审计。",
         "operationId": "admin_photos_list",
         "security": [
           {
@@ -4174,42 +4172,41 @@
             "description": "ok = 合格；warn = 有调整建议；fail = 建议重拍"
           },
           {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
-              "examples": [
-                "eyJpIjoxMDI0fQ"
-              ],
-              "title": "Cursor"
-            },
-            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
-          },
-          {
-            "name": "limit",
+            "name": "page",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
               "minimum": 1,
-              "description": "每页条数，1～100，默认 20",
+              "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表",
+              "examples": [
+                2
+              ],
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                10,
+                20,
+                50,
+                100
+              ],
+              "type": "integer",
+              "description": "每页条数，只能选 10、20、50 或 100，默认 20",
               "examples": [
                 20
               ],
               "default": 20,
-              "title": "Limit"
+              "title": "Page Size"
             },
-            "description": "每页条数，1～100，默认 20"
+            "description": "每页条数，只能选 10、20、50 或 100，默认 20"
           },
           {
             "name": "x-csrf-token",
@@ -4383,7 +4380,7 @@
           "后台"
         ],
         "summary": "订单列表",
-        "description": "按下单时间从新到旧列出订单，游标分页，条件之间是“并且”。权限点 order:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "description": "按订单 ID 从大到小列出订单，页码分页，条件之间是“并且”。权限点 order:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
         "operationId": "admin_orders_list",
         "security": [
           {
@@ -4502,42 +4499,41 @@
             "description": "下单时间终点（不含），带时区的 ISO 8601"
           },
           {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
-              "examples": [
-                "eyJpIjoxMDI0fQ"
-              ],
-              "title": "Cursor"
-            },
-            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
-          },
-          {
-            "name": "limit",
+            "name": "page",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
               "minimum": 1,
-              "description": "每页条数，1～100，默认 20",
+              "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表",
+              "examples": [
+                2
+              ],
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                10,
+                20,
+                50,
+                100
+              ],
+              "type": "integer",
+              "description": "每页条数，只能选 10、20、50 或 100，默认 20",
               "examples": [
                 20
               ],
               "default": 20,
-              "title": "Limit"
+              "title": "Page Size"
             },
-            "description": "每页条数，1～100，默认 20"
+            "description": "每页条数，只能选 10、20、50 或 100，默认 20"
           },
           {
             "name": "x-csrf-token",
@@ -4840,7 +4836,7 @@
           "后台"
         ],
         "summary": "回执申请列表",
-        "description": "按创建时间从新到旧列出回执申请，游标分页，条件之间是“并且”。权限点 application:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "description": "按申请 ID 从大到小列出回执申请，页码分页，条件之间是“并且”。权限点 application:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
         "operationId": "admin_applications_list",
         "security": [
           {
@@ -4958,42 +4954,41 @@
             "description": "按人工核对标记筛选。true 仅查需人工核对，false 仅查无需人工核对，省略则全部"
           },
           {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
-              "examples": [
-                "eyJpIjoxMDI0fQ"
-              ],
-              "title": "Cursor"
-            },
-            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
-          },
-          {
-            "name": "limit",
+            "name": "page",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
               "minimum": 1,
-              "description": "每页条数，1～100，默认 20",
+              "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表",
+              "examples": [
+                2
+              ],
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                10,
+                20,
+                50,
+                100
+              ],
+              "type": "integer",
+              "description": "每页条数，只能选 10、20、50 或 100，默认 20",
               "examples": [
                 20
               ],
               "default": 20,
-              "title": "Limit"
+              "title": "Page Size"
             },
-            "description": "每页条数，1～100，默认 20"
+            "description": "每页条数，只能选 10、20、50 或 100，默认 20"
           },
           {
             "name": "x-csrf-token",
@@ -5684,7 +5679,7 @@
           "后台"
         ],
         "summary": "规格列表",
-        "description": "列出全部规格（含已下架），按创建时间从新到旧，游标分页，条件之间是“并且”。权限点 spec:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。可按名称、状态、分类和精确的地区码筛选。",
+        "description": "列出全部规格（含已下架），按规格 ID 从大到小，页码分页，条件之间是“并且”。权限点 spec:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。可按名称、状态、分类和精确的地区码筛选。",
         "operationId": "admin_specs_list",
         "security": [
           {
@@ -5789,42 +5784,41 @@
             "description": "按规格保存的地区码精确匹配"
           },
           {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
-              "examples": [
-                "eyJpIjoxMDI0fQ"
-              ],
-              "title": "Cursor"
-            },
-            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
-          },
-          {
-            "name": "limit",
+            "name": "page",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
               "minimum": 1,
-              "description": "每页条数，1～100，默认 20",
+              "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表",
+              "examples": [
+                2
+              ],
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                10,
+                20,
+                50,
+                100
+              ],
+              "type": "integer",
+              "description": "每页条数，只能选 10、20、50 或 100，默认 20",
               "examples": [
                 20
               ],
               "default": 20,
-              "title": "Limit"
+              "title": "Page Size"
             },
-            "description": "每页条数，1～100，默认 20"
+            "description": "每页条数，只能选 10、20、50 或 100，默认 20"
           },
           {
             "name": "x-csrf-token",
@@ -6511,7 +6505,7 @@
           "后台"
         ],
         "summary": "服务商规格列表",
-        "description": "分页列出服务商规格映射（哪家服务商能办哪个规格、对方规格 ID、成本），按创建时间从新到旧，条件之间是“并且”。权限点 provider:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。同步规格目录后新增的映射默认停用，可用 is_enabled=false 筛出来逐个配置成本后启用。",
+        "description": "分页列出服务商规格映射（哪家服务商能办哪个规格、对方规格 ID、成本），按映射 ID 从大到小，条件之间是“并且”。权限点 provider:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。同步规格目录后新增的映射默认停用，可用 is_enabled=false 筛出来逐个配置成本后启用。",
         "operationId": "admin_provider_specs_list",
         "security": [
           {
@@ -6585,42 +6579,41 @@
             "description": "按是否启用筛选：true = 已启用；false = 已停用；不传 = 全部"
           },
           {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
-              "examples": [
-                "eyJpIjoxMDI0fQ"
-              ],
-              "title": "Cursor"
-            },
-            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
-          },
-          {
-            "name": "limit",
+            "name": "page",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
               "minimum": 1,
-              "description": "每页条数，1～100，默认 20",
+              "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表",
+              "examples": [
+                2
+              ],
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                10,
+                20,
+                50,
+                100
+              ],
+              "type": "integer",
+              "description": "每页条数，只能选 10、20、50 或 100，默认 20",
               "examples": [
                 20
               ],
               "default": 20,
-              "title": "Limit"
+              "title": "Page Size"
             },
-            "description": "每页条数，1～100，默认 20"
+            "description": "每页条数，只能选 10、20、50 或 100，默认 20"
           },
           {
             "name": "x-csrf-token",
@@ -7020,7 +7013,7 @@
           "后台"
         ],
         "summary": "路由规则列表",
-        "description": "分页列出路由规则（某规格、某地区下的候选服务商及优先级），按创建时间从新到旧，条件之间是“并且”。权限点 provider:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "description": "分页列出路由规则（某规格、某地区下的候选服务商及优先级），按规则 ID 从大到小，条件之间是“并且”。权限点 provider:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
         "operationId": "admin_route_rules_list",
         "security": [
           {
@@ -7073,42 +7066,41 @@
             "description": "按规格编码精确筛选"
           },
           {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
-              "examples": [
-                "eyJpIjoxMDI0fQ"
-              ],
-              "title": "Cursor"
-            },
-            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
-          },
-          {
-            "name": "limit",
+            "name": "page",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
               "minimum": 1,
-              "description": "每页条数，1～100，默认 20",
+              "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表",
+              "examples": [
+                2
+              ],
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                10,
+                20,
+                50,
+                100
+              ],
+              "type": "integer",
+              "description": "每页条数，只能选 10、20、50 或 100，默认 20",
               "examples": [
                 20
               ],
               "default": 20,
-              "title": "Limit"
+              "title": "Page Size"
             },
-            "description": "每页条数，1～100，默认 20"
+            "description": "每页条数，只能选 10、20、50 或 100，默认 20"
           },
           {
             "name": "x-csrf-token",
@@ -7585,7 +7577,7 @@
           "后台"
         ],
         "summary": "通知任务列表",
-        "description": "按通知任务 ID 从大到小查询，可按状态筛选和游标翻页。返回任务状态、渠道、时间及关联记录 ID。权限点 notify:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "description": "按通知任务 ID 从大到小查询，可按状态筛选和按页码翻页。返回任务状态、渠道、时间及关联记录 ID。权限点 notify:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
         "operationId": "admin_notify_tasks_list",
         "security": [
           {
@@ -7622,42 +7614,41 @@
             "description": "按状态筛选。pending = 待发送；sent = 已发送；failed = 发送失败；skipped = 跳过；cancelled = 已取消"
           },
           {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
-              "examples": [
-                "eyJpIjoxMDI0fQ"
-              ],
-              "title": "Cursor"
-            },
-            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
-          },
-          {
-            "name": "limit",
+            "name": "page",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
               "minimum": 1,
-              "description": "每页条数，1～100，默认 20",
+              "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表",
+              "examples": [
+                2
+              ],
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                10,
+                20,
+                50,
+                100
+              ],
+              "type": "integer",
+              "description": "每页条数，只能选 10、20、50 或 100，默认 20",
               "examples": [
                 20
               ],
               "default": 20,
-              "title": "Limit"
+              "title": "Page Size"
             },
-            "description": "每页条数，1～100，默认 20"
+            "description": "每页条数，只能选 10、20、50 或 100，默认 20"
           },
           {
             "name": "x-csrf-token",
@@ -7737,42 +7728,41 @@
         ],
         "parameters": [
           {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
-              "examples": [
-                "eyJpIjoxMDI0fQ"
-              ],
-              "title": "Cursor"
-            },
-            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
-          },
-          {
-            "name": "limit",
+            "name": "page",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
               "minimum": 1,
-              "description": "每页条数，1～100，默认 20",
+              "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表",
+              "examples": [
+                2
+              ],
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                10,
+                20,
+                50,
+                100
+              ],
+              "type": "integer",
+              "description": "每页条数，只能选 10、20、50 或 100，默认 20",
               "examples": [
                 20
               ],
               "default": 20,
-              "title": "Limit"
+              "title": "Page Size"
             },
-            "description": "每页条数，1～100，默认 20"
+            "description": "每页条数，只能选 10、20、50 或 100，默认 20"
           },
           {
             "name": "x-csrf-token",
@@ -8277,7 +8267,7 @@
           "后台"
         ],
         "summary": "审计日志",
-        "description": "按时间从新到旧列出后台操作记录，游标分页。权限点 audit:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "description": "按日志 ID 从大到小列出后台操作记录，页码分页。权限点 audit:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
         "operationId": "admin_audit_logs",
         "security": [
           {
@@ -8352,42 +8342,41 @@
             "description": "按操作对象类型筛选，如 order、plan"
           },
           {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
-              "examples": [
-                "eyJpIjoxMDI0fQ"
-              ],
-              "title": "Cursor"
-            },
-            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
-          },
-          {
-            "name": "limit",
+            "name": "page",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
               "minimum": 1,
-              "description": "每页条数，1～100，默认 20",
+              "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表",
+              "examples": [
+                2
+              ],
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                10,
+                20,
+                50,
+                100
+              ],
+              "type": "integer",
+              "description": "每页条数，只能选 10、20、50 或 100，默认 20",
               "examples": [
                 20
               ],
               "default": 20,
-              "title": "Limit"
+              "title": "Page Size"
             },
-            "description": "每页条数，1～100，默认 20"
+            "description": "每页条数，只能选 10、20、50 或 100，默认 20"
           },
           {
             "name": "x-csrf-token",
@@ -8626,27 +8615,50 @@
             },
             "type": "array",
             "title": "Items",
-            "description": "本页数据，按创建时间从新到旧"
+            "description": "本页数据，按记录 ID 从大到小。超出最后一页时返回空列表"
           },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total",
+            "description": "符合筛选条件的记录总条数",
+            "examples": [
+              42
+            ]
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page",
+            "description": "请求的页码，从 1 开始",
+            "examples": [
+              2
+            ]
+          },
+          "page_size": {
+            "type": "integer",
+            "enum": [
+              10,
+              20,
+              50,
+              100
             ],
-            "title": "Next Cursor",
-            "description": "下一页游标；为空表示没有更多了"
+            "title": "Page Size",
+            "description": "请求的每页条数，可选 10、20、50 或 100",
+            "examples": [
+              20
+            ]
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "total",
+          "page",
+          "page_size"
         ],
         "title": "AdminAccountPage",
-        "description": "分页列表：用于账号管理的管理员资料。"
+        "description": "页码分页列表：用于账号管理的管理员资料。"
       },
       "AdminAccountRoleIn": {
         "properties": {
@@ -9073,27 +9085,50 @@
             },
             "type": "array",
             "title": "Items",
-            "description": "本页数据，按创建时间从新到旧"
+            "description": "本页数据，按记录 ID 从大到小。超出最后一页时返回空列表"
           },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total",
+            "description": "符合筛选条件的记录总条数",
+            "examples": [
+              42
+            ]
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page",
+            "description": "请求的页码，从 1 开始",
+            "examples": [
+              2
+            ]
+          },
+          "page_size": {
+            "type": "integer",
+            "enum": [
+              10,
+              20,
+              50,
+              100
             ],
-            "title": "Next Cursor",
-            "description": "下一页游标；为空表示没有更多了"
+            "title": "Page Size",
+            "description": "请求的每页条数，可选 10、20、50 或 100",
+            "examples": [
+              20
+            ]
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "total",
+          "page",
+          "page_size"
         ],
         "title": "AdminApplicationPage",
-        "description": "分页列表：回执申请摘要（后台列表用）。"
+        "description": "页码分页列表：回执申请摘要（后台列表用）。"
       },
       "AdminAttemptOut": {
         "properties": {
@@ -9351,27 +9386,50 @@
             },
             "type": "array",
             "title": "Items",
-            "description": "本页数据，按创建时间从新到旧"
+            "description": "本页数据，按记录 ID 从大到小。超出最后一页时返回空列表"
           },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total",
+            "description": "符合筛选条件的记录总条数",
+            "examples": [
+              42
+            ]
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page",
+            "description": "请求的页码，从 1 开始",
+            "examples": [
+              2
+            ]
+          },
+          "page_size": {
+            "type": "integer",
+            "enum": [
+              10,
+              20,
+              50,
+              100
             ],
-            "title": "Next Cursor",
-            "description": "下一页游标；为空表示没有更多了"
+            "title": "Page Size",
+            "description": "请求的每页条数，可选 10、20、50 或 100",
+            "examples": [
+              20
+            ]
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "total",
+          "page",
+          "page_size"
         ],
         "title": "AdminAuditLogPage",
-        "description": "分页列表：一条后台操作审计日志。"
+        "description": "页码分页列表：一条后台操作审计日志。"
       },
       "AdminBriefOut": {
         "properties": {
@@ -9548,27 +9606,50 @@
             },
             "type": "array",
             "title": "Items",
-            "description": "本页数据，按创建时间从新到旧"
+            "description": "本页数据，按记录 ID 从大到小。超出最后一页时返回空列表"
           },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total",
+            "description": "符合筛选条件的记录总条数",
+            "examples": [
+              42
+            ]
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page",
+            "description": "请求的页码，从 1 开始",
+            "examples": [
+              2
+            ]
+          },
+          "page_size": {
+            "type": "integer",
+            "enum": [
+              10,
+              20,
+              50,
+              100
             ],
-            "title": "Next Cursor",
-            "description": "下一页游标；为空表示没有更多了"
+            "title": "Page Size",
+            "description": "请求的每页条数，可选 10、20、50 或 100",
+            "examples": [
+              20
+            ]
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "total",
+          "page",
+          "page_size"
         ],
         "title": "AdminClientAppPage",
-        "description": "分页列表：应用配置及首次注册用户数。"
+        "description": "页码分页列表：应用配置及首次注册用户数。"
       },
       "AdminClientAppUpdateIn": {
         "properties": {
@@ -9936,27 +10017,50 @@
             },
             "type": "array",
             "title": "Items",
-            "description": "本页数据，按创建时间从新到旧"
+            "description": "本页数据，按记录 ID 从大到小。超出最后一页时返回空列表"
           },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total",
+            "description": "符合筛选条件的记录总条数",
+            "examples": [
+              42
+            ]
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page",
+            "description": "请求的页码，从 1 开始",
+            "examples": [
+              2
+            ]
+          },
+          "page_size": {
+            "type": "integer",
+            "enum": [
+              10,
+              20,
+              50,
+              100
             ],
-            "title": "Next Cursor",
-            "description": "下一页游标；为空表示没有更多了"
+            "title": "Page Size",
+            "description": "请求的每页条数，可选 10、20、50 或 100",
+            "examples": [
+              20
+            ]
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "total",
+          "page",
+          "page_size"
         ],
         "title": "AdminNotifyTaskPage",
-        "description": "分页列表：通知任务的状态信息。"
+        "description": "页码分页列表：通知任务的状态信息。"
       },
       "AdminOrderDetail": {
         "properties": {
@@ -10196,27 +10300,50 @@
             },
             "type": "array",
             "title": "Items",
-            "description": "本页数据，按创建时间从新到旧"
+            "description": "本页数据，按记录 ID 从大到小。超出最后一页时返回空列表"
           },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total",
+            "description": "符合筛选条件的记录总条数",
+            "examples": [
+              42
+            ]
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page",
+            "description": "请求的页码，从 1 开始",
+            "examples": [
+              2
+            ]
+          },
+          "page_size": {
+            "type": "integer",
+            "enum": [
+              10,
+              20,
+              50,
+              100
             ],
-            "title": "Next Cursor",
-            "description": "下一页游标；为空表示没有更多了"
+            "title": "Page Size",
+            "description": "请求的每页条数，可选 10、20、50 或 100",
+            "examples": [
+              20
+            ]
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "total",
+          "page",
+          "page_size"
         ],
         "title": "AdminOrderPage",
-        "description": "分页列表：订单摘要（后台列表用）。"
+        "description": "页码分页列表：订单摘要（后台列表用）。"
       },
       "AdminPasswordResetOut": {
         "properties": {
@@ -10682,27 +10809,50 @@
             },
             "type": "array",
             "title": "Items",
-            "description": "本页数据，按创建时间从新到旧"
+            "description": "本页数据，按记录 ID 从大到小。超出最后一页时返回空列表"
           },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total",
+            "description": "符合筛选条件的记录总条数",
+            "examples": [
+              42
+            ]
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page",
+            "description": "请求的页码，从 1 开始",
+            "examples": [
+              2
+            ]
+          },
+          "page_size": {
+            "type": "integer",
+            "enum": [
+              10,
+              20,
+              50,
+              100
             ],
-            "title": "Next Cursor",
-            "description": "下一页游标；为空表示没有更多了"
+            "title": "Page Size",
+            "description": "请求的每页条数，可选 10、20、50 或 100",
+            "examples": [
+              20
+            ]
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "total",
+          "page",
+          "page_size"
         ],
         "title": "AdminPhotoPage",
-        "description": "分页列表：后台照片摘要及用于网格展示的临时图片链接。"
+        "description": "页码分页列表：后台照片摘要及用于网格展示的临时图片链接。"
       },
       "AdminPhotoRenderOut": {
         "properties": {
@@ -11489,27 +11639,50 @@
             },
             "type": "array",
             "title": "Items",
-            "description": "本页数据，按创建时间从新到旧"
+            "description": "本页数据，按记录 ID 从大到小。超出最后一页时返回空列表"
           },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total",
+            "description": "符合筛选条件的记录总条数",
+            "examples": [
+              42
+            ]
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page",
+            "description": "请求的页码，从 1 开始",
+            "examples": [
+              2
+            ]
+          },
+          "page_size": {
+            "type": "integer",
+            "enum": [
+              10,
+              20,
+              50,
+              100
             ],
-            "title": "Next Cursor",
-            "description": "下一页游标；为空表示没有更多了"
+            "title": "Page Size",
+            "description": "请求的每页条数，可选 10、20、50 或 100",
+            "examples": [
+              20
+            ]
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "total",
+          "page",
+          "page_size"
         ],
         "title": "AdminProviderSpecPage",
-        "description": "分页列表：服务商能办理的一个规格（覆盖矩阵的一行）。"
+        "description": "页码分页列表：服务商能办理的一个规格（覆盖矩阵的一行）。"
       },
       "AdminProviderSpecUpdateIn": {
         "properties": {
@@ -12037,27 +12210,50 @@
             },
             "type": "array",
             "title": "Items",
-            "description": "本页数据，按创建时间从新到旧"
+            "description": "本页数据，按记录 ID 从大到小。超出最后一页时返回空列表"
           },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total",
+            "description": "符合筛选条件的记录总条数",
+            "examples": [
+              42
+            ]
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page",
+            "description": "请求的页码，从 1 开始",
+            "examples": [
+              2
+            ]
+          },
+          "page_size": {
+            "type": "integer",
+            "enum": [
+              10,
+              20,
+              50,
+              100
             ],
-            "title": "Next Cursor",
-            "description": "下一页游标；为空表示没有更多了"
+            "title": "Page Size",
+            "description": "请求的每页条数，可选 10、20、50 或 100",
+            "examples": [
+              20
+            ]
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "total",
+          "page",
+          "page_size"
         ],
         "title": "AdminRouteRulePage",
-        "description": "分页列表：路由规则的一行：某规格（可限地区）下的一个候选服务商。"
+        "description": "页码分页列表：路由规则的一行：某规格（可限地区）下的一个候选服务商。"
       },
       "AdminRouteRuleUpdateIn": {
         "properties": {
@@ -12685,27 +12881,50 @@
             },
             "type": "array",
             "title": "Items",
-            "description": "本页数据，按创建时间从新到旧（新同步进来的规格排在最前）"
+            "description": "本页数据，按规格 ID 从大到小（新同步进来的规格排在最前）。超出最后一页时返回空列表"
           },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total",
+            "description": "符合筛选条件的记录总条数",
+            "examples": [
+              42
+            ]
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page",
+            "description": "请求的页码，从 1 开始",
+            "examples": [
+              2
+            ]
+          },
+          "page_size": {
+            "type": "integer",
+            "enum": [
+              10,
+              20,
+              50,
+              100
             ],
-            "title": "Next Cursor",
-            "description": "下一页游标；为空表示没有更多了"
+            "title": "Page Size",
+            "description": "请求的每页条数，可选 10、20、50 或 100",
+            "examples": [
+              20
+            ]
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "total",
+          "page",
+          "page_size"
         ],
         "title": "AdminSpecPage",
-        "description": "分页列表：规格（含已下架）。"
+        "description": "页码分页列表：规格（含已下架）。"
       },
       "AdminSpecRegionOut": {
         "properties": {
@@ -13461,51 +13680,73 @@
             },
             "type": "array",
             "title": "Items",
-            "description": "本页数据，按创建时间从新到旧"
+            "description": "本页数据，按记录 ID 从大到小。超出最后一页时返回空列表"
           },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total",
+            "description": "符合筛选条件的记录总条数",
+            "examples": [
+              42
+            ]
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page",
+            "description": "请求的页码，从 1 开始",
+            "examples": [
+              2
+            ]
+          },
+          "page_size": {
+            "type": "integer",
+            "enum": [
+              10,
+              20,
+              50,
+              100
             ],
-            "title": "Next Cursor",
-            "description": "下一页游标；为空表示没有更多了"
+            "title": "Page Size",
+            "description": "请求的每页条数，可选 10、20、50 或 100",
+            "examples": [
+              20
+            ]
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "total",
+          "page",
+          "page_size"
         ],
         "title": "AdminUserPage",
-        "description": "分页列表：用户摘要（后台列表用）。手机号只返回打码后的。"
+        "description": "页码分页列表：用户摘要（后台列表用）。手机号只返回打码后的。"
       },
       "AdminUserSearchIn": {
         "properties": {
-          "cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cursor",
-            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page",
+            "description": "页码从 1 开始，默认 1。超过最后一页时返回空列表",
+            "default": 1,
             "examples": [
-              "eyJpIjoxMDI0fQ"
+              2
             ]
           },
-          "limit": {
+          "page_size": {
             "type": "integer",
-            "maximum": 100.0,
-            "minimum": 1.0,
-            "title": "Limit",
-            "description": "每页条数，1～100，默认 20",
+            "enum": [
+              10,
+              20,
+              50,
+              100
+            ],
+            "title": "Page Size",
+            "description": "每页条数，只能选 10、20、50 或 100，默认 20",
             "default": 20,
             "examples": [
               20
