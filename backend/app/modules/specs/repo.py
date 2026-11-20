@@ -76,6 +76,18 @@ def catalog_specs(db: Session) -> list[Spec]:
     return list(db.scalars(select(Spec).order_by(Spec.id)))
 
 
+def upstream_siblings(db: Session, provider: Provider) -> list[Provider]:
+    """同一上游分组里的其他服务商（编号体系相同）。"""
+    if not provider.upstream_group:
+        return []
+    stmt = (
+        select(Provider)
+        .where(Provider.upstream_group == provider.upstream_group, Provider.id != provider.id)
+        .order_by(Provider.id)
+    )
+    return list(db.scalars(stmt))
+
+
 def upstream_mappings(db: Session, provider: Provider) -> list[ProviderSpec]:
     stmt = (
         select(ProviderSpec)

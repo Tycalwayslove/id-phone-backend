@@ -210,3 +210,79 @@ def test_sync_catalog_logs_one_unknown_color_count(monkeypatch, caplog):
 
     assert list(service._load_catalog("zheying", "zheying")) == ["1001", "1002"]
     assert [record.getMessage() for record in caplog.records] == ["回执服务商目录已跳过 4 个未知底色"]
+
+
+def test_sync_result_does_not_depend_on_provider_order(db: Session, monkeypatch):
+    """黔微云列表不带回执标记和办理字段；先同步哪家，最终结果都必须一样。"""
+    fake = FakeProvider("zheying")
+    catalogs: dict[str, list] = {}
+    monkeypatch.setattr(FakeProvider, "list_items", lambda self: catalogs[self.code])
+
+    def run(tag: str, order: tuple[str, str]) -> dict:
+        zy = Provider(code=f"zy_{tag}", name="鹧应", adapter="zheying", upstream_group=f"g_{tag}")
+        qwy = Provider(code=f"qwy_{tag}", name="黔微云", adapter="qianweiyun", upstream_group=f"g_{tag}")
+        db.add_all([zy, qwy])
+        db.flush()
+        # 名称带 tag，避免两轮之间按名称和尺寸合并
+        receipt = replace(fake.get_item("713"), name=f"广州市身份证{tag}")
+        normal = replace(fake.get_item("1001"), name=f"一寸{tag}")
+        catalogs[zy.code] = [receipt, normal]
+        catalogs[qwy.code] = [
+            replace(item, is_receipt=None, receipt_fields=[], provider_category=None)
+            for item in (receipt, normal)
+        ]
+        roles = {"zy": zy, "qwy": qwy}
+        for role in order:
+            service.sync_provider_specs(db, roles[role].code)
+
+        snapshot = {}
+        for item_id in ("713", "1001"):
+            spec = db.scalar(select(Spec).where(Spec.code == f"cat_g_{tag}_{item_id}"))
+            assert spec is not None, item_id
+            mappings = {
+                row.provider_id: row.param_mapping
+                for row in db.scalars(select(ProviderSpec).where(ProviderSpec.spec_id == spec.id))
+            }
+            routes = {
+                rule.provider_id: rule.is_enabled
+                for rule in db.scalars(select(RouteRule).where(RouteRule.spec_id == spec.id))
+            }
+            snapshot[item_id] = {
+                "category": spec.category,
+                "status": spec.status,
+                "region": spec.region_code,
+                "form": [field["key"] for field in spec.form_schema],
+                "mapping": {role: mappings.get(p.id) for role, p in roles.items()},
+                "route": {role: routes.get(p.id) for role, p in roles.items()},
+            }
+        return snapshot
+
+    zheying_first = run("a", ("zy", "qwy"))
+    qianweiyun_first = run("b", ("qwy", "zy"))
+    assert zheying_first == qianweiyun_first
+
+    receipt = zheying_first["713"]
+    assert (receipt["category"], receipt["status"], receipt["region"]) == ("receipt", "active", "440100")
+    assert receipt["form"] == ["mobile", "city", "name", "idcard"]
+    assert receipt["mapping"]["zy"] == receipt["mapping"]["qwy"] != {}
+    assert receipt["route"] == {"zy": True, "qwy": True}
+    normal = zheying_first["1001"]
+    assert normal["category"] == "normal" and normal["route"] == {"zy": False, "qwy": False}
+
+
+def test_sync_continues_when_sibling_catalog_fails(db: Session, monkeypatch, caplog):
+    zy = Provider(code="zy_down", name="鹧应", adapter="zheying", upstream_group="g_down")
+    qwy = Provider(code="qwy_down", name="黔微云", adapter="qianweiyun", upstream_group="g_down")
+    db.add_all([zy, qwy])
+    db.flush()
+    item = replace(FakeProvider("zheying").get_item("713"), is_receipt=None, receipt_fields=[])
+
+    def list_items(self):
+        if self.code == zy.code:
+            raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, "down")
+        return [item]
+
+    monkeypatch.setattr(FakeProvider, "list_items", list_items)
+    result = service.sync_provider_specs(db, qwy.code)
+    assert result.created == 1
+    assert "zy_down" in caplog.text

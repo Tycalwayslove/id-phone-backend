@@ -3,6 +3,7 @@
 import logging
 import re
 from collections import defaultdict
+from dataclasses import replace
 
 from sqlalchemy.orm import Session
 
@@ -12,7 +13,7 @@ from app.core.regions import province_of, region_name, resolve_region
 from app.core.utils import utcnow
 from app.integrations.receipt_providers import open_catalog_provider
 from app.integrations.receipt_providers.base import ProviderItem
-from app.models import ProviderSpec, Spec
+from app.models import Provider, ProviderSpec, Spec
 from app.modules.specs import repo
 from app.modules.specs.schemas import (
     ProviderSyncChange,
@@ -132,6 +133,34 @@ def _load_catalog(adapter: str, provider_code: str) -> dict[str, ProviderItem]:
     raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, "读取回执服务商规格目录超时")
 
 
+def _fill_receipt_metadata(db: Session, provider: Provider, catalog: dict[str, ProviderItem]) -> None:
+    """有的服务商列表不带回执标记和办理字段（如黔微云）。同上游编号一致，从兄弟服务商的目录补齐，
+    这样先同步哪家结果都一样。兄弟目录读不到就照常继续。"""
+    missing = {item_id for item_id, item in catalog.items() if item.is_receipt is None}
+    if not missing:
+        return
+    for sibling in repo.upstream_siblings(db, provider):
+        try:
+            sibling_catalog = _load_catalog(sibling.adapter, sibling.code)
+        except AppError:
+            log.warning("同上游服务商 %s 目录读取失败，%s 的回执标记无法补齐", sibling.code, provider.code)
+            continue
+        for item_id in list(missing):
+            source = sibling_catalog.get(item_id)
+            if source is None or source.is_receipt is None:
+                continue
+            item = catalog[item_id]
+            catalog[item_id] = replace(
+                item,
+                is_receipt=source.is_receipt,
+                receipt_fields=item.receipt_fields or source.receipt_fields,
+                provider_category=item.provider_category or source.provider_category,
+            )
+            missing.discard(item_id)
+        if not missing:
+            return
+
+
 def _photo_fields(item: ProviderItem) -> dict:
     return {
         "width_px": item.width_px,
@@ -216,6 +245,7 @@ def sync_provider_specs(db: Session, provider_code: str, *, auto_publish: bool =
     if provider is None:
         raise AppError(ErrorCode.NOT_FOUND, "服务商不存在")
     catalog = _load_catalog(provider.adapter, provider_code)
+    _fill_receipt_metadata(db, provider, catalog)
     repo.lock_catalog_merge(db)
     mappings = repo.lock_provider_specs(db, provider.id)
     specs = repo.lock_specs(db, {row.spec_id for row in mappings})
