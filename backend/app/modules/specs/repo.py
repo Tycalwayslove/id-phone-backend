@@ -44,6 +44,16 @@ def get_active_by_code(db: Session, code: str) -> Spec | None:
     return db.scalar(select(Spec).where(Spec.code == code, Spec.status == "active"))
 
 
+def get_default_preview_spec(db: Session) -> Spec | None:
+    stmt = (
+        select(Spec)
+        .where(Spec.status == "active", Spec.category == "normal")
+        .order_by((Spec.name == "一寸").desc(), Spec.sort, Spec.id)
+        .limit(1)
+    )
+    return db.scalar(stmt)
+
+
 def receipt_spec_ids(db: Session, spec_ids: list[int]) -> set[int]:
     """一次查询取出具有启用服务商、规格映射和路由规则的规格。"""
     if not spec_ids:

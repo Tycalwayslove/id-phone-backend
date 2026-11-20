@@ -1,5 +1,7 @@
+import pytest
 from sqlalchemy import update
 
+from app.core.config import settings
 from app.models import ProviderSpec, RouteRule
 from app.modules.specs import repo
 from tests.factories import make_provider_for, make_spec
@@ -62,6 +64,58 @@ def test_detail_and_supports_receipt(client, db):
 
     make_provider_for(db, spec)
     assert client.get("/api/v1/specs/det_a").json()["supports_receipt"] is True
+
+
+def test_preview_prefers_configured_active_spec(client, db, monkeypatch):
+    configured = make_spec(db, "preview_configured", category="exam")
+    make_spec(db, "preview_one_inch", category="normal").name = "一寸"
+    db.flush()
+    monkeypatch.setattr(settings, "preview_spec_code", configured.code)
+
+    response = client.get("/api/v1/specs/preview")
+    assert response.status_code == 200
+    assert response.json() == client.get(f"/api/v1/specs/{configured.code}").json()
+
+
+@pytest.mark.parametrize("configured_code", ["", "preview_missing", "preview_offline"])
+def test_preview_falls_back_to_exact_one_inch(client, db, monkeypatch, configured_code):
+    offline = make_spec(db, "preview_offline", category="normal")
+    offline.name, offline.status = "一寸", "inactive"
+    make_spec(db, "preview_exam", category="exam").name = "一寸"
+    make_spec(db, "preview_similar", category="normal").name = "小一寸"
+    one_inch = make_spec(db, "preview_one_inch", category="normal")
+    one_inch.name, one_inch.sort = "一寸", 10
+    db.flush()
+    monkeypatch.setattr(settings, "preview_spec_code", configured_code)
+
+    response = client.get("/api/v1/specs/preview")
+    assert response.status_code == 200
+    assert response.json()["code"] == one_inch.code
+
+
+def test_preview_falls_back_to_first_active_normal(client, db, monkeypatch):
+    make_spec(db, "preview_later", category="normal").sort = 5
+    make_spec(db, "preview_offline", category="normal").status = "inactive"
+    make_spec(db, "preview_receipt", category="receipt")
+    first = make_spec(db, "preview_first", category="normal")
+    make_spec(db, "preview_tied", category="normal")
+    db.flush()
+    monkeypatch.setattr(settings, "preview_spec_code", "preview_missing")
+
+    response = client.get("/api/v1/specs/preview")
+    assert response.status_code == 200
+    assert response.json()["code"] == first.code
+
+
+def test_preview_not_found(client, db, monkeypatch):
+    make_spec(db, "preview_offline", category="normal").status = "inactive"
+    make_spec(db, "preview_receipt", category="receipt")
+    db.flush()
+    monkeypatch.setattr(settings, "preview_spec_code", "preview_offline")
+
+    response = client.get("/api/v1/specs/preview")
+    assert response.status_code == 404
+    assert response.json()["code"] == "SPEC_NOT_FOUND"
 
 
 def test_list_checks_receipt_support_in_one_batch(client, db, monkeypatch):

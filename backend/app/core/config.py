@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     # 抠图与美颜：fake 时直接用原图
     matting_mode: Literal["fake", "zheying"] = "fake"
     matting_timeout_seconds: float = 5
+    preview_spec_code: str = ""
 
     # 定时任务 worker（python -m app.workers.runner）每轮间隔
     worker_interval_seconds: int = 60
