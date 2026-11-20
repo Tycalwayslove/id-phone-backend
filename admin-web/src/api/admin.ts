@@ -7,6 +7,9 @@ export type OrderFilters = NonNullable<operations['admin_orders_list']['paramete
 export type ReceiptFilters = NonNullable<operations['admin_applications_list']['parameters']['query']>
 export type AuditFilters = NonNullable<operations['admin_audit_logs']['parameters']['query']>
 export type NotifyFilters = NonNullable<operations['admin_notify_tasks_list']['parameters']['query']>
+export type SpecFilters = NonNullable<operations['admin_specs_list']['parameters']['query']>
+export type ProviderSpecFilters = NonNullable<operations['admin_provider_specs_list']['parameters']['query']>
+export type RouteRuleFilters = NonNullable<operations['admin_route_rules_list']['parameters']['query']>
 
 export const adminApi = {
   login: async (body: Schema['AdminLoginIn']) =>
@@ -48,7 +51,7 @@ export const adminApi = {
   updatePlan: async (code: string, body: Schema['AdminPlanUpdateIn']) =>
     result(await client.PATCH('/api/v1/admin/plans/{code}', { params: { path: { code } }, body })),
 
-  specs: async (query: { cursor: string | null }, signal: AbortSignal) =>
+  specs: async (query: SpecFilters, signal: AbortSignal) =>
     result(await client.GET('/api/v1/admin/specs', { params: { query }, signal })),
   createSpec: async (body: Schema['AdminSpecCreateIn']) =>
     result(await client.POST('/api/v1/admin/specs', { body })),
@@ -61,6 +64,10 @@ export const adminApi = {
     result(await client.PATCH('/api/v1/admin/providers/{code}', { params: { path: { code } }, body })),
   syncProviderSpecs: async (code: string) =>
     result(await client.POST('/api/v1/admin/providers/{code}/sync-specs', { params: { path: { code } } })),
+  providerSpecs: async (query: ProviderSpecFilters, signal: AbortSignal) =>
+    result(await client.GET('/api/v1/admin/provider-specs', { params: { query }, signal })),
+  routeRules: async (query: RouteRuleFilters, signal: AbortSignal) =>
+    result(await client.GET('/api/v1/admin/route-rules', { params: { query }, signal })),
   createProviderSpec: async (body: Schema['AdminProviderSpecCreateIn']) =>
     result(await client.POST('/api/v1/admin/provider-specs', { body })),
   updateProviderSpec: async (entry_id: number, body: Schema['AdminProviderSpecUpdateIn']) =>

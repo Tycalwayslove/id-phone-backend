@@ -4,8 +4,9 @@ from typing import Annotated
 from fastapi import APIRouter, Cookie, Depends, Path, Query, Request, Response
 
 from app.core.config import settings
-from app.core.deps import DB, Admin, CurrentAdmin, Page, PageParams, require
+from app.core.deps import DB, Admin, CurrentAdmin, Page, require
 from app.core.errors import ErrorCode, errors_doc
+from app.core.pagination import PageParams
 from app.core.schemas import OkResponse
 from app.modules.admin import service
 from app.modules.admin.schemas import (
@@ -31,12 +32,14 @@ from app.modules.admin.schemas import (
     AdminProviderOut,
     AdminProviderSpecCreateIn,
     AdminProviderSpecOut,
+    AdminProviderSpecPage,
     AdminProviderSpecUpdateIn,
     AdminProviderUpdateIn,
     AdminRefundIn,
     AdminRefundResultOut,
     AdminRouteRuleCreateIn,
     AdminRouteRuleOut,
+    AdminRouteRulePage,
     AdminRouteRuleUpdateIn,
     AdminSpecCreateIn,
     AdminSpecOut,
@@ -47,6 +50,8 @@ from app.modules.admin.schemas import (
     AdminUserPage,
     AdminUserSearchIn,
     NotifyStatus,
+    SpecCategory,
+    SpecStatus,
 )
 from app.modules.specs.schemas import ProviderSyncResult
 
@@ -215,7 +220,7 @@ def search_users(body: AdminUserSearchIn, _: UserRead, db: DB):
         db,
         user_id=body.user_id,
         status=body.status,
-        page=PageParams(body.cursor, body.limit),
+        page=PageParams.of(body),
         phone=body.phone,
     )
 
@@ -474,13 +479,42 @@ def update_plan(code: PlanCodePath, body: AdminPlanUpdateIn, admin: PlanWrite, d
     "/specs",
     operation_id="admin_specs_list",
     summary="规格列表",
-    description=f"列出全部规格（含已下架），按创建时间从新到旧，游标分页。权限点 spec:read。{_LOGIN_NOTE}",
+    description=(
+        f"列出全部规格（含已下架），按创建时间从新到旧，游标分页，条件之间是“并且”。权限点 spec:read。{_LOGIN_NOTE}"
+        "从服务商同步进来的新规格默认下架，可用 status=inactive 筛出来逐个审核后上架。"
+    ),
     response_model=AdminSpecPage,
     response_description="规格分页列表",
     responses=errors_doc(*_AUTH),
 )
-def list_specs(_: SpecRead, db: DB, page: Page):
-    return service.list_specs(db, page)
+def list_specs(
+    _: SpecRead,
+    db: DB,
+    page: Page,
+    keyword: Annotated[
+        str | None,
+        Query(
+            max_length=64,
+            description="按规格名称或编码模糊查找（包含即可，不区分大小写）",
+            examples=["身份证"],
+        ),
+    ] = None,
+    status: Annotated[
+        SpecStatus | None,
+        Query(
+            description="按状态筛选：active = 上架；inactive = 下架（含同步进来待审核的）",
+            examples=["inactive"],
+        ),
+    ] = None,
+    category: Annotated[
+        SpecCategory | None,
+        Query(
+            description="按分类筛选：receipt = 回执类；normal = 普通证件照；exam = 考试报名照",
+            examples=["receipt"],
+        ),
+    ] = None,
+):
+    return service.list_specs(db, keyword=keyword, status=status, category=category, page=page)
 
 
 @admin_router.post(
@@ -522,7 +556,10 @@ def update_spec(code: SpecCodePath, body: AdminSpecUpdateIn, admin: SpecWrite, d
     "/providers",
     operation_id="admin_providers_list",
     summary="服务商列表",
-    description=f"列出回执服务商及其能办理的规格、路由规则，不返回密钥。数量少所以不分页。权限点 provider:read。{_LOGIN_NOTE}",
+    description=(
+        f"列出全部回执服务商（只有几家，所以不分页），不返回密钥。权限点 provider:read。{_LOGIN_NOTE}"
+        "只返回规格映射和路由规则的数量；明细分别用 GET /admin/provider-specs、GET /admin/route-rules 分页查询。"
+    ),
     response_model=list[AdminProviderOut],
     response_description="全部服务商",
     responses=errors_doc(*_AUTH),
@@ -564,6 +601,45 @@ def sync_provider_specs(code: ProviderCodePath, admin: ProviderWrite, db: DB):
 
 
 # ---------- 服务商规格与路由规则 ----------
+
+
+@admin_router.get(
+    "/provider-specs",
+    operation_id="admin_provider_specs_list",
+    summary="服务商规格列表",
+    description=(
+        f"分页列出服务商规格映射（哪家服务商能办哪个规格、对方规格 ID、成本），按创建时间从新到旧，"
+        f"条件之间是“并且”。权限点 provider:read。{_LOGIN_NOTE}"
+        "同步规格目录后新增的映射默认停用，可用 is_enabled=false 筛出来逐个配置成本后启用。"
+    ),
+    response_model=AdminProviderSpecPage,
+    response_description="服务商规格映射分页列表",
+    responses=errors_doc(*_AUTH),
+)
+def list_provider_specs(
+    _: ProviderRead,
+    db: DB,
+    page: Page,
+    provider_code: Annotated[
+        str | None,
+        Query(max_length=64, description="按服务商编码筛选；不存在的编码返回空列表", examples=["zheying"]),
+    ] = None,
+    keyword: Annotated[
+        str | None,
+        Query(
+            max_length=64,
+            description="按规格名称、规格编码或服务商规格 ID 模糊查找（包含即可，不区分大小写）",
+            examples=["身份证"],
+        ),
+    ] = None,
+    is_enabled: Annotated[
+        bool | None,
+        Query(description="按是否启用筛选：true = 已启用；false = 已停用；不传 = 全部", examples=[False]),
+    ] = None,
+):
+    return service.list_provider_specs(
+        db, provider_code=provider_code, keyword=keyword, is_enabled=is_enabled, page=page
+    )
 
 
 @admin_router.post(
@@ -609,6 +685,33 @@ def update_provider_spec(
 )
 def delete_provider_spec(entry_id: ProviderSpecIdPath, admin: ProviderWrite, db: DB):
     return service.delete_provider_spec(db, admin, entry_id)
+
+
+@admin_router.get(
+    "/route-rules",
+    operation_id="admin_route_rules_list",
+    summary="路由规则列表",
+    description=(
+        f"分页列出路由规则（某规格、某地区下的候选服务商及优先级），按创建时间从新到旧，"
+        f"条件之间是“并且”。权限点 provider:read。{_LOGIN_NOTE}"
+    ),
+    response_model=AdminRouteRulePage,
+    response_description="路由规则分页列表",
+    responses=errors_doc(*_AUTH),
+)
+def list_route_rules(
+    _: ProviderRead,
+    db: DB,
+    page: Page,
+    provider_code: Annotated[
+        str | None,
+        Query(max_length=64, description="按服务商编码筛选；不存在的编码返回空列表", examples=["zheying"]),
+    ] = None,
+    spec_code: Annotated[
+        str | None, Query(max_length=64, description="按规格编码精确筛选", examples=["gd_idcard"])
+    ] = None,
+):
+    return service.list_route_rules(db, provider_code=provider_code, spec_code=spec_code, page=page)
 
 
 @admin_router.post(

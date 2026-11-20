@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.integrations.payment import FakePay
 from app.main import app
-from app.models import Entitlement, NotifyTask, ReceiptApplication
+from app.models import Entitlement, NotifyTask, ProviderSpec, ReceiptApplication
 from app.modules.receipts.repo import MANUAL_REVIEW_REQUIRED
 from scripts.check_api_docs import find_problems
 from tests.admin.helpers import API, PASSWORD, admin_login, entitlement_statuses, make_admin, user_buys
@@ -574,6 +574,72 @@ def test_specs_create_update_list(client: TestClient, db: Session):
     assert log["before"] == {"name": "后台规格", "status": "active"}
 
 
+def test_spec_list_filters_and_pages(client: TestClient, db: Session):
+    for code in ("flt_a", "flt_b", "flt_c"):
+        make_spec(db, code)
+    make_spec(db, "flt_exam", category="exam").status = "inactive"
+    db.flush()
+    admin_login(client, db, "op", "operator")
+
+    def codes(**params) -> list[str]:
+        return [s["code"] for s in client.get(f"{API}/specs", params=params).json()["items"]]
+
+    assert codes(keyword="FLT_") == ["flt_exam", "flt_c", "flt_b", "flt_a"]  # 编码模糊匹配，不区分大小写
+    assert codes(keyword="flt", status="inactive") == ["flt_exam"]
+    assert codes(keyword="flt", category="receipt", status="active") == ["flt_c", "flt_b", "flt_a"]
+    assert codes(keyword="%") == []  # 通配符被转义
+
+    first = client.get(f"{API}/specs", params={"keyword": "flt", "limit": 3}).json()
+    assert [s["code"] for s in first["items"]] == ["flt_exam", "flt_c", "flt_b"] and first["next_cursor"]
+    second = client.get(
+        f"{API}/specs", params={"keyword": "flt", "limit": 3, "cursor": first["next_cursor"]}
+    ).json()
+    assert [s["code"] for s in second["items"]] == ["flt_a"] and second["next_cursor"] is None
+    assert client.get(f"{API}/specs", params={"status": "bogus"}).status_code == 422
+
+
+def test_provider_specs_list_filters_and_pages(client: TestClient, db: Session):
+    specs = [make_spec(db, f"ps_{i}") for i in range(3)]
+    provider = make_provider_for(db, specs[0], "ps_prov")
+    make_provider_for(db, specs[1], "ps_other")
+    db.add_all(
+        ProviderSpec(
+            provider_id=provider.id, spec_id=s.id, provider_item_id=f"9{i}", cost_fen=0, is_enabled=False
+        )
+        for i, s in enumerate(specs[1:])
+    )
+    db.flush()
+    admin_login(client, db, "op", "operator")
+    url = f"{API}/provider-specs"
+
+    def page(**params) -> dict:
+        r = client.get(url, params=params)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    assert [e["spec_code"] for e in page(provider_code="ps_prov")["items"]] == ["ps_2", "ps_1", "ps_0"]
+    assert [e["spec_code"] for e in page(provider_code="ps_prov", is_enabled=False)["items"]] == [
+        "ps_2",
+        "ps_1",
+    ]
+    assert [e["provider_code"] for e in page(keyword="ps_1")["items"]] == ["ps_prov", "ps_other"]
+    assert [e["spec_code"] for e in page(provider_code="ps_prov", keyword="91")["items"]] == ["ps_2"]
+    assert page(provider_code="nobody")["items"] == []
+
+    first = page(provider_code="ps_prov", limit=2)
+    second = page(provider_code="ps_prov", limit=2, cursor=first["next_cursor"])
+    assert [e["spec_code"] for e in first["items"] + second["items"]] == ["ps_2", "ps_1", "ps_0"]
+    assert second["next_cursor"] is None
+
+    rules = client.get(f"{API}/route-rules", params={"spec_code": "ps_1"}).json()["items"]
+    assert [r["provider_code"] for r in rules] == ["ps_other"]
+
+    client.post(f"{API}/auth/logout")
+    admin_login(client, db, "fin", "finance")
+    assert client.get(url).status_code == 403  # finance 没有 provider:read
+    assert client.get(f"{API}/route-rules").status_code == 403
+
+
 def test_finance_cannot_write_specs(client: TestClient, db: Session):
     csrf = admin_login(client, db, "fin", "finance")
     assert client.get(f"{API}/specs").status_code == 403  # finance 没有 spec:read
@@ -588,9 +654,13 @@ def test_providers_list_and_update(client: TestClient, db: Session):
 
     providers = {p["code"]: p for p in client.get(f"{API}/providers").json()}
     p = providers["prov_a"]
-    assert p["provider_specs"][0]["spec_code"] == "prov_spec" and p["provider_specs"][0]["cost_fen"] == 300
-    assert p["route_rules"][0]["priority"] == 10
-    assert "config" not in str(p).lower()
+    assert (p["provider_spec_count"], p["enabled_provider_spec_count"], p["route_rule_count"]) == (1, 1, 1)
+    assert "provider_specs" not in p and "config" not in str(p).lower()
+    entries = client.get(f"{API}/provider-specs", params={"provider_code": "prov_a"}).json()
+    assert [(e["spec_code"], e["cost_fen"]) for e in entries["items"]] == [("prov_spec", 300)]
+    assert entries["next_cursor"] is None
+    rules = client.get(f"{API}/route-rules", params={"provider_code": "prov_a"}).json()["items"]
+    assert [(r["spec_code"], r["priority"]) for r in rules] == [("prov_spec", 10)]
 
     r = client.patch(f"{API}/providers/prov_a", json={"status": "disabled"}, headers=csrf)
     assert r.json()["code"] == "PERMISSION_DENIED"  # 只有 owner
@@ -641,7 +711,7 @@ def test_admin_api_docs_complete():
         if path.startswith("/api/v1/admin")
         for op in ops.values()
     ]
-    assert len(ids) == 36 and len(ids) == len(set(ids)) and all(i.startswith("admin_") for i in ids)
+    assert len(ids) == 38 and len(ids) == len(set(ids)) and all(i.startswith("admin_") for i in ids)
     assert (
         spec["paths"][f"{API}/providers/{{code}}/sync-specs"]["post"]["operationId"]
         == "admin_providers_sync_specs"

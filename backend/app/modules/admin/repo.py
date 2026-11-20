@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, defer
 
-from app.core.utils import utcnow
+from app.core.utils import contains_pattern, utcnow
 from app.models import (
     AdminSession,
     AdminUser,
@@ -243,8 +243,23 @@ def specs_by_ids(db: Session, ids: Iterable[int]) -> dict[int, Spec]:
     return {s.id: s for s in db.scalars(select(Spec).where(Spec.id.in_(ids)))}
 
 
-def list_specs(db: Session, *, before_id: int | None, limit: int) -> list[Spec]:
+def list_specs(
+    db: Session,
+    *,
+    keyword: str | None,
+    status: str | None,
+    category: str | None,
+    before_id: int | None,
+    limit: int,
+) -> list[Spec]:
     stmt = select(Spec)
+    if keyword:
+        pattern = contains_pattern(keyword)
+        stmt = stmt.where(or_(Spec.name.ilike(pattern, escape="\\"), Spec.code.ilike(pattern, escape="\\")))
+    if status:
+        stmt = stmt.where(Spec.status == status)
+    if category:
+        stmt = stmt.where(Spec.category == category)
     if before_id is not None:
         stmt = stmt.where(Spec.id < before_id)
     return list(db.scalars(stmt.order_by(Spec.id.desc()).limit(limit)))
@@ -278,12 +293,75 @@ def get_provider_by_code(db: Session, code: str, *, for_update: bool = False) ->
     return db.scalar(stmt)
 
 
-def provider_specs(db: Session) -> list[ProviderSpec]:
-    return list(db.scalars(select(ProviderSpec).order_by(ProviderSpec.id)))
+def provider_spec_counts(db: Session) -> dict[int, tuple[int, int]]:
+    """每个服务商的 (规格映射总数, 已启用数)。"""
+    stmt = select(
+        ProviderSpec.provider_id,
+        func.count(),
+        func.count().filter(ProviderSpec.is_enabled),
+    ).group_by(ProviderSpec.provider_id)
+    return {pid: (total, enabled) for pid, total, enabled in db.execute(stmt).tuples()}
 
 
-def route_rules(db: Session) -> list[RouteRule]:
-    return list(db.scalars(select(RouteRule).order_by(RouteRule.priority, RouteRule.id)))
+def route_rule_counts(db: Session) -> dict[int, int]:
+    stmt = select(RouteRule.provider_id, func.count()).group_by(RouteRule.provider_id)
+    return dict(db.execute(stmt).tuples().all())
+
+
+def list_provider_specs(
+    db: Session,
+    *,
+    provider_code: str | None,
+    keyword: str | None,
+    is_enabled: bool | None,
+    before_id: int | None,
+    limit: int,
+) -> list[tuple[ProviderSpec, str, Spec]]:
+    """服务商规格映射，按 id 倒序；返回 (映射, 服务商编码, 规格)。"""
+    stmt = (
+        select(ProviderSpec, Provider.code, Spec)
+        .join(Provider, Provider.id == ProviderSpec.provider_id)
+        .join(Spec, Spec.id == ProviderSpec.spec_id)
+    )
+    if provider_code:
+        stmt = stmt.where(Provider.code == provider_code)
+    if keyword:
+        pattern = contains_pattern(keyword)
+        stmt = stmt.where(
+            or_(
+                Spec.name.ilike(pattern, escape="\\"),
+                Spec.code.ilike(pattern, escape="\\"),
+                ProviderSpec.provider_item_id.ilike(pattern, escape="\\"),
+            )
+        )
+    if is_enabled is not None:
+        stmt = stmt.where(ProviderSpec.is_enabled.is_(is_enabled))
+    if before_id is not None:
+        stmt = stmt.where(ProviderSpec.id < before_id)
+    return list(db.execute(stmt.order_by(ProviderSpec.id.desc()).limit(limit)).tuples())
+
+
+def list_route_rules(
+    db: Session,
+    *,
+    provider_code: str | None,
+    spec_code: str | None,
+    before_id: int | None,
+    limit: int,
+) -> list[tuple[RouteRule, str, Spec]]:
+    """路由规则，按 id 倒序；返回 (规则, 服务商编码, 规格)。"""
+    stmt = (
+        select(RouteRule, Provider.code, Spec)
+        .join(Provider, Provider.id == RouteRule.provider_id)
+        .join(Spec, Spec.id == RouteRule.spec_id)
+    )
+    if provider_code:
+        stmt = stmt.where(Provider.code == provider_code)
+    if spec_code:
+        stmt = stmt.where(Spec.code == spec_code)
+    if before_id is not None:
+        stmt = stmt.where(RouteRule.id < before_id)
+    return list(db.execute(stmt.order_by(RouteRule.id.desc()).limit(limit)).tuples())
 
 
 def lock_provider_spec(db: Session, entry_id: int) -> ProviderSpec | None:

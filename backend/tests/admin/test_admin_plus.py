@@ -163,9 +163,8 @@ def test_provider_spec_writes_and_audits(client: TestClient, db: Session):
     updated = response.json()
     assert updated["cost_fen"] == 450 and updated["is_enabled"] is False
     assert updated["param_mapping"] == {"name": "text_name"}
-    providers = client.get(f"{API}/providers").json()
-    provider = next(p for p in providers if p["code"] == PROVIDER_CODES["provider_code"])
-    assert updated in provider["provider_specs"]
+    listed = client.get(f"{API}/provider-specs", params={"provider_code": PROVIDER_CODES["provider_code"]})
+    assert updated in listed.json()["items"]
 
     assert client.delete(entry_url, headers=csrf).json() == {"ok": True}
     assert_error(client.delete(entry_url, headers=csrf), 404, "NOT_FOUND")
