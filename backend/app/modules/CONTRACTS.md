@@ -70,7 +70,8 @@ tests/<m>/test_*.py
 
 ## orders（补充）
 
-- `refund_order(db, *, order_no, amount_fen, reason, operator) -> Refund`：后台退款。可退余额 = 已付 − 已退 − 处理中退款；全额退完撤销该订单的权益。不 commit。
+- `refund_order(db, *, order_no, request_id, amount_fen, reason, operator) -> RefundSubmission`：后台退款（refund、order、审计快照 before）。out_refund_no = "RA" + request_id.hex，相同请求重试返回原记录，参数不同抛 IDEMPOTENCY_CONFLICT。可退余额 = 已付 − 已退 − 处理中退款；微信退款异步，处理中占用余额，确认成功后只入账一次；全额退完撤销该订单的权益。不 commit。
+- `poll_pending_refunds(db, limit=10) -> int`：worker 调用，查单补偿丢失的退款通知（仅 PAY_MODE=wechat）。
 
 ## admin（后台）例外
 

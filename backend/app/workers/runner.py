@@ -39,6 +39,7 @@ def run_once(db: Session) -> None:
         receipts.poll_due,
         notify.send_due,
         orders.close_expired,
+        orders.poll_pending_refunds,
         entitlements.create_expiration_reminders,
         purge_orphan_uploads,
     ):
