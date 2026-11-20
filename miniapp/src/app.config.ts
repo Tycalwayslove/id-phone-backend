@@ -1,4 +1,5 @@
 export default defineAppConfig({
+  __usePrivacyCheck__: true,
   pages: [
     'pages/index/index',
     'pages/photos/index',
@@ -12,7 +13,9 @@ export default defineAppConfig({
     'pages/receipt-detail/index',
     'pages/photo-detail/index',
     'pages/orders/index',
-    'pages/entitlements/index'
+    'pages/entitlements/index',
+    'pages/legal/agreement/index',
+    'pages/legal/privacy/index'
   ],
   window: {
     backgroundTextStyle: 'light',

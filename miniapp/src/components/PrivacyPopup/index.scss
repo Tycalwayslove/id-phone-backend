@@ -1,0 +1,51 @@
+.privacy-popup {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: rgba(31, 35, 41, 0.55);
+
+  &__panel {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 650px;
+    margin: 0 auto var(--gap);
+    padding: 40px 32px 32px;
+    background: #fff;
+    border-radius: var(--radius);
+  }
+
+  &__title,
+  &__summary,
+  &__link {
+    display: block;
+  }
+
+  &__title {
+    font-size: 36px;
+    font-weight: 600;
+  }
+
+  &__summary {
+    margin: 20px 0;
+    color: var(--c-text-2);
+  }
+
+  &__link {
+    padding: 8px 0;
+    color: var(--c-primary);
+  }
+
+  &__actions {
+    display: flex;
+    gap: var(--gap);
+    margin-top: 32px;
+
+    > * {
+      flex: 1;
+    }
+  }
+}
