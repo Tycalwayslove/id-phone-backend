@@ -2,8 +2,9 @@
 
 from typing import Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, computed_field
 
+from app.core.regions import region_name
 from app.core.schemas import Schema, page_model
 
 
@@ -34,8 +35,34 @@ class SpecOut(Schema):
         default=None, description="成品高度，单位毫米；官方未规定时为空", examples=[32]
     )
 
+    @computed_field(description="行政区划全称。全国通用或区划码未知时为空。", examples=["广州市"])
+    @property
+    def region_name(self) -> str | None:
+        return region_name(self.region_code)
+
 
 SpecPage = page_model(SpecOut, "SpecPage", "按排序值从小到大，排序值相同按 ID")
+
+
+class SpecRegionCity(Schema):
+    """有已上架地区专属规格的地级市。"""
+
+    region_code: str = Field(description="地级行政区划码，供筛选规格使用", examples=["440100"])
+    region_name: str = Field(description="地级行政区划全称", examples=["广州市"])
+    spec_count: int = Field(description="仅适用于该市的已上架规格数", examples=[12])
+
+
+class SpecRegionProvince(Schema):
+    """一个省级行政区及其有专属规格的城市。"""
+
+    region_code: str = Field(description="省级行政区划码，供筛选规格使用", examples=["440000"])
+    region_name: str = Field(description="省级行政区划全称", examples=["广东省"])
+    spec_count: int = Field(description="省级与所列市级已上架专属规格总数", examples=[15])
+    province_spec_count: int = Field(description="适用于全省的已上架专属规格数", examples=[3])
+    cities: list[SpecRegionCity] = Field(
+        description="有已上架专属规格的市，按区划码排序。直辖市的专属规格计入省级，城市列表为空。",
+        examples=[[]],
+    )
 
 
 class SpecFormField(Schema):
@@ -84,7 +111,7 @@ class ProviderSyncItem(Schema):
     """一条服务商规格映射的同步结果。"""
 
     provider_item_id: str = Field(description="服务商侧的规格 ID", examples=["713"])
-    spec_code: str = Field(description="本地规格编码", examples=["zy_713"])
+    spec_code: str = Field(description="本地规格编码", examples=["cat_zheying_713"])
     spec_name: str = Field(description="本地规格名称", examples=["广东身份证（回执）"])
     change: ProviderSyncChange = Field(
         description="同步结果。created = 新增；updated = 更新；unchanged = 参数未变；disabled = 映射已停用",
@@ -94,12 +121,17 @@ class ProviderSyncItem(Schema):
         description="本次更新的制照参数字段。新增、未变或停用时为空",
         examples=[["width_px", "file_size_max_kb"], []],
     )
+    unknown_receipt_fields: list[str] = Field(
+        default_factory=list,
+        description="未预定义显示名的服务商回执字段标识，表单中使用原字段名。没有时为空列表。",
+        examples=[["text_unit"], []],
+    )
 
 
 class ProviderSyncResult(Schema):
     """同步服务商目录后的统计与逐条结果。"""
 
-    created: int = Field(description="新建的规格和映射数量", examples=[1])
+    created: int = Field(description="新建的映射数量，含关联到已有规格的映射", examples=[1])
     updated: int = Field(description="制照参数有变化的映射数量", examples=[2])
     unchanged: int = Field(description="制照参数未变化、仅刷新同步时间的映射数量", examples=[8])
     disabled: int = Field(description="本次由启用改为停用的映射数量", examples=[1])

@@ -58,7 +58,7 @@ tests/<m>/test_*.py
 ## specs（规格）
 
 - `get_active_spec(db, code) -> Spec`：不存在或已下架 → `SPEC_NOT_FOUND`。
-- `sync_provider_specs(db, provider_code) -> ProviderSyncResult`：同步全量服务商目录及制照参数，新增规格默认下架，目录移除的映射停用。由后台调用方与审计记录一并提交。
+- `sync_provider_specs(db, provider_code, *, auto_publish=True) -> ProviderSyncResult`：同步全量服务商目录及制照参数，合并同上游同编号或同名同像素尺寸的规格。默认上架新规格、启用新映射并添加路由规则；目录移除的映射停用。由后台调用方与审计记录一并提交。
 
 ## notify（通知）
 

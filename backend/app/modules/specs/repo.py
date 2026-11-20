@@ -1,6 +1,6 @@
 """规格查询。规格是公开数据，不区分用户。"""
 
-from sqlalchemy import exists, select, tuple_
+from sqlalchemy import exists, func, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ def list_active(
     *,
     category: str | None,
     keyword: str | None,
+    region_codes: set[str],
     after: tuple[int, int] | None,
     limit: int,
 ) -> list[Spec]:
@@ -22,9 +23,21 @@ def list_active(
         q = q.where(Spec.category == category)
     if keyword:
         q = q.where(Spec.name.ilike(contains_pattern(keyword), escape="\\"))
+    if region_codes:
+        q = q.where(or_(Spec.region_code.is_(None), Spec.region_code.in_(region_codes | {""})))
     if after is not None:
         q = q.where(tuple_(Spec.sort, Spec.id) > tuple_(after[0], after[1]))
     return list(db.scalars(q.order_by(Spec.sort, Spec.id).limit(limit)))
+
+
+def active_region_counts(db: Session) -> list[tuple[str, int]]:
+    stmt = (
+        select(Spec.region_code, func.count())
+        .where(Spec.status == "active", Spec.region_code.is_not(None))
+        .group_by(Spec.region_code)
+        .order_by(Spec.region_code)
+    )
+    return [(code, count) for code, count in db.execute(stmt) if code is not None]
 
 
 def get_active_by_code(db: Session, code: str) -> Spec | None:
@@ -54,6 +67,25 @@ def lock_catalog_provider(db: Session, code: str) -> Provider | None:
     return db.scalar(stmt.execution_options(populate_existing=True))
 
 
+def lock_catalog_merge(db: Session) -> None:
+    # 不同服务商同时同步时，后一笔事务需要看到前一笔新建的规格和映射。
+    db.execute(select(func.pg_advisory_xact_lock(func.hashtext("id-phone:spec-catalog"))))
+
+
+def catalog_specs(db: Session) -> list[Spec]:
+    return list(db.scalars(select(Spec).order_by(Spec.id)))
+
+
+def upstream_mappings(db: Session, provider: Provider) -> list[ProviderSpec]:
+    stmt = (
+        select(ProviderSpec)
+        .join(Provider, ProviderSpec.provider_id == Provider.id)
+        .where(Provider.upstream_group == provider.upstream_group, Provider.id != provider.id)
+        .order_by(ProviderSpec.spec_id, ProviderSpec.id)
+    )
+    return list(db.scalars(stmt))
+
+
 def lock_provider_specs(db: Session, provider_id: int) -> list[ProviderSpec]:
     stmt = (
         select(ProviderSpec)
@@ -75,3 +107,12 @@ def lock_specs(db: Session, spec_ids: set[int]) -> dict[int, Spec]:
 def insert_catalog_spec(db: Session, values: dict) -> Spec | None:
     stmt = insert(Spec).values(**values).on_conflict_do_nothing(index_elements=[Spec.code]).returning(Spec)
     return db.scalar(stmt)
+
+
+def add_catalog_route(db: Session, *, spec_id: int, provider_id: int, is_enabled: bool) -> None:
+    stmt = insert(RouteRule).values(spec_id=spec_id, provider_id=provider_id, is_enabled=is_enabled)
+    db.execute(
+        stmt.on_conflict_do_nothing(
+            index_elements=[RouteRule.spec_id, RouteRule.region_code, RouteRule.provider_id]
+        )
+    )
