@@ -1,12 +1,17 @@
 import json
+from dataclasses import replace
 from datetime import timedelta
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import func, select
 
+from app.core.errors import AppError, ErrorCode
 from app.core.utils import utcnow
-from app.integrations.payment import FakePay, sign_fake_notify
+from app.integrations.payment import FakePay, OrderQuery, PayNotify, RefundResult, sign_fake_notify
 from app.models import Entitlement, Order, Payment, Refund
+from app.modules.orders import service
 from tests.conftest import login
 from tests.factories import make_plan, make_standard_plans
 from tests.orders.helpers import latest_user_id, make_photo
@@ -200,7 +205,7 @@ def test_wxpay_callback_bad_signature(client, db):
     body = _notify_body(db, order_no, amount_fen=9900)
     r = client.post(f"{API}/callbacks/wxpay", content=body, headers={"X-Fake-Signature": "bad"})
     assert r.status_code == 401
-    assert r.json()["code"] == "PAYMENT_SIGNATURE_INVALID"
+    assert r.json() == {"code": "FAIL", "message": "支付通知签名不正确"}
     assert client.get(f"{API}/orders/{order_no}", headers=h).json()["status"] == "pending"
 
 
@@ -211,8 +216,8 @@ def test_wxpay_callback_marks_paid_and_is_idempotent(client, db):
     headers = {"X-Fake-Signature": sign_fake_notify(body), "Content-Type": "application/json"}
     for _ in range(2):
         r = client.post(f"{API}/callbacks/wxpay", content=body, headers=headers)
-        assert r.status_code == 200, r.text
-        assert r.json() == {"code": "SUCCESS", "message": "成功"}
+        assert r.status_code == 204, r.text
+        assert r.content == b""
     assert client.get(f"{API}/orders/{order_no}", headers=h).json()["status"] == "paid"
     assert len(client.get(f"{API}/entitlements", headers=h).json()) == 1
 
@@ -237,8 +242,8 @@ def test_wxpay_callback_for_closed_order_refunds_once(
     headers = {"X-Fake-Signature": sign_fake_notify(body)}
     for _ in range(2):
         r = client.post(f"{API}/callbacks/wxpay", content=body, headers=headers)
-        assert r.status_code == 200, r.text
-        assert r.json()["code"] == "SUCCESS"
+        assert r.status_code == 204, r.text
+        assert r.content == b""
 
     detail = client.get(f"{API}/orders/{order_no}", headers=h).json()
     assert detail["status"] == order_status and detail["paid_fen"] == 9900
@@ -263,7 +268,7 @@ def test_wxpay_callback_amount_mismatch(client, db):
         f"{API}/callbacks/wxpay", content=body, headers={"X-Fake-Signature": sign_fake_notify(body)}
     )
     assert r.status_code == 409
-    assert r.json()["code"] == "ORDER_NOT_PAYABLE"
+    assert r.json() == {"code": "FAIL", "message": "支付金额与订单金额不一致"}
     assert client.get(f"{API}/orders/{order_no}", headers=h).json()["status"] == "pending"
 
 
@@ -273,7 +278,7 @@ def test_wxpay_callback_unknown_order(client, db):
         f"{API}/callbacks/wxpay", content=body, headers={"X-Fake-Signature": sign_fake_notify(body)}
     )
     assert r.status_code == 404
-    assert r.json()["code"] == "ORDER_NOT_FOUND"
+    assert r.json() == {"code": "FAIL", "message": "订单不存在"}
 
 
 def test_unlimited_99_covers_all_photos(client, db):
@@ -348,3 +353,153 @@ def test_orders_list_cursor_pagination(client, db):
     p2 = client.get(f"{API}/orders", params={"limit": 2, "cursor": p1["next_cursor"]}, headers=h).json()
     assert [o["order_no"] for o in p2["items"]] == [nos[0]]
     assert p2["next_cursor"] is None
+
+
+def _buy_paid_and_enable_wechat(client, db, monkeypatch):
+    headers, _ = _setup(client, db)
+    order_no = _buy(client, headers, "unlimited_99")["order_no"]
+    assert client.post(f"{API}/dev/orders/{order_no}/simulate-paid", headers=headers).status_code == 200
+    payment = db.scalars(select(Payment)).one()
+    monkeypatch.setattr(service.settings, "pay_mode", "wechat")
+    return order_no, payment
+
+
+def test_wechat_refund_callback_applies_once_and_validates_local_payment(client, db, monkeypatch):
+    order_no, payment = _buy_paid_and_enable_wechat(client, db, monkeypatch)
+    submissions = []
+    results = []
+
+    def submit(**kwargs):
+        submissions.append(kwargs)
+        return "pending"
+
+    gateway = SimpleNamespace(refund=submit, parse_refund_notify=lambda headers, body: results[-1])
+    monkeypatch.setattr(service, "get_payment", lambda: gateway)
+    request_id = uuid4()
+    refund = service.refund_order(
+        db, order_no=order_no, request_id=request_id, amount_fen=9900, reason="原申请", operator="admin"
+    ).refund
+    db.commit()
+    assert refund.out_refund_no == f"RA{request_id.hex}"
+    assert refund.status == "pending"
+    assert db.scalar(select(Entitlement.status)) == "active"
+    assert db.scalar(select(Order.refunded_fen)) == 0
+    assert len(submissions) == 1
+
+    with pytest.raises(AppError) as exc:
+        service.refund_order(
+            db, order_no=order_no, request_id=uuid4(), amount_fen=1, reason="超出余额", operator="admin"
+        )
+    assert exc.value.code == ErrorCode.REFUND_NOT_ALLOWED
+    db.rollback()
+
+    result = RefundResult(
+        payment.out_trade_no, refund.out_refund_no, payment.transaction_id, 9900, 9900, "success"
+    )
+    results.append(replace(result, refund_fen=100))
+    url = f"{API}/callbacks/wxpay/refund"
+    response = client.post(url, content=b"notification")
+    assert response.status_code == 409
+    assert response.json() == {"code": "FAIL", "message": "微信退款结果与本地流水不一致"}
+    assert db.scalar(select(Order.refunded_fen)) == 0
+
+    for notice in (result, result, replace(result, status="failed")):
+        results.append(notice)
+        response = client.post(url, content=b"notification")
+        assert response.status_code == 204
+        assert response.content == b""
+    assert db.scalar(select(Order.refunded_fen)) == 9900
+    assert db.scalar(select(Order.status)) == "refunded"
+    assert db.scalar(select(Entitlement.status)) == "revoked"
+    assert refund.status == "success" and refund.finished_at is not None
+
+
+def test_wechat_refund_query_retries_original_number_and_polls_terminal_state(client, db, monkeypatch):
+    order_no, payment = _buy_paid_and_enable_wechat(client, db, monkeypatch)
+    submissions = []
+    queries = []
+
+    def submit(**kwargs):
+        submissions.append(kwargs)
+        return "pending"
+
+    def query(out_refund_no):
+        queries.append(out_refund_no)
+        if len(queries) == 1:
+            return None
+        return RefundResult(
+            payment.out_trade_no, out_refund_no, payment.transaction_id, 2200, 9900, "success"
+        )
+
+    gateway = SimpleNamespace(refund=submit, query_refund=query)
+    monkeypatch.setattr(service, "get_payment", lambda: gateway)
+    request = dict(order_no=order_no, request_id=uuid4(), amount_fen=2200, reason="原申请", operator="admin")
+    first = service.refund_order(db, **request)
+    db.commit()
+    replay = service.refund_order(db, **{**request, "reason": "修改原因"})
+    assert replay.refund.id == first.refund.id
+    assert replay.before is None
+    assert replay.refund.status == "pending"
+    assert len(submissions) == 2 and submissions[0] == submissions[1]
+    assert queries == [first.refund.out_refund_no]
+    replay.refund.updated_at = utcnow() - timedelta(minutes=5)
+    db.commit()
+
+    assert service.poll_pending_refunds(db) == 1
+    assert replay.refund.status == "success"
+    assert replay.order.status == "part_refunded"
+    assert replay.order.refunded_fen == 2200
+    assert db.scalar(select(Entitlement.status)) == "active"
+    assert service.poll_pending_refunds(db) == 0
+    assert queries == [first.refund.out_refund_no] * 2
+
+
+def test_wechat_cancel_waits_for_remote_close_and_detail_can_recover_payment(client, db, monkeypatch):
+    headers, _ = _setup(client, db)
+    order_no = _buy(client, headers, "unlimited_99")["order_no"]
+    payment = db.scalars(select(Payment)).one()
+    monkeypatch.setattr(service.settings, "pay_mode", "wechat")
+
+    def close(out_trade_no):
+        assert out_trade_no == payment.out_trade_no
+        raise AppError(ErrorCode.ORDER_NOT_CANCELLABLE)
+
+    def query(out_trade_no):
+        assert out_trade_no == payment.out_trade_no
+        return OrderQuery("SUCCESS", PayNotify(out_trade_no, "WX123", 9900, True, {}))
+
+    gateway = SimpleNamespace(close_order=close, query_order=query)
+    monkeypatch.setattr(service, "get_payment", lambda: gateway)
+    url = f"{API}/orders/{order_no}"
+    assert client.post(f"{API}/dev/orders/{order_no}/simulate-paid", headers=headers).status_code == 409
+    assert client.post(url + "/cancel", headers=headers).status_code == 409
+    assert db.scalar(select(Order.status)) == "pending"
+    assert db.scalar(select(Payment.status)) == "pending"
+
+    assert client.get(url, headers=headers).json()["status"] == "paid"
+    assert db.scalar(select(Payment.transaction_id)) == "WX123"
+    assert len(client.get(f"{API}/entitlements", headers=headers).json()) == 1
+
+
+def test_wechat_closed_refund_releases_reserved_balance(client, db, monkeypatch):
+    order_no, payment = _buy_paid_and_enable_wechat(client, db, monkeypatch)
+    gateway = SimpleNamespace(refund=lambda **kwargs: "pending")
+    monkeypatch.setattr(service, "get_payment", lambda: gateway)
+    request = dict(order_no=order_no, amount_fen=9900, reason="整单退款", operator="admin")
+    first = service.refund_order(db, request_id=uuid4(), **request)
+    db.commit()
+    assert first.refund.status == "pending"
+    result = RefundResult(
+        payment.out_trade_no, first.refund.out_refund_no, payment.transaction_id, 9900, 9900, "failed"
+    )
+    gateway.parse_refund_notify = lambda headers, body: result
+    response = client.post(f"{API}/callbacks/wxpay/refund", content=b"notification")
+    assert response.status_code == 204
+    assert first.refund.status == "failed"
+    assert first.refund.finished_at is not None
+    assert first.order.status == "paid"
+    assert first.order.refunded_fen == 0
+
+    next_refund = service.refund_order(db, request_id=uuid4(), **request).refund
+    assert next_refund.status == "pending"
+    assert next_refund.out_refund_no != first.refund.out_refund_no

@@ -1,9 +1,13 @@
+import logging
+from collections.abc import Callable, Mapping
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Request
+from fastapi import APIRouter, Depends, Path, Request, Response
+from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
 
 from app.core.deps import DB, IdempotencyKeyHeader, Me, Page
-from app.core.errors import ErrorCode, errors_doc
+from app.core.errors import AppError, ErrorCode, errors_doc
 from app.modules.orders import service
 from app.modules.orders.schemas import (
     OrderCreatedOut,
@@ -11,12 +15,13 @@ from app.modules.orders.schemas import (
     OrderOut,
     OrderPage,
     PlanOut,
-    WxpayAck,
+    WxpayFailure,
 )
 
 router = APIRouter(tags=["套餐与订单"])
 callback_router = APIRouter(tags=["回调"])
 dev_router = APIRouter(tags=["联调"])
+log = logging.getLogger(__name__)
 
 _AUTH = (ErrorCode.AUTH_REQUIRED, ErrorCode.AUTH_INVALID)
 
@@ -59,6 +64,8 @@ def list_plans(db: DB):
         ErrorCode.ENTITLEMENT_NOT_FOUND,
         ErrorCode.ENTITLEMENT_EXPIRED,
         ErrorCode.IDEMPOTENCY_CONFLICT,
+        ErrorCode.ORDER_NOT_PAYABLE,
+        ErrorCode.INTERNAL_ERROR,
     ),
 )
 def create_order(payload: OrderCreateIn, me: Me, db: DB, idem: IdempotencyKeyHeader = None):
@@ -87,11 +94,14 @@ def list_orders(me: Me, db: DB, page: Page):
     summary="订单详情",
     description=(
         "按订单号查询当前用户的订单，支付后前端用它确认订单是否已变为 paid。需要登录。"
+        "真实支付模式下，查询待支付订单时会向微信确认支付结果。"
         "别人的订单或不存在的订单号都返回 ORDER_NOT_FOUND。待支付但已超时的订单会被自动改为已关闭。"
     ),
     response_model=OrderOut,
     response_description="订单详情",
-    responses=errors_doc(*_AUTH, ErrorCode.ORDER_NOT_FOUND),
+    responses=errors_doc(
+        *_AUTH, ErrorCode.ORDER_NOT_FOUND, ErrorCode.ORDER_NOT_PAYABLE, ErrorCode.INTERNAL_ERROR
+    ),
 )
 def get_order(order_no: OrderNoPath, me: Me, db: DB):
     return service.get_order(db, me.id, order_no)
@@ -101,10 +111,15 @@ def get_order(order_no: OrderNoPath, me: Me, db: DB):
     "/orders/{order_no}/cancel",
     operation_id="orders_cancel",
     summary="取消订单",
-    description="取消当前用户的待支付订单，取消后订单变为已关闭。需要登录。只有待支付的订单能取消，已支付或已关闭的返回 ORDER_NOT_CANCELLABLE。",
+    description=(
+        "取消当前用户的待支付订单。需要登录。真实支付模式下先在微信关单，再将本地订单改为已关闭。"
+        "已支付或已关闭的订单返回 ORDER_NOT_CANCELLABLE，微信关单暂未确认时可以重试。"
+    ),
     response_model=OrderOut,
     response_description="取消后的订单",
-    responses=errors_doc(*_AUTH, ErrorCode.ORDER_NOT_FOUND, ErrorCode.ORDER_NOT_CANCELLABLE),
+    responses=errors_doc(
+        *_AUTH, ErrorCode.ORDER_NOT_FOUND, ErrorCode.ORDER_NOT_CANCELLABLE, ErrorCode.INTERNAL_ERROR
+    ),
 )
 def cancel_order(order_no: OrderNoPath, me: Me, db: DB):
     return service.cancel_order(db, me.id, order_no)
@@ -117,19 +132,48 @@ async def _raw_body(request: Request) -> bytes:
     return await request.body()
 
 
+_WX_ACK = (
+    "回调使用微信支付协议。成功返回 HTTP 204 空响应。"
+    '失败固定返回 {"code":"FAIL","message":"失败原因"}，各状态码对应的内部错误仅供排查。'
+)
+
+
+def _wxpay_errors(*codes: ErrorCode) -> dict:
+    return {
+        status: {"model": WxpayFailure, "description": response["description"]}
+        for status, response in errors_doc(*codes, ErrorCode.INTERNAL_ERROR).items()
+    }
+
+
+def _wxpay_ack(
+    handler: Callable[[Session, Mapping[str, str], bytes], None], db: Session, request: Request, body: bytes
+) -> Response:
+    try:
+        handler(db, request.headers, body)
+    except Exception as exc:
+        if not isinstance(exc, AppError):
+            log.error("微信支付回调处理失败 handler=%s error_type=%s", handler.__name__, type(exc).__name__)
+            exc = AppError(ErrorCode.INTERNAL_ERROR)
+        db.rollback()
+        return JSONResponse(
+            status_code=exc.status, content=WxpayFailure(code="FAIL", message=exc.message).model_dump()
+        )
+    return Response(status_code=204)
+
+
 @callback_router.post(
     "/wxpay",
     operation_id="callbacks_wxpay",
     summary="微信支付结果通知",
     description=(
-        "由微信支付服务器调用，前端不要调用。不需要登录，靠签名验证来源：签名不对返回 PAYMENT_SIGNATURE_INVALID。"
-        "处理是幂等的，重复通知不会重复发放权益。处理成功返回 {code: SUCCESS, message: 成功}。"
+        "由微信支付服务器调用，无需登录。服务端验证签名并解密原始报文。重复通知不会重复发放权益。"
         "订单已关闭时自动发起全额退款，保留系统退款记录，不发放权益。"
-        "联调（fake）模式下，签名放在 X-Fake-Signature 请求头，请求体是 JSON。"
+        "联调（fake）模式下，签名放在 X-Fake-Signature 请求头，请求体是 JSON。" + _WX_ACK
     ),
-    response_model=WxpayAck,
+    status_code=204,
+    response_class=Response,
     response_description="通知已处理",
-    responses=errors_doc(
+    responses=_wxpay_errors(
         ErrorCode.PAYMENT_SIGNATURE_INVALID,
         ErrorCode.ORDER_NOT_FOUND,
         ErrorCode.ORDER_NOT_PAYABLE,
@@ -137,8 +181,29 @@ async def _raw_body(request: Request) -> bytes:
     ),
 )
 def wxpay_notify(request: Request, db: DB, body: Annotated[bytes, Depends(_raw_body)]):
-    headers = {k.lower(): v for k, v in request.headers.items()}
-    return service.handle_wxpay_notify(db, headers, body)
+    return _wxpay_ack(service.handle_wxpay_notify, db, request, body)
+
+
+@callback_router.post(
+    "/wxpay/refund",
+    operation_id="callbacks_wxpay_refund",
+    summary="微信退款结果通知",
+    description=(
+        "由微信支付服务器调用，无需登录。验签解密后核对商户单号、微信支付单号和金额。"
+        "成功退款入账一次，退款关闭释放预占余额。退款异常继续预占，等待商户处理。" + _WX_ACK
+    ),
+    status_code=204,
+    response_class=Response,
+    response_description="退款通知已处理",
+    responses=_wxpay_errors(
+        ErrorCode.PAYMENT_SIGNATURE_INVALID,
+        ErrorCode.NOT_FOUND,
+        ErrorCode.REFUND_NOT_ALLOWED,
+        ErrorCode.VALIDATION_ERROR,
+    ),
+)
+def wxpay_refund_notify(request: Request, db: DB, body: Annotated[bytes, Depends(_raw_body)]):
+    return _wxpay_ack(service.handle_wxpay_refund_notify, db, request, body)
 
 
 # ---------- 联调 ----------
