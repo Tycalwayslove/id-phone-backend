@@ -2,7 +2,16 @@
 
 import io
 
-from PIL import Image, ImageColor, ImageDraw, ImageFont, ImageOps, UnidentifiedImageError
+from PIL import (
+    Image,
+    ImageColor,
+    ImageDraw,
+    ImageEnhance,
+    ImageFilter,
+    ImageFont,
+    ImageOps,
+    UnidentifiedImageError,
+)
 
 # 上传允许的格式：Pillow 识别出的格式 → (mime, 扩展名)
 ALLOWED_FORMATS = {"JPEG": ("image/jpeg", "jpg"), "PNG": ("image/png", "png")}
@@ -66,6 +75,22 @@ def _apply_watermark(img: Image.Image) -> Image.Image:
     return Image.alpha_composite(img.convert("RGBA"), layer).convert("RGB")
 
 
+def _apply_beauty(img: Image.Image, level: int) -> Image.Image:
+    """提高档位时增加平滑图的混合权重，并略微提亮。"""
+    alpha = img.getchannel("A") if img.mode == "RGBA" else None
+    # 预乘透明度再做模糊，避免透明像素原有的颜色渗入主体边缘。
+    blur_source = img.convert("RGBa") if alpha is not None else img
+    blurred = blur_source.filter(ImageFilter.GaussianBlur(radius=1.5))
+    if alpha is not None:
+        blurred = blurred.convert("RGBA").convert("RGB")
+        img = img.convert("RGB")
+    blended = Image.blend(img, blurred, 0.06 * level)
+    result = ImageEnhance.Brightness(blended).enhance(1 + 0.012 * level)
+    if alpha is not None:
+        result.putalpha(alpha)
+    return result
+
+
 def make_render(
     data: bytes,
     *,
@@ -79,15 +104,16 @@ def make_render(
 ) -> bytes:
     """把底片（抠图或原图）导出成规格要求的 JPEG 字节。
 
-    步骤：纠正方向 → 按宽高比居中裁剪 → 缩放 → 透明区域铺底色 → （预览）加水印 → 压缩到大小上限内。
+    步骤：纠正方向 → 居中裁剪 → 缩放 → 按档位美颜 → 透明区域铺底色 → （预览）加水印 → 压缩。
     """
-    # TODO: beauty_level 美颜暂未实现，先忽略
     with Image.open(io.BytesIO(data)) as src:
         img = ImageOps.exif_transpose(src)
         has_alpha = img.mode in ("RGBA", "LA") or "transparency" in img.info
         img = img.convert("RGBA" if has_alpha else "RGB")
     img = _center_crop(img, width_px / height_px)
     img = img.resize((width_px, height_px), Image.Resampling.LANCZOS)
+    if beauty_level > 0:
+        img = _apply_beauty(img, beauty_level)
     if has_alpha:
         canvas = Image.new("RGB", img.size, ImageColor.getrgb(bg_color))
         canvas.paste(img, mask=img.getchannel("A"))

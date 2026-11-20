@@ -1,8 +1,9 @@
 import io
 import os
+from itertools import pairwise
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw, ImageStat
 
 from app.modules.photos import imaging
 from tests.photos.helpers import jpeg_bytes, png_rgba_bytes
@@ -58,3 +59,51 @@ def test_inspect_rejects_bad_input():
     Image.new("RGB", (400, 400)).save(gif, "GIF")
     with pytest.raises(imaging.ImageInvalidError):
         imaging.inspect_image(gif.getvalue())
+
+
+@pytest.mark.parametrize("beauty_level", [0, 5])
+def test_rgba_render_preserves_alpha_when_replacing_background(beauty_level):
+    original = Image.new("RGBA", (96, 32), (255, 0, 0, 0))
+    draw = ImageDraw.Draw(original)
+    draw.rectangle((32, 0, 63, 31), fill=(255, 255, 255, 255))
+    draw.rectangle((64, 0, 95, 31), fill=(0, 0, 0, 128))
+    buf = io.BytesIO()
+    original.save(buf, "PNG")
+
+    result = _render(buf.getvalue(), width_px=96, height_px=32, bg_color="#4080C0", beauty_level=beauty_level)
+    with Image.open(io.BytesIO(result)) as out:
+        assert out.getpixel((16, 16)) == pytest.approx((64, 128, 192), abs=3)
+        assert out.getpixel((48, 16)) == pytest.approx((255, 255, 255), abs=3)
+        assert out.getpixel((80, 16)) == pytest.approx((32, 64, 96), abs=3)
+
+
+@pytest.fixture
+def textured_image():
+    img = Image.frombytes("L", (64, 64), bytes([60, 180] * 32) * 64).convert("RGB")
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return img, buf.getvalue()
+
+
+def test_beauty_zero_matches_original_render_pixels(textured_image):
+    original, data = textured_image
+    legacy = io.BytesIO()
+    original.save(legacy, "JPEG", quality=95, dpi=(300, 300), optimize=True)
+    legacy.seek(0)
+
+    result = _render(data, width_px=64, height_px=64, beauty_level=0)
+    with Image.open(legacy) as expected, Image.open(io.BytesIO(result)) as out:
+        assert out.tobytes() == expected.tobytes()
+
+
+def test_beauty_smooths_and_brightens_more_at_higher_levels(textured_image):
+    _, data = textured_image
+    stats = []
+    for level in range(6):
+        result = _render(data, width_px=64, height_px=64, beauty_level=level)
+        with Image.open(io.BytesIO(result)) as out:
+            stats.append(ImageStat.Stat(out.crop((16, 16, 48, 48)).convert("L")))
+
+    for lower, higher in pairwise(stats):
+        assert higher.mean[0] > lower.mean[0]
+        assert higher.stddev[0] < lower.stddev[0]
