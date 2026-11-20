@@ -108,11 +108,11 @@
   &__target {
     display: flex;
     flex: 1;
-    align-items: center;
+    align-items: stretch;
     justify-content: center;
     width: 100%;
     min-height: 0;
-    padding: 16px 0;
+    padding: 8px 0 0;
   }
 
   &__album {
@@ -142,14 +142,18 @@
 }
 
 .camera-target {
+  // 自拍时手臂伸直，脸约占画面宽度的 40%~55%：外框铺满屏宽，头部轮廓约占屏宽 54%（矮屏按高度缩小）
+  --head-w: min(54vw, 40vh);
+  --head-h: calc(var(--head-w) * 1.32);
+  --head-top: 5%;
+
   position: relative;
   box-sizing: border-box;
-  width: min(74vw, 416px, 54vh);
+  width: 94vw;
   height: 100%;
-  max-height: 556px;
-  border: 2px solid rgba(255, 255, 255, 0.72);
-  border-radius: 24px;
-  box-shadow: 0 0 0 120vmax rgba(23, 35, 59, 0.22);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  border-radius: 32px;
+  box-shadow: 0 0 0 120vmax rgba(23, 35, 59, 0.16);
 
   &--lit {
     box-shadow: 0 0 0 120vmax #fff;
@@ -161,23 +165,23 @@
     left: 50%;
     box-sizing: border-box;
     transform: translateX(-50%);
-    border: 3px solid rgba(255, 255, 255, 0.72);
-    background: rgba(255, 255, 255, 0.06);
+    border: 3px solid rgba(255, 255, 255, 0.8);
+    background: rgba(255, 255, 255, 0.05);
   }
 
   &__head {
-    top: 12%;
-    width: 55%;
-    height: 58%;
+    top: var(--head-top);
+    width: var(--head-w);
+    height: var(--head-h);
     border-radius: 48% 48% 46% 46%;
   }
 
   &__shoulders {
+    top: calc(var(--head-top) + var(--head-h) - 6px);
     bottom: 0;
-    width: 91%;
-    height: 23%;
+    width: 100%;
     border-bottom: 0;
-    border-radius: 54% 54% 0 0;
+    border-radius: 50% 50% 0 0 / 36% 36% 0 0;
   }
 
   &__line {
@@ -187,11 +191,11 @@
     border-top: 2px dashed rgba(255, 255, 255, 0.88);
 
     &--top {
-      top: 12%;
+      top: var(--head-top);
     }
 
     &--chin {
-      top: 70%;
+      top: calc(var(--head-top) + var(--head-h));
     }
 
     text {

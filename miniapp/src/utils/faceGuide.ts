@@ -37,7 +37,7 @@ export const GUIDE_LIMITS = {
   autoDelay: 1000,
   maxSampleAge: 750, // 视频断流时，禁止用旧结果完成自动拍摄
   minWidth: 0.36,
-  maxWidth: 0.66, // 轮廓头部宽为外框的 55%，留出自拍时的轻微晃动余量
+  maxWidth: 0.66, // 外框铺满屏宽，头部轮廓约为外框的 57%；脸宽在外框的 36%~66% 之间都算合适，留出自拍晃动余量
   centerX: 0.13, // 相对于外框宽度、头部轮廓高度的容差
   centerY: 0.16,
   poseDegrees: 10,
