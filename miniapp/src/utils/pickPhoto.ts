@@ -2,7 +2,7 @@
 import Taro from '@tarojs/taro'
 import type { components } from '../api/schema'
 import { createPhoto, uploadPhotoFile } from '../api/photos'
-import { isUserCancel } from './errors'
+import { isUserCancel, UserFacingError } from './errors'
 
 type PhotoOut = components['schemas']['PhotoOut']
 export type PhotoSource = components['schemas']['PhotoCreate']['source']
@@ -12,10 +12,10 @@ export async function pickPhotoFile(source: PhotoSource): Promise<string | null>
   const sourceType: Array<'camera' | 'album'> = [source === 'camera' ? 'camera' : 'album']
   try {
     if (Taro.getEnv() === Taro.ENV_TYPE.WEAPP) {
-      const res = await Taro.chooseMedia({ count: 1, mediaType: ['image'], sourceType, camera: 'back' })
+      const res = await Taro.chooseMedia({ count: 1, mediaType: ['image'], sourceType, sizeType: ['compressed'], camera: 'back' })
       return res.tempFiles[0]?.tempFilePath ?? null
     }
-    const res = await Taro.chooseImage({ count: 1, sourceType })
+    const res = await Taro.chooseImage({ count: 1, sourceType, sizeType: ['compressed'] })
     return res.tempFilePaths[0] ?? null
   } catch (e) {
     if (isUserCancel(e)) return null
@@ -23,10 +23,11 @@ export async function pickPhotoFile(source: PhotoSource): Promise<string | null>
   }
 }
 
-/** 上传前的长边上限（像素）：后端抠图最多用到 1024px，证件照成品只有几百像素，2000px 足够 */
-const MAX_SIDE_PX = 2000
-/** 压缩后仍超过这个大小就再降一次画质；真机调试的上传上限是 2MB */
+/** 压缩后的目标大小；真机调试的上传上限是 2MB，后端上限 10MB */
 const MAX_UPLOAD_BYTES = 1.8 * 1024 * 1024
+const HARD_LIMIT_BYTES = 2 * 1024 * 1024
+/** 只调画质逐级压缩（按尺寸压缩的参数在部分环境不支持，会直接失败） */
+const QUALITY_STEPS = [80, 60, 40]
 
 function fileSize(path: string): Promise<number | null> {
   return new Promise((resolve) => {
@@ -38,31 +39,33 @@ function fileSize(path: string): Promise<number | null> {
   })
 }
 
-async function compress(path: string, quality: number, longSide: number, landscape: boolean): Promise<string> {
-  const res = await Taro.compressImage({
-    src: path,
-    quality,
-    ...(landscape ? { compressedWidth: longSide } : { compressedHeight: longSide })
-  } as Taro.compressImage.Option)
-  return res.tempFilePath
-}
+const kb = (bytes: number | null) => (bytes === null ? '未知' : `${Math.round(bytes / 1024)}KB`)
 
-/** 照片太大时先在手机上缩小再上传；压缩失败就用原图（大小由后端兜底校验） */
+/** 照片太大时先在手机上压缩再上传；每一步都检查大小，并在调试台打印走了哪条路径 */
 async function shrinkForUpload(path: string): Promise<string> {
   if (Taro.getEnv() !== Taro.ENV_TYPE.WEAPP) return path
-  try {
-    const [info, size] = await Promise.all([Taro.getImageInfo({ src: path }), fileSize(path)])
-    const longSide = Math.max(info.width, info.height)
-    if (longSide <= MAX_SIDE_PX && size !== null && size <= MAX_UPLOAD_BYTES) return path
-    const target = Math.min(longSide, MAX_SIDE_PX)
-    const landscape = info.width >= info.height
-    let out = await compress(path, 85, target, landscape)
-    const outSize = await fileSize(out)
-    if (outSize !== null && outSize > MAX_UPLOAD_BYTES) out = await compress(path, 70, target, landscape)
-    return out
-  } catch {
-    return path
+  const original = await fileSize(path)
+  if (original !== null && original <= MAX_UPLOAD_BYTES) return path
+  let best = path
+  let bestSize = original
+  for (const quality of QUALITY_STEPS) {
+    try {
+      const { tempFilePath } = await Taro.compressImage({ src: path, quality })
+      const size = await fileSize(tempFilePath)
+      console.info(`[上传压缩] 画质 ${quality}：${kb(original)} → ${kb(size)}`)
+      if (size !== null && (bestSize === null || size < bestSize)) {
+        best = tempFilePath
+        bestSize = size
+      }
+      if (size !== null && size <= MAX_UPLOAD_BYTES) break
+    } catch (e) {
+      console.warn(`[上传压缩] 画质 ${quality} 压缩失败`, e)
+    }
   }
+  if (bestSize !== null && bestSize > HARD_LIMIT_BYTES) {
+    throw new UserFacingError('照片太大，请重新拍一张或换一张照片')
+  }
+  return best
 }
 
 /** 用相机或相册返回的临时文件创建照片 */

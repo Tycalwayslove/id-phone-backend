@@ -25,7 +25,8 @@ interface Draft {
 function takePhoto(): Promise<string> {
   return new Promise((resolve, reject) => {
     Taro.createCameraContext().takePhoto({
-      quality: 'high',
+      // 证件照成品只有几百像素宽，普通画质足够，文件也小，上传更稳
+      quality: 'normal',
       success: ({ tempImagePath }) => resolve(tempImagePath),
       fail: reject
     })

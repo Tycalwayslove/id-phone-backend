@@ -53,7 +53,11 @@ const TABLE: Record<string, ErrorInfo> = {
 }
 
 /** 把任意异常转成可展示的信息；未知错误码用服务端返回的 message */
+/** 前端自己发现的问题，message 直接展示给用户 */
+export class UserFacingError extends Error {}
+
 export function describeError(err: unknown): ErrorInfo {
+  if (err instanceof UserFacingError) return { message: err.message, action: 'none' }
   if (err instanceof ApiError) {
     const hit = TABLE[err.code]
     if (hit) return hit
