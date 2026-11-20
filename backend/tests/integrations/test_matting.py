@@ -9,7 +9,7 @@ from app.integrations import matting
 
 
 def test_fake_matting_removes_background_and_keeps_subject(monkeypatch):
-    monkeypatch.setattr(matting, "settings", SimpleNamespace())
+    monkeypatch.setattr(matting, "settings", SimpleNamespace(matting_mode="fake", matting_timeout_seconds=5))
     original = Image.new("RGB", (32, 32), (240, 240, 240))
     draw = ImageDraw.Draw(original)
     draw.rectangle((0, 16, 31, 31), fill=(228, 232, 236))

@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     oss_bucket: str = ""
     oss_access_key_id: str = ""
     oss_access_key_secret: str = ""
+    # 地域 ID，如 cn-hangzhou；留空时从标准 Endpoint 推出
+    oss_region: str = ""
 
     # 抠图与美颜：fake 时直接用原图
     matting_mode: Literal["fake", "zheying"] = "fake"
