@@ -64,4 +64,4 @@
 | 0028 | [小程序跟进：续费、退款中、照片检测提示（T017）](0028-miniapp-followup.md) | 已完成，待真机验证 |
 | 0029 | [后台需人工核对处理（T018）](0029-admin-manual-review.md) | 已完成 |
 | 0030 | [服务商规格目录同步（T019）与小程序 WXSS 修复](0030-provider-spec-sync-and-miniapp-wxss.md) | 已完成，真实目录待密钥 |
-| 0031 | [分页统一复用、规格页同步入口](0031-pagination-and-spec-sync-entry.md) | 已完成（待 CI） |
+| 0031 | [分页统一复用、规格页同步入口](0031-pagination-and-spec-sync-entry.md) | 已完成 |
