@@ -1,16 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Text, View } from '@tarojs/components'
+import { Button, Text, View } from '@tarojs/components'
 import { useRouter } from '@tarojs/taro'
-import { Button } from '@nutui/nutui-react-taro'
 import type { components } from '../../api/schema'
 import { getSpec } from '../../api/specs'
 import Loading from '../../components/Loading'
 import PageContainer from '../../components/PageContainer'
+import ShootGuide from '../../components/ShootGuide'
+import useShootFlow from '../../hooks/useShootFlow'
 import { handleError } from '../../utils/errors'
 import { formatMm, formatSizeRange } from '../../utils/format'
-import { PAGES, navigate } from '../../utils/nav'
-import { pickAndCreatePhoto } from '../../utils/pickPhoto'
-import type { PhotoSource } from '../../utils/pickPhoto'
 import './index.scss'
 
 type SpecDetail = components['schemas']['SpecDetail']
@@ -19,7 +17,7 @@ export default function SpecDetailPage() {
   const { params } = useRouter()
   const code = params.code ?? ''
   const [spec, setSpec] = useState<SpecDetail | null>(null)
-  const [busy, setBusy] = useState(false)
+  const shoot = useShootFlow()
 
   useEffect(() => {
     if (!code) return
@@ -27,19 +25,6 @@ export default function SpecDetailPage() {
       .then(setSpec)
       .catch((e: unknown) => handleError(e))
   }, [code])
-
-  async function choose(source: PhotoSource): Promise<void> {
-    if (busy || !spec) return
-    setBusy(true)
-    try {
-      const photo = await pickAndCreatePhoto(source)
-      if (photo) await navigate(PAGES.editor, { photo_id: photo.id, spec_code: spec.code })
-    } catch (e) {
-      await handleError(e)
-    } finally {
-      setBusy(false)
-    }
-  }
 
   if (!spec) {
     return (
@@ -109,13 +94,11 @@ export default function SpecDetailPage() {
       </View>
 
       <View className='bottom-bar'>
-        <Button block type='default' disabled={busy} onClick={() => choose('camera')}>
-          拍照
-        </Button>
-        <Button block type='primary' disabled={busy} onClick={() => choose('upload')}>
-          从相册选
+        <Button className='btn-native' disabled={shoot.busy} onClick={() => void shoot.open(spec.code, spec)}>
+          开始拍
         </Button>
       </View>
+      <ShootGuide spec={shoot.spec} onChoose={shoot.choose} onClose={shoot.close} />
     </PageContainer>
   )
 }

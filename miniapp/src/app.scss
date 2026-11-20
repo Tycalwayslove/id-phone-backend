@@ -1,28 +1,42 @@
 page {
-  /* 品牌色与语义色 */
-  --c-primary: #2b6bff;
-  --c-success: #00b578;
+  --c-ink: #17233b;
+  --c-primary: #2f6cc8;
+  --c-backdrop-blue: #438edb;
+  --c-backdrop-red: #d7263d;
+  --c-bg: #eef1f5;
+  --c-surface: #ffffff;
+  --c-text-2: #5b6577;
+  --c-line: #dde2ea;
+  --c-ok: #1f8a5b;
+  --c-danger: #d93a3a;
   --c-warning: #ff8f1f;
-  --c-danger: #ff3141;
-  --c-text: #1f2329;
-  --c-text-2: #646a73;
-  --c-bg: #f5f6f8;
-  --c-line: #eceef1;
-  /* 字号 */
+  --c-text: var(--c-ink);
+  --c-success: var(--c-ok);
+
+  --fs-hero: 52px;
+  --fs-title: 36px;
+  --fs-section: 32px;
   --fs-body: 28px;
-  --fs-title: 32px;
   --fs-small: 24px;
-  /* 卡片 */
-  --radius: 24px;
+  --fs-price: 44px;
+  --radius: 20px;
+  --radius-button: 16px;
+  --radius-sheet: 32px;
+  --button-height: 96px;
   --gap: 24px;
 
-  /* NutUI 主色跟随品牌色 */
-  --nutui-color-primary: #2b6bff;
-  --nutui-color-primary-stop-1: #2b6bff;
-  --nutui-color-primary-stop-2: #2b6bff;
+  --nutui-color-primary: var(--c-primary);
+  --nutui-color-primary-stop-1: var(--c-primary);
+  --nutui-color-primary-stop-2: var(--c-primary);
+  --nutui-button-default-height: var(--button-height);
+  --nutui-button-border-radius: var(--radius-button);
+  --nutui-button-default-padding: 0 24px;
+  --nutui-button-default-background-color: var(--c-surface);
+  --nutui-button-default-border-color: var(--c-line);
 
   background: var(--c-bg);
-  color: var(--c-text);
+  color: var(--c-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
   font-size: var(--fs-body);
   line-height: 1.5;
 }
@@ -32,7 +46,7 @@ page {
   margin-bottom: var(--gap);
   padding: 32px;
   border-radius: var(--radius);
-  background: #fff;
+  background: var(--c-surface);
 }
 
 .section-title {
@@ -40,9 +54,9 @@ page {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: var(--fs-title);
+  font-size: var(--fs-section);
   font-weight: 600;
-  color: var(--c-text);
+  color: var(--c-ink);
 }
 
 .section-more {
@@ -80,7 +94,7 @@ page {
   display: flex;
   box-sizing: border-box;
   padding: 24px 32px calc(24px + env(safe-area-inset-bottom));
-  background: #fff;
+  background: var(--c-surface);
   box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.04);
 
   gap: 24px;
@@ -98,23 +112,25 @@ page {
   align-items: center;
   justify-content: center;
   margin: 0;
-  padding: 0 48px;
-  height: 88px;
+  box-sizing: border-box;
+  padding: 0 24px;
+  min-height: var(--button-height);
   border: none;
-  border-radius: 999px;
+  border-radius: var(--radius-button);
   background: var(--c-primary);
   color: #fff;
-  font-size: var(--fs-title);
-  line-height: 88px;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  line-height: 1.4;
 
   &::after {
     border: none;
   }
 
   &--plain {
-    background: #fff;
-    color: var(--c-primary);
-    border: 2px solid var(--c-primary);
+    background: var(--c-surface);
+    color: var(--c-ink);
+    border: 1px solid var(--c-line);
   }
 }
 
@@ -124,7 +140,7 @@ page {
   align-items: center;
   justify-content: space-between;
   padding: 32px;
-  background: #fff;
+  background: var(--c-surface);
   font-size: var(--fs-title);
   color: var(--c-text);
   border-bottom: 1px solid var(--c-line);
@@ -147,5 +163,56 @@ page {
 
   &::after {
     border: none;
+  }
+}
+
+/* 相框的四角独立于照片层，换图时角标仍保持原位。 */
+.photo-frame {
+  position: relative;
+  box-sizing: border-box;
+  aspect-ratio: 3 / 4;
+  background: var(--c-surface);
+
+  &::before,
+  &::after,
+  &__corner {
+    position: absolute;
+    z-index: 2;
+    box-sizing: border-box;
+    width: 20px;
+    height: 20px;
+    border: solid var(--c-line);
+    border-width: 0;
+    pointer-events: none;
+  }
+
+  &::before {
+    content: '';
+    top: -5px;
+    left: -5px;
+    border-top-width: 3px;
+    border-left-width: 3px;
+  }
+
+  &::after {
+    content: '';
+    right: -5px;
+    bottom: -5px;
+    border-right-width: 3px;
+    border-bottom-width: 3px;
+  }
+
+  &__corner--top-right {
+    top: -5px;
+    right: -5px;
+    border-top-width: 3px;
+    border-right-width: 3px;
+  }
+
+  &__corner--bottom-left {
+    bottom: -5px;
+    left: -5px;
+    border-bottom-width: 3px;
+    border-left-width: 3px;
   }
 }

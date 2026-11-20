@@ -1,58 +1,72 @@
 .home-hero {
-  margin-bottom: 40px;
-  padding: 48px 32px 32px;
-  border-radius: var(--radius);
-  background: linear-gradient(135deg, #2b6bff 0%, #5b8cff 100%);
-  display: flex;
-  flex-direction: column;
+  margin: 12px auto 32px;
+  text-align: center;
 
-  &__name {
-    font-size: 52px;
-    font-weight: 700;
-    color: #fff;
+  &__title {
+    display: block;
+    font-size: var(--fs-hero);
+    font-weight: 600;
   }
 
-  &__slogan {
-    margin-top: 12px;
-    font-size: var(--fs-body);
-    color: rgba(255, 255, 255, 0.85);
+  &__intro {
+    display: block;
+    margin: 12px auto 0;
+    max-width: 500px;
+    color: var(--c-text-2);
   }
 
-  &__search {
-    margin-top: 32px;
+  &__note {
+    display: block;
+    margin-top: 14px;
   }
 }
 
 .home-section {
-  margin-top: 40px;
+  margin-top: 42px;
+}
+
+.home-link {
+  font-size: var(--fs-small);
+  font-weight: 400;
+  color: var(--c-primary);
+}
+
+.home-receipt-copy {
+  display: block;
+  margin-bottom: 16px;
+  color: var(--c-text-2);
 }
 
 .home-scroll {
   white-space: nowrap;
 
   &__row {
-    display: flex;
+    display: inline-flex;
+    gap: 16px;
   }
 }
 
 .home-receipt {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  width: 280px;
-  margin-right: 24px;
-  padding: 32px;
+  padding: 16px 24px;
+  border: 1px solid var(--c-line);
   border-radius: var(--radius);
-  background: #fff;
+  color: var(--c-primary);
+  font-size: var(--fs-small);
+}
 
-  &__name {
-    font-size: var(--fs-title);
-    color: var(--c-text);
+.home-reason {
+  display: flex;
+  gap: 24px;
+  padding: 16px 0;
+  border-top: 1px solid var(--c-line);
+
+  &__label {
+    flex: 0 0 176px;
+    font-weight: 600;
   }
 
-  &__sub {
-    margin-top: 8px;
-    font-size: var(--fs-small);
-    color: var(--c-primary);
+  &__description {
+    flex: 1;
+    color: var(--c-text-2);
   }
 }

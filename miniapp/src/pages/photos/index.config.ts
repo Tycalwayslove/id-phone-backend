@@ -1,5 +1,5 @@
 export default definePageConfig({
-  navigationBarTitleText: '证件照',
+  navigationBarTitleText: '我的照片',
   enablePullDownRefresh: true,
   onReachBottomDistance: 80
 })
