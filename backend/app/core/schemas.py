@@ -17,17 +17,18 @@ class OkResponse(Schema):
     ok: bool = Field(default=True, description="固定为 true")
 
 
-def page_model(item: type[BaseModel], name: str) -> Any:
-    """生成分页返回模型。name 会成为接口文档里的模型名，如 PhotoPage。
+def page_model(item: type[BaseModel], name: str, order: str = "按创建时间从新到旧") -> Any:
+    """生成分页返回模型 {items, next_cursor}。name 会成为接口文档里的模型名，如 PhotoPage。
 
-    用法：PhotoPage = page_model(PhotoOut, "PhotoPage")
+    用法：PhotoPage = page_model(PhotoOut, "PhotoPage")；排序不是按创建时间倒序时传 order 说明。
+    分页参数和服务层写法见 app/core/pagination.py。
     """
     first_line = (item.__doc__ or name).strip().splitlines()[0]
     model = create_model(
         name,
         __base__=Schema,
         __doc__=f"分页列表：{first_line}",
-        items=(list[item], Field(description="本页数据，按创建时间从新到旧")),
+        items=(list[item], Field(description=f"本页数据，{order}")),
         next_cursor=(str | None, Field(default=None, description="下一页游标；为空表示没有更多了")),
     )
     return model

@@ -2,10 +2,10 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Path, Query
 
-from app.core.deps import DB, Me
+from app.core.deps import DB, Me, Page
 from app.core.errors import ErrorCode, errors_doc
 from app.modules.entitlements import service
-from app.modules.entitlements.schemas import EntitlementOut
+from app.modules.entitlements.schemas import EntitlementOut, EntitlementPage
 
 router = APIRouter(tags=["权益"])
 
@@ -15,17 +15,18 @@ router = APIRouter(tags=["权益"])
     operation_id="entitlements_list",
     summary="我的权益列表",
     description=(
-        "返回当前用户买到的权益（保管期、回执次数等），按到期时间从晚到早排序，最多 100 条，不分页。"
+        "返回当前用户买到的权益（保管期、回执次数等），按到期时间从晚到早排序，游标分页。"
         "需要登录。默认只返回当前有效的权益。传 status=expired 查已到期或已撤销的权益，status=all 查全部。"
         "根据 can_renew 判断是否展示续费入口。"
     ),
-    response_model=list[EntitlementOut],
-    response_description="权益列表，没有则为空数组",
+    response_model=EntitlementPage,
+    response_description="权益分页列表，没有则 items 为空数组",
     responses=errors_doc(ErrorCode.AUTH_REQUIRED, ErrorCode.AUTH_INVALID),
 )
 def list_entitlements(
     me: Me,
     db: DB,
+    page: Page,
     status: Annotated[
         Literal["active", "expired", "all"],
         Query(
@@ -35,7 +36,7 @@ def list_entitlements(
         ),
     ] = "active",
 ):
-    return service.list_entitlements(db, me.id, status)
+    return service.list_entitlements(db, me.id, status, page)
 
 
 @router.get(

@@ -14,9 +14,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.deps import PageParams
 from app.core.errors import AppError, ErrorCode
-from app.core.utils import decode_cursor, encode_cursor, utcnow
+from app.core.pagination import PageParams
+from app.core.utils import utcnow
 from app.integrations import wechat
 from app.integrations.matting import get_matting
 from app.integrations.storage import build_key, get_storage
@@ -405,15 +405,12 @@ def apply_wechat_media_check(db: Session, event: WechatMediaEvent) -> None:
 def list_photos(db: Session, *, user_id: int, page: PageParams) -> PhotoPage:
     from app.modules.entitlements import service as ent_service
 
-    cur = decode_cursor(page.cursor)
-    before = cur.get("id") if cur and isinstance(cur.get("id"), int) else None
-    rows = repo.list_photos(db, user_id, before_id=before, limit=page.limit + 1)
-    has_more = len(rows) > page.limit
-    rows = rows[: page.limit]
+    rows = repo.list_photos(db, user_id, before_id=page.before_id(), limit=page.fetch_limit)
+    rows, next_cursor = page.slice(rows)
     files = repo.get_files(db, user_id, [p.original_file_id for p in rows])
     access = ent_service.photo_access_many(db, user_id, [p.id for p in rows])
     items = [_photo_out(p, files[p.original_file_id], AccessOut.model_validate(access[p.id])) for p in rows]
-    return PhotoPage(items=items, next_cursor=encode_cursor({"id": rows[-1].id}) if has_more else None)
+    return PhotoPage(items=items, next_cursor=next_cursor)
 
 
 def get_photo_detail(db: Session, *, user_id: int, photo_id: int) -> PhotoDetail:

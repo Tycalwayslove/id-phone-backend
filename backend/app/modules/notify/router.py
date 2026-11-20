@@ -15,7 +15,7 @@ _AUTH_ERRORS = (ErrorCode.AUTH_REQUIRED, ErrorCode.AUTH_INVALID, ErrorCode.ACCOU
     operation_id="notify_templates",
     summary="订阅消息模板列表",
     description=(
-        "返回小程序需要向用户申请授权的订阅消息模板。需要登录。"
+        "返回小程序需要向用户申请授权的订阅消息模板（固定几个，一次返回全部、不分页）。需要登录。"
         "前端在用户提交回执申请前，用这里的 template_id 调 wx.requestSubscribeMessage，"
         "再调用“上报订阅授权”接口把用户点了允许的模板告诉后端，办理结果出来后才能通知到用户。"
     ),

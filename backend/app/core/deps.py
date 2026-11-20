@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.errors import AppError, ErrorCode
+from app.core.pagination import CURSOR_DESCRIPTION, DEFAULT_LIMIT, LIMIT_DESCRIPTION, MAX_LIMIT, PageParams
 from app.core.security import hash_token, sign
 from app.core.utils import utcnow
 from app.models import AdminSession, AdminUser, AuthSession, User, UserIdentity
@@ -203,21 +204,16 @@ def require(permission: str):
 # ---------- 通用参数 ----------
 
 
-@dataclass
-class PageParams:
-    cursor: str | None
-    limit: int
-
-
 def page_params(
-    cursor: Annotated[
-        str | None, Query(description="翻页游标：第一页不传，之后传上一页返回的 next_cursor")
-    ] = None,
-    limit: Annotated[int, Query(ge=1, le=100, description="每页条数，1～100，默认 20")] = 20,
+    cursor: Annotated[str | None, Query(description=CURSOR_DESCRIPTION, examples=["eyJpIjoxMDI0fQ"])] = None,
+    limit: Annotated[
+        int, Query(ge=1, le=MAX_LIMIT, description=LIMIT_DESCRIPTION, examples=[20])
+    ] = DEFAULT_LIMIT,
 ) -> PageParams:
     return PageParams(cursor=cursor, limit=limit)
 
 
+# 列表接口统一的分页查询参数，用法见 app/core/pagination.py
 Page = Annotated[PageParams, Depends(page_params)]
 
 IdempotencyKeyHeader = Annotated[

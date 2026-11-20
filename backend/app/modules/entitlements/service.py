@@ -13,15 +13,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError, ErrorCode
+from app.core.pagination import PageParams
 from app.core.utils import utcnow
 from app.models import Entitlement, EntitlementLedger, EntitlementQuota, OrderItem, Plan
 from app.modules.entitlements import repo
-from app.modules.entitlements.schemas import EntitlementOut
+from app.modules.entitlements.schemas import EntitlementOut, EntitlementPage
 from app.modules.notify import service as notify_service
 
 DEFAULT_STORAGE_DAYS = 30
 RENEWAL_GRACE_PERIOD = timedelta(days=30)
-LIST_LIMIT = 100
 
 
 @dataclass(frozen=True)
@@ -359,10 +359,24 @@ def _to_outs(db: Session, ents: list[Entitlement]) -> list[EntitlementOut]:
 
 
 def list_entitlements(
-    db: Session, user_id: int, status: Literal["active", "expired", "all"]
-) -> list[EntitlementOut]:
-    ents = repo.list_for_user(db, user_id, status=status, now=utcnow(), limit=LIST_LIMIT)
-    return _to_outs(db, ents)
+    db: Session, user_id: int, status: Literal["active", "expired", "all"], page: PageParams
+) -> EntitlementPage:
+    ents = repo.list_for_user(
+        db, user_id, status=status, now=utcnow(), after=_parse_cursor(page), limit=page.fetch_limit
+    )
+    ents, next_cursor = page.slice(ents, cursor_of=lambda e: {"e": e.ends_at.isoformat(), "i": e.id})
+    return EntitlementPage(items=_to_outs(db, ents), next_cursor=next_cursor)
+
+
+def _parse_cursor(page: PageParams) -> tuple[datetime, int] | None:
+    data = page.cursor_values()
+    if not data or not isinstance(data.get("i"), int) or not isinstance(data.get("e"), str):
+        return None
+    try:
+        ends_at = datetime.fromisoformat(data["e"])
+    except ValueError:
+        return None
+    return (ends_at, data["i"]) if ends_at.tzinfo else None
 
 
 def get_entitlement(db: Session, user_id: int, entitlement_id: int) -> EntitlementOut:

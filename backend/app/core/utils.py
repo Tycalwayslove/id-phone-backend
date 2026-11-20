@@ -30,3 +30,9 @@ def decode_cursor(cursor: str | None) -> dict[str, Any] | None:
         return data if isinstance(data, dict) else None
     except ValueError:
         return None
+
+
+def contains_pattern(keyword: str) -> str:
+    """模糊查询“包含 keyword”的 LIKE 模式，已转义 % _ \\；配合 .ilike(..., escape="\\\\") 使用。"""
+    escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"

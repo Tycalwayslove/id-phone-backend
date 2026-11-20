@@ -35,7 +35,7 @@ class SpecOut(Schema):
     )
 
 
-SpecPage = page_model(SpecOut, "SpecPage")
+SpecPage = page_model(SpecOut, "SpecPage", "按排序值从小到大，排序值相同按 ID")
 
 
 class SpecFormField(Schema):

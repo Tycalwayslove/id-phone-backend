@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import Field
 
-from app.core.schemas import Schema
+from app.core.schemas import Schema, page_model
 
 
 class EntitlementOut(Schema):
@@ -35,3 +35,6 @@ class EntitlementOut(Schema):
     receipt_quota_used: int = Field(description="已使用（含办理中占用）的回执次数", examples=[0])
     receipt_quota_left: int = Field(description="剩余回执次数 = 总次数 - 已使用", examples=[1])
     resubmit_limit: int = Field(description="回执被驳回后可免费重新提交的次数；没有则为 0", examples=[3])
+
+
+EntitlementPage = page_model(EntitlementOut, "EntitlementPage", "按到期时间从晚到早")

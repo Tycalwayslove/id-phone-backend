@@ -35,7 +35,7 @@ OrderNoPath = Annotated[
     operation_id="plans_list",
     summary="在售套餐列表",
     description=(
-        "返回当前可购买的套餐，按运营配置的顺序排列。不需要登录。"
+        "返回当前可购买的套餐，按运营配置的顺序排列。在售套餐只有几个，一次返回全部、不分页。不需要登录。"
         "只包含已上架且在销售时间窗口内的套餐；权益里没有的项为 0。价格和权益以此接口为准，不要写死在前端。"
     ),
     response_model=list[PlanOut],
@@ -89,7 +89,7 @@ def create_order(payload: OrderCreateIn, me: Me, db: DB, idem: IdempotencyKeyHea
     responses=errors_doc(*_AUTH),
 )
 def list_orders(me: Me, db: DB, page: Page):
-    return service.list_orders(db, me.id, page.cursor, page.limit)
+    return service.list_orders(db, me.id, page)
 
 
 @router.get(

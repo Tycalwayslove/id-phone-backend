@@ -70,14 +70,14 @@ def test_buy_39_9_then_simulate_paid(client, db):
     assert created["total_fen"] == 3990
     assert created["pay_params"]["mode"] == "fake"
     assert created["items"][0]["photo_id"] == photo.id
-    assert client.get(f"{API}/entitlements", headers=h).json() == []
+    assert client.get(f"{API}/entitlements", headers=h).json()["items"] == []
 
     r = client.post(f"{API}/dev/orders/{created['order_no']}/simulate-paid", headers=h)
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "paid"
     assert r.json()["paid_fen"] == 3990
 
-    ents = client.get(f"{API}/entitlements", headers=h).json()
+    ents = client.get(f"{API}/entitlements", headers=h).json()["items"]
     assert len(ents) == 1
     ent = ents[0]
     assert ent["photo_id"] == photo.id
@@ -251,7 +251,7 @@ def test_wxpay_callback_marks_paid_and_is_idempotent(client, db):
         assert r.status_code == 204, r.text
         assert r.content == b""
     assert client.get(f"{API}/orders/{order_no}", headers=h).json()["status"] == "paid"
-    assert len(client.get(f"{API}/entitlements", headers=h).json()) == 1
+    assert len(client.get(f"{API}/entitlements", headers=h).json()["items"]) == 1
 
 
 @pytest.mark.parametrize(("refund_status", "order_status"), [("success", "refunded"), ("pending", "closed")])
@@ -280,7 +280,7 @@ def test_wxpay_callback_for_closed_order_refunds_once(
     detail = client.get(f"{API}/orders/{order_no}", headers=h).json()
     assert detail["status"] == order_status and detail["paid_fen"] == 9900
     assert detail["refunded_fen"] == (9900 if refund_status == "success" else 0)
-    assert client.get(f"{API}/entitlements", headers=h).json() == []
+    assert client.get(f"{API}/entitlements", headers=h).json()["items"] == []
     payment = db.scalars(select(Payment)).one()
     assert payment.status == "success" and payment.transaction_id == "WX123"
     record = db.scalars(select(Refund)).one()
@@ -317,7 +317,7 @@ def test_unlimited_99_covers_all_photos(client, db):
     h, _ = _setup(client, db)
     order_no = _buy(client, h, "unlimited_99")["order_no"]
     client.post(f"{API}/dev/orders/{order_no}/simulate-paid", headers=h)
-    ent = client.get(f"{API}/entitlements", headers=h).json()[0]
+    ent = client.get(f"{API}/entitlements", headers=h).json()["items"][0]
     assert ent["photo_id"] is None
     assert ent["receipt_quota_total"] == 10
     assert ent["one_person"] is True
@@ -330,7 +330,7 @@ def test_addon_follows_parent(client, db):
     photo = make_photo(db, uid)
     first = _buy(client, h, "photo_year_39_9", photo_id=photo.id)["order_no"]
     client.post(f"{API}/dev/orders/{first}/simulate-paid", headers=h)
-    parent = client.get(f"{API}/entitlements", headers=h).json()[0]
+    parent = client.get(f"{API}/entitlements", headers=h).json()["items"][0]
 
     addon_no = _buy(client, h, "addon_receipt_10", parent_entitlement_id=parent["id"])["order_no"]
     detail = client.get(f"{API}/orders/{addon_no}", headers=h).json()
@@ -338,7 +338,7 @@ def test_addon_follows_parent(client, db):
     assert detail["items"][0]["photo_id"] == photo.id
     client.post(f"{API}/dev/orders/{addon_no}/simulate-paid", headers=h)
 
-    ents = {e["plan_code"]: e for e in client.get(f"{API}/entitlements", headers=h).json()}
+    ents = {e["plan_code"]: e for e in client.get(f"{API}/entitlements", headers=h).json()["items"]}
     assert set(ents) == {"photo_year_39_9", "addon_receipt_10"}
     assert ents["addon_receipt_10"]["ends_at"] == parent["ends_at"]
     assert ents["addon_receipt_10"]["photo_id"] == photo.id
@@ -354,7 +354,7 @@ def test_addon_needs_valid_parent(client, db):
     bob = login(client, "dev:bob")
     bob_no = _buy(client, bob, "unlimited_99")["order_no"]
     client.post(f"{API}/dev/orders/{bob_no}/simulate-paid", headers=bob)
-    bob_ent = client.get(f"{API}/entitlements", headers=bob).json()[0]
+    bob_ent = client.get(f"{API}/entitlements", headers=bob).json()["items"][0]
     r = client.post(
         f"{API}/orders",
         json={"plan_code": "addon_receipt_10", "parent_entitlement_id": bob_ent["id"]},
@@ -695,7 +695,7 @@ def test_wechat_cancel_waits_for_remote_close_and_detail_can_recover_payment(cli
 
     assert client.get(url, headers=headers).json()["status"] == "paid"
     assert db.scalar(select(Payment.transaction_id)) == "WX123"
-    assert len(client.get(f"{API}/entitlements", headers=headers).json()) == 1
+    assert len(client.get(f"{API}/entitlements", headers=headers).json()["items"]) == 1
 
 
 def test_wechat_closed_refund_releases_reserved_balance(client, db, monkeypatch):
