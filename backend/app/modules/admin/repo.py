@@ -1,15 +1,17 @@
-"""后台查询。后台是“只读直查各业务表”的例外：函数不按用户过滤，只给 admin 模块自己用。"""
+"""后台查询、行锁和会话吊销。跨模块只读查询不按用户过滤，仅供 admin 使用。"""
 
 from collections.abc import Iterable
 from datetime import datetime
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import func, or_, select, update
+from sqlalchemy.orm import Session, defer
 
+from app.core.utils import utcnow
 from app.models import (
     AdminSession,
     AdminUser,
     AuditLog,
+    NotifyTask,
     Order,
     OrderItem,
     Payment,
@@ -35,8 +37,79 @@ def get_admin_by_username(db: Session, username: str) -> AdminUser | None:
     return db.scalar(select(AdminUser).where(AdminUser.username == username))
 
 
+def list_admin_accounts(db: Session, *, before_id: int | None, limit: int) -> list[AdminUser]:
+    stmt = select(AdminUser).options(defer(AdminUser.password_hash))
+    if before_id is not None:
+        stmt = stmt.where(AdminUser.id < before_id)
+    return list(db.scalars(stmt.order_by(AdminUser.id.desc()).limit(limit)))
+
+
+def lock_admin_for_login(db: Session, admin_id: int) -> AdminUser | None:
+    return db.get(AdminUser, admin_id, populate_existing=True, with_for_update={"key_share": True})
+
+
+def lock_admin_accounts(db: Session, admin_id: int, target_id: int) -> list[AdminUser]:
+    # 涉及所有者的写操作按同一顺序锁行，并读取锁定后的最新角色和状态。
+    stmt = (
+        select(AdminUser)
+        .where(
+            or_(
+                AdminUser.id.in_((admin_id, target_id)),
+                (AdminUser.role == "owner") & (AdminUser.status == "active"),
+            )
+        )
+        .order_by(AdminUser.id)
+        .with_for_update(key_share=True)
+        .execution_options(populate_existing=True)
+    )
+    return list(db.scalars(stmt))
+
+
+def revoke_admin_sessions(db: Session, admin_id: int) -> None:
+    db.execute(
+        update(AdminSession)
+        .where(AdminSession.admin_id == admin_id, AdminSession.revoked_at.is_(None))
+        .values(revoked_at=utcnow())
+    )
+
+
 def get_session_by_hash(db: Session, token_hash: str) -> AdminSession | None:
     return db.scalar(select(AdminSession).where(AdminSession.token_hash == token_hash))
+
+
+# ---------- 看板与通知 ----------
+
+
+def overview_counts(db: Session) -> tuple[int, int, int, int, dict[str, int]]:
+    paid = Order.status.in_(PAID_STATUSES)
+    user_count, order_count, paid_count, paid_fen = db.execute(
+        select(
+            select(func.count(User.id)).scalar_subquery(),
+            func.count(Order.id),
+            func.count(Order.id).filter(paid),
+            func.coalesce(func.sum(Order.paid_fen).filter(paid), 0),
+        )
+    ).one()
+    receipt_counts = dict(
+        db.execute(
+            select(ReceiptApplication.status, func.count(ReceiptApplication.id)).group_by(
+                ReceiptApplication.status
+            )
+        ).tuples()
+    )
+    return user_count, order_count, paid_count, paid_fen, receipt_counts
+
+
+def list_notify_tasks(
+    db: Session, *, status: str | None, before_id: int | None, limit: int
+) -> list[NotifyTask]:
+    # notify 目前没有后台列表 service，使用后台只读查询例外。
+    stmt = select(NotifyTask).options(defer(NotifyTask.result))
+    if status is not None:
+        stmt = stmt.where(NotifyTask.status == status)
+    if before_id is not None:
+        stmt = stmt.where(NotifyTask.id < before_id)
+    return list(db.scalars(stmt.order_by(NotifyTask.id.desc()).limit(limit)))
 
 
 # ---------- 用户 ----------
@@ -272,6 +345,26 @@ def provider_specs(db: Session) -> list[ProviderSpec]:
 
 def route_rules(db: Session) -> list[RouteRule]:
     return list(db.scalars(select(RouteRule).order_by(RouteRule.priority, RouteRule.id)))
+
+
+def lock_provider_spec(db: Session, entry_id: int) -> ProviderSpec | None:
+    return db.get(ProviderSpec, entry_id, populate_existing=True, with_for_update=True)
+
+
+def lock_route_rule(db: Session, rule_id: int) -> RouteRule | None:
+    return db.get(RouteRule, rule_id, populate_existing=True, with_for_update=True)
+
+
+def routing_references(db: Session, entry: ProviderSpec | RouteRule) -> tuple[str, Spec]:
+    model = type(entry)
+    provider_code, spec = db.execute(
+        select(Provider.code, Spec)
+        .select_from(model)
+        .join(Provider, Provider.id == model.provider_id)
+        .join(Spec, Spec.id == model.spec_id)
+        .where(model.id == entry.id)
+    ).one()
+    return provider_code, spec
 
 
 # ---------- 审计 ----------

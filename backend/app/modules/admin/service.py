@@ -8,6 +8,7 @@
 import json
 import threading
 import time
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -23,18 +24,26 @@ from app.core.schemas import OkResponse
 from app.core.utils import decode_cursor, encode_cursor, utcnow
 from app.models import (
     AdminSession,
+    AdminUser,
     AuditLog,
     Order,
     OrderItem,
     Plan,
     PlanBenefit,
+    ProviderSpec,
     ReceiptApplication,
+    RouteRule,
     Spec,
     User,
 )
+from app.models.receipt import APPLICATION_STATUSES
 from app.models.trade import BENEFIT_TYPES
 from app.modules.admin import repo
 from app.modules.admin.schemas import (
+    AdminAccountCreateIn,
+    AdminAccountOut,
+    AdminAccountPage,
+    AdminAccountRoleIn,
     AdminApplicationDetail,
     AdminApplicationOut,
     AdminApplicationPage,
@@ -44,24 +53,32 @@ from app.modules.admin.schemas import (
     AdminBriefOut,
     AdminLoginOut,
     AdminMeOut,
+    AdminNotifyTaskOut,
+    AdminNotifyTaskPage,
     AdminOrderDetail,
     AdminOrderOut,
     AdminOrderPage,
+    AdminPasswordResetOut,
     AdminPaymentOut,
     AdminPlanCreateIn,
     AdminPlanOut,
     AdminPlanUpdateIn,
     AdminProviderOut,
+    AdminProviderSpecCreateIn,
     AdminProviderSpecOut,
+    AdminProviderSpecUpdateIn,
     AdminProviderUpdateIn,
     AdminRefundIn,
     AdminRefundOut,
     AdminRefundResultOut,
+    AdminRouteRuleCreateIn,
     AdminRouteRuleOut,
+    AdminRouteRuleUpdateIn,
     AdminSpecCreateIn,
     AdminSpecOut,
     AdminSpecPage,
     AdminSpecUpdateIn,
+    AdminStatsOverviewOut,
     AdminUserDetail,
     AdminUserOut,
     AdminUserPage,
@@ -156,6 +173,16 @@ def _j(value: Any) -> Any:
     return value.isoformat() if isinstance(value, datetime) else value
 
 
+def _flush_unique(db: Session, constraint: str, message: str) -> None:
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        if isinstance(exc.orig, UniqueViolation) and exc.orig.diag.constraint_name == constraint:
+            raise AppError(ErrorCode.CONFLICT, message) from exc
+        raise
+
+
 # ---------- 分页 ----------
 
 
@@ -175,22 +202,44 @@ def _next(rows: list, has_more: bool) -> str | None:
 
 # ---------- 登录 / 退出 / 我 ----------
 
+# 兼容已有 Argon2 哈希。前缀标识此哈希必须在首次登录时替换。
+_TEMP_PASSWORD_PREFIX = "temporary:"
+
 
 def login(
-    db: Session, *, username: str, password: str, user_agent: str | None, ip: str | None
+    db: Session,
+    *,
+    username: str,
+    password: str,
+    user_agent: str | None,
+    ip: str | None,
+    new_password: str | None = None,
 ) -> tuple[AdminLoginOut, str]:
     """校验账号密码，建会话。返回 (响应体, 明文令牌)，令牌由 router 写进 Cookie。"""
     key = username.strip().lower()
     _check_rate(key)
     admin = repo.get_admin_by_username(db, username)
-    if admin is None:
+    stored_hash = admin.password_hash if admin is not None else None
+    if stored_hash is None:
         _burn_password_check(password)
         ok = False
     else:
-        ok = security.verify_password(admin.password_hash, password) and admin.status == "active"
+        ok = security.verify_password(stored_hash.removeprefix(_TEMP_PASSWORD_PREFIX), password)
     if not ok or admin is None:
         _record_fail(key)
         raise AppError(ErrorCode.ADMIN_LOGIN_FAILED)
+
+    # 与停用和重置串行，防止用刚刚失效的凭据建立新会话。
+    admin = repo.lock_admin_for_login(db, admin.id)
+    if admin is None or admin.status != "active" or admin.password_hash != stored_hash:
+        _record_fail(key)
+        raise AppError(ErrorCode.ADMIN_LOGIN_FAILED)
+    if admin.password_hash.startswith(_TEMP_PASSWORD_PREFIX):
+        if new_password is None or new_password == password:
+            raise AppError(ErrorCode.VALIDATION_ERROR, "请设置与临时密码不同的正式密码")
+        admin.password_hash = security.hash_password(new_password)
+    elif new_password is not None:
+        raise AppError(ErrorCode.VALIDATION_ERROR, "只有使用临时密码登录时才能设置正式密码")
     _clear_fails(key)
 
     now = utcnow()
@@ -235,6 +284,134 @@ def me(admin: CurrentAdmin) -> AdminMeOut:
     granted = ROLE_PERMISSIONS.get(admin.role, set())
     perms = all_permissions() if "*" in granted else sorted(granted)
     return AdminMeOut(id=admin.id, username=admin.username, role=admin.role, permissions=perms)  # type: ignore[arg-type]
+
+
+# ---------- 管理员账号 ----------
+
+
+def list_admin_accounts(db: Session, page: PageParams) -> AdminAccountPage:
+    rows = repo.list_admin_accounts(db, before_id=_before_id(page.cursor), limit=page.limit + 1)
+    rows, more = _slice(rows, page.limit)
+    return AdminAccountPage(
+        items=[AdminAccountOut.model_validate(row) for row in rows], next_cursor=_next(rows, more)
+    )
+
+
+def _locked_accounts(db: Session, admin: CurrentAdmin, target_id: int) -> tuple[AdminUser, int]:
+    rows = {row.id: row for row in repo.lock_admin_accounts(db, admin.id, target_id)}
+    actor = rows.get(admin.id)
+    if actor is None or actor.status != "active" or not replace(admin, role=actor.role).can("admin:write"):
+        raise AppError(ErrorCode.PERMISSION_DENIED)
+    target = rows.get(target_id)
+    if target is None:
+        raise AppError(ErrorCode.NOT_FOUND, "管理员账号不存在")
+    active_owners = sum(row.role == "owner" and row.status == "active" for row in rows.values())
+    return target, active_owners
+
+
+def create_admin_account(db: Session, admin: CurrentAdmin, body: AdminAccountCreateIn) -> AdminAccountOut:
+    _locked_accounts(db, admin, admin.id)
+    account = AdminUser(
+        username=body.username,
+        password_hash=security.hash_password(body.password),
+        role=body.role,
+        status="active",
+    )
+    db.add(account)
+    _flush_unique(db, "uq_admin_users_username", "后台用户名已存在")
+    _audit(
+        db,
+        admin.id,
+        "admin_user.create",
+        "admin_user",
+        account.id,
+        after={"username": account.username, "role": account.role, "status": account.status},
+    )
+    db.commit()
+    return AdminAccountOut.model_validate(account)
+
+
+def _guard_owner_removal(target: AdminUser, admin: CurrentAdmin, active_owners: int) -> None:
+    if target.role == "owner" and target.status == "active" and active_owners <= 1:
+        raise AppError(ErrorCode.CONFLICT, "不能停用或降级最后一个启用的所有者")
+    if target.id == admin.id:
+        raise AppError(ErrorCode.PERMISSION_DENIED, "不能停用或降级自己的账号")
+
+
+def disable_admin_account(db: Session, admin: CurrentAdmin, target_id: int) -> AdminAccountOut:
+    account, active_owners = _locked_accounts(db, admin, target_id)
+    if account.status != "disabled":
+        _guard_owner_removal(account, admin, active_owners)
+        _audit(
+            db,
+            admin.id,
+            "admin_user.disable",
+            "admin_user",
+            account.id,
+            {"status": account.status},
+            {"status": "disabled"},
+        )
+        account.status = "disabled"
+        repo.revoke_admin_sessions(db, account.id)
+        db.commit()
+    return AdminAccountOut.model_validate(account)
+
+
+def update_admin_role(
+    db: Session, admin: CurrentAdmin, target_id: int, body: AdminAccountRoleIn
+) -> AdminAccountOut:
+    account, active_owners = _locked_accounts(db, admin, target_id)
+    if account.role != body.role:
+        if account.role == "owner":
+            _guard_owner_removal(account, admin, active_owners)
+        _audit(
+            db,
+            admin.id,
+            "admin_user.update_role",
+            "admin_user",
+            account.id,
+            {"role": account.role},
+            {"role": body.role},
+        )
+        account.role = body.role
+        db.commit()
+    return AdminAccountOut.model_validate(account)
+
+
+def reset_admin_password(db: Session, admin: CurrentAdmin, target_id: int) -> AdminPasswordResetOut:
+    account, _ = _locked_accounts(db, admin, target_id)
+    if account.status != "active":
+        raise AppError(ErrorCode.ACCOUNT_DISABLED)
+    password = security.new_token()
+    account.password_hash = _TEMP_PASSWORD_PREFIX + security.hash_password(password)
+    repo.revoke_admin_sessions(db, account.id)
+    _audit(db, admin.id, "admin_user.reset_password", "admin_user", account.id)
+    db.commit()
+    _clear_fails(account.username.strip().lower())
+    return AdminPasswordResetOut(temporary_password=password)
+
+
+# ---------- 看板与通知 ----------
+
+
+def stats_overview(db: Session) -> AdminStatsOverviewOut:
+    users, orders, paid_orders, paid_total, receipts = repo.overview_counts(db)
+    return AdminStatsOverviewOut(
+        user_count=users,
+        order_count=orders,
+        paid_order_count=paid_orders,
+        paid_total_fen=paid_total,
+        receipt_count=sum(receipts.values()),
+        receipt_counts_by_status={status: receipts.get(status, 0) for status in APPLICATION_STATUSES},
+    )
+
+
+def list_notify_tasks(db: Session, *, status: str | None, page: PageParams) -> AdminNotifyTaskPage:
+    rows = repo.list_notify_tasks(db, status=status, before_id=_before_id(page.cursor), limit=page.limit + 1)
+    rows, more = _slice(rows, page.limit)
+    return AdminNotifyTaskPage(
+        items=[AdminNotifyTaskOut.model_validate(row) for row in rows], next_cursor=_next(rows, more)
+    )
 
 
 # ---------- 用户 ----------
@@ -761,8 +938,7 @@ def list_providers(db: Session) -> list[AdminProviderOut]:
     providers = repo.list_providers(db)
     pspecs = repo.provider_specs(db)
     rules = repo.route_rules(db)
-    codes = repo.spec_codes(db, [p.spec_id for p in pspecs] + [r.spec_id for r in rules])
-    names = {sid: s.name for sid, s in repo.specs_by_ids(db, codes.keys()).items()}
+    specs = repo.specs_by_ids(db, [p.spec_id for p in pspecs] + [r.spec_id for r in rules])
     out = []
     for p in providers:
         out.append(
@@ -774,26 +950,12 @@ def list_providers(db: Session) -> list[AdminProviderOut]:
                 status=p.status,  # type: ignore[arg-type]
                 updated_at=p.updated_at,
                 provider_specs=[
-                    AdminProviderSpecOut(
-                        spec_code=codes[ps.spec_id],
-                        spec_name=names[ps.spec_id],
-                        provider_item_id=ps.provider_item_id,
-                        cost_fen=ps.cost_fen,
-                        is_enabled=ps.is_enabled,
-                        last_synced_at=ps.last_synced_at,
-                    )
+                    _provider_spec_out(ps, p.code, specs[ps.spec_id])
                     for ps in pspecs
                     if ps.provider_id == p.id
                 ],
                 route_rules=[
-                    AdminRouteRuleOut(
-                        spec_code=codes[r.spec_id],
-                        region_code=r.region_code,
-                        priority=r.priority,
-                        is_enabled=r.is_enabled,
-                    )
-                    for r in rules
-                    if r.provider_id == p.id
+                    _route_rule_out(r, p.code, specs[r.spec_id]) for r in rules if r.provider_id == p.id
                 ],
             )
         )
@@ -820,6 +982,155 @@ def update_provider(
         db.commit()
         db.refresh(provider)
     return next(p for p in list_providers(db) if p.code == code)
+
+
+# ---------- 服务商规格与路由规则 ----------
+
+_PROVIDER_SPEC_UNIQUE = "uq_provider_specs_provider_spec"
+_ROUTE_RULE_UNIQUE = "uq_route_rules_spec_region_provider"
+
+
+def _provider_spec_out(entry: ProviderSpec, provider_code: str, spec: Spec) -> AdminProviderSpecOut:
+    return AdminProviderSpecOut(
+        id=entry.id,
+        provider_code=provider_code,
+        spec_code=spec.code,
+        spec_name=spec.name,
+        provider_item_id=entry.provider_item_id,
+        param_mapping=entry.param_mapping,
+        cost_fen=entry.cost_fen,
+        is_enabled=entry.is_enabled,
+        last_synced_at=entry.last_synced_at,
+    )
+
+
+def _route_rule_out(rule: RouteRule, provider_code: str, spec: Spec) -> AdminRouteRuleOut:
+    return AdminRouteRuleOut(
+        id=rule.id,
+        provider_code=provider_code,
+        spec_code=spec.code,
+        region_code=rule.region_code,
+        priority=rule.priority,
+        is_enabled=rule.is_enabled,
+    )
+
+
+def _routing_values(db: Session, values: dict) -> dict:
+    for key, value in values.items():
+        if value is None and key != "region_code":
+            raise AppError(ErrorCode.VALIDATION_ERROR, f"{key} 不能为空")
+    if "provider_code" in values:
+        provider = repo.get_provider_by_code(db, values.pop("provider_code"))
+        if provider is None:
+            raise AppError(ErrorCode.NOT_FOUND, "服务商不存在")
+        values["provider_id"] = provider.id
+    if "spec_code" in values:
+        spec = repo.get_spec_by_code(db, values.pop("spec_code"))
+        if spec is None:
+            raise AppError(ErrorCode.SPEC_NOT_FOUND)
+        values["spec_id"] = spec.id
+    return values
+
+
+def _routing_snapshot(out: AdminProviderSpecOut | AdminRouteRuleOut) -> dict:
+    return out.model_dump(exclude={"id", "spec_name", "last_synced_at", "param_mapping"})
+
+
+def create_provider_spec(
+    db: Session, admin: CurrentAdmin, body: AdminProviderSpecCreateIn
+) -> AdminProviderSpecOut:
+    entry = ProviderSpec(**_routing_values(db, body.model_dump()))
+    db.add(entry)
+    _flush_unique(db, _PROVIDER_SPEC_UNIQUE, "该服务商已配置此规格")
+    out = _provider_spec_out(entry, *repo.routing_references(db, entry))
+    _audit(db, admin.id, "provider_spec.create", "provider_spec", entry.id, after=_routing_snapshot(out))
+    db.commit()
+    return out
+
+
+def update_provider_spec(
+    db: Session, admin: CurrentAdmin, entry_id: int, body: AdminProviderSpecUpdateIn
+) -> AdminProviderSpecOut:
+    entry = repo.lock_provider_spec(db, entry_id)
+    if entry is None:
+        raise AppError(ErrorCode.NOT_FOUND, "服务商规格不存在")
+    before = _provider_spec_out(entry, *repo.routing_references(db, entry))
+    for key, value in _routing_values(db, body.model_dump(exclude_unset=True)).items():
+        setattr(entry, key, value)
+    _flush_unique(db, _PROVIDER_SPEC_UNIQUE, "该服务商已配置此规格")
+    after = _provider_spec_out(entry, *repo.routing_references(db, entry))
+    if before != after:
+        snapshot = _routing_snapshot(after)
+        if before.param_mapping != after.param_mapping:
+            snapshot["param_mapping_changed"] = True
+        _audit(
+            db,
+            admin.id,
+            "provider_spec.update",
+            "provider_spec",
+            entry.id,
+            _routing_snapshot(before),
+            snapshot,
+        )
+        db.commit()
+    return after
+
+
+def delete_provider_spec(db: Session, admin: CurrentAdmin, entry_id: int) -> OkResponse:
+    entry = repo.lock_provider_spec(db, entry_id)
+    if entry is None:
+        raise AppError(ErrorCode.NOT_FOUND, "服务商规格不存在")
+    before = _provider_spec_out(entry, *repo.routing_references(db, entry))
+    db.delete(entry)
+    _audit(db, admin.id, "provider_spec.delete", "provider_spec", entry.id, before=_routing_snapshot(before))
+    db.commit()
+    return OkResponse()
+
+
+def create_route_rule(db: Session, admin: CurrentAdmin, body: AdminRouteRuleCreateIn) -> AdminRouteRuleOut:
+    rule = RouteRule(**_routing_values(db, body.model_dump()))
+    db.add(rule)
+    _flush_unique(db, _ROUTE_RULE_UNIQUE, "此规格、地区和服务商的路由规则已存在")
+    out = _route_rule_out(rule, *repo.routing_references(db, rule))
+    _audit(db, admin.id, "route_rule.create", "route_rule", rule.id, after=_routing_snapshot(out))
+    db.commit()
+    return out
+
+
+def update_route_rule(
+    db: Session, admin: CurrentAdmin, rule_id: int, body: AdminRouteRuleUpdateIn
+) -> AdminRouteRuleOut:
+    rule = repo.lock_route_rule(db, rule_id)
+    if rule is None:
+        raise AppError(ErrorCode.NOT_FOUND, "路由规则不存在")
+    before = _route_rule_out(rule, *repo.routing_references(db, rule))
+    for key, value in _routing_values(db, body.model_dump(exclude_unset=True)).items():
+        setattr(rule, key, value)
+    _flush_unique(db, _ROUTE_RULE_UNIQUE, "此规格、地区和服务商的路由规则已存在")
+    after = _route_rule_out(rule, *repo.routing_references(db, rule))
+    if before != after:
+        _audit(
+            db,
+            admin.id,
+            "route_rule.update",
+            "route_rule",
+            rule.id,
+            _routing_snapshot(before),
+            _routing_snapshot(after),
+        )
+        db.commit()
+    return after
+
+
+def delete_route_rule(db: Session, admin: CurrentAdmin, rule_id: int) -> OkResponse:
+    rule = repo.lock_route_rule(db, rule_id)
+    if rule is None:
+        raise AppError(ErrorCode.NOT_FOUND, "路由规则不存在")
+    before = _route_rule_out(rule, *repo.routing_references(db, rule))
+    db.delete(rule)
+    _audit(db, admin.id, "route_rule.delete", "route_rule", rule.id, before=_routing_snapshot(before))
+    db.commit()
+    return OkResponse()
 
 
 # ---------- 审计日志 ----------

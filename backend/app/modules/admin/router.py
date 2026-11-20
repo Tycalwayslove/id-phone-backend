@@ -9,28 +9,43 @@ from app.core.errors import ErrorCode, errors_doc
 from app.core.schemas import OkResponse
 from app.modules.admin import service
 from app.modules.admin.schemas import (
+    NOTIFY_STATUS_DOC,
+    AdminAccountCreateIn,
+    AdminAccountOut,
+    AdminAccountPage,
+    AdminAccountRoleIn,
     AdminApplicationDetail,
     AdminApplicationPage,
     AdminAuditLogPage,
     AdminLoginIn,
     AdminLoginOut,
     AdminMeOut,
+    AdminNotifyTaskPage,
     AdminOrderDetail,
     AdminOrderPage,
+    AdminPasswordResetOut,
     AdminPlanCreateIn,
     AdminPlanOut,
     AdminPlanUpdateIn,
     AdminProviderOut,
+    AdminProviderSpecCreateIn,
+    AdminProviderSpecOut,
+    AdminProviderSpecUpdateIn,
     AdminProviderUpdateIn,
     AdminRefundIn,
     AdminRefundResultOut,
+    AdminRouteRuleCreateIn,
+    AdminRouteRuleOut,
+    AdminRouteRuleUpdateIn,
     AdminSpecCreateIn,
     AdminSpecOut,
     AdminSpecPage,
     AdminSpecUpdateIn,
+    AdminStatsOverviewOut,
     AdminUserDetail,
     AdminUserPage,
     AdminUserSearchIn,
+    NotifyStatus,
 )
 
 admin_router = APIRouter(tags=["后台"])
@@ -59,6 +74,10 @@ SpecWrite = _perm("spec:write")
 ProviderRead = _perm("provider:read")
 ProviderWrite = _perm("provider:write")
 AuditRead = _perm("audit:read")
+StatsRead = _perm("stats:read")
+NotifyRead = _perm("notify:read")
+AdminAccountRead = _perm("admin:read")
+AdminAccountWrite = _perm("admin:write")
 
 OrderNoPath = Annotated[str, Path(description="订单号", examples=["O20261119083012A1B2C3"])]
 AppNoPath = Annotated[str, Path(description="回执申请单号", examples=["R20261119083012A1B2C3"])]
@@ -66,6 +85,9 @@ UserIdPath = Annotated[int, Path(description="用户 ID", ge=1, examples=[1024])
 PlanCodePath = Annotated[str, Path(description="套餐编码", examples=["photo_year_39_9"])]
 SpecCodePath = Annotated[str, Path(description="规格编码", examples=["gd_idcard"])]
 ProviderCodePath = Annotated[str, Path(description="服务商编码", examples=["zheying"])]
+AdminIdPath = Annotated[int, Path(ge=1, le=2**63 - 1, description="管理员账号 ID", examples=[3])]
+ProviderSpecIdPath = Annotated[int, Path(ge=1, le=2**63 - 1, description="服务商规格记录 ID", examples=[71])]
+RouteRuleIdPath = Annotated[int, Path(ge=1, le=2**63 - 1, description="路由规则 ID", examples=[86])]
 
 # ---------- 登录 ----------
 
@@ -79,16 +101,18 @@ ProviderCodePath = Annotated[str, Path(description="服务商编码", examples=[
         "SameSite=Strict）下发会话，并在响应体返回 csrf_token，之后所有修改类请求在请求头 X-CSRF-Token 里带上它。"
         "账号不存在、密码错误、账号被停用都返回同一个 ADMIN_LOGIN_FAILED；同一用户名 15 分钟内失败 5 次后返回 RATE_LIMITED。"
         "会话闲置 2 小时、最长 12 小时失效（以服务端配置为准）。"
+        "使用重置获得的临时密码登录时，必须同时提供不同的 new_password。登录成功后临时密码失效。"
     ),
     response_model=AdminLoginOut,
     response_description="登录成功，返回 csrf_token 和账号信息，会话 Cookie 已写入",
-    responses=errors_doc(ErrorCode.ADMIN_LOGIN_FAILED, ErrorCode.RATE_LIMITED),
+    responses=errors_doc(ErrorCode.ADMIN_LOGIN_FAILED, ErrorCode.RATE_LIMITED, ErrorCode.VALIDATION_ERROR),
 )
 def login(body: AdminLoginIn, request: Request, response: Response, db: DB):
     out, token = service.login(
         db,
         username=body.username,
         password=body.password,
+        new_password=body.new_password,
         user_agent=request.headers.get("user-agent"),
         ip=request.client.host if request.client else None,
     )
@@ -486,6 +510,203 @@ def list_providers(_: ProviderRead, db: DB):
 )
 def update_provider(code: ProviderCodePath, body: AdminProviderUpdateIn, admin: ProviderWrite, db: DB):
     return service.update_provider(db, admin, code, body)
+
+
+# ---------- 服务商规格与路由规则 ----------
+
+
+@admin_router.post(
+    "/provider-specs",
+    operation_id="admin_provider_specs_create",
+    summary="新增服务商规格",
+    description=f"配置服务商可办理的规格、服务商侧规格 ID 和成本。同一服务商与规格只能有一条配置。权限点 provider:write。{_LOGIN_NOTE}{_WRITE_NOTE}",
+    response_model=AdminProviderSpecOut,
+    response_description="新建的服务商规格配置",
+    responses=errors_doc(
+        *_AUTH, ErrorCode.NOT_FOUND, ErrorCode.SPEC_NOT_FOUND, ErrorCode.CONFLICT, ErrorCode.VALIDATION_ERROR
+    ),
+)
+def create_provider_spec(body: AdminProviderSpecCreateIn, admin: ProviderWrite, db: DB):
+    return service.create_provider_spec(db, admin, body)
+
+
+@admin_router.patch(
+    "/provider-specs/{entry_id}",
+    operation_id="admin_provider_specs_update",
+    summary="修改服务商规格",
+    description=f"按服务商列表提供的记录 ID 更新配置。省略的字段保持原值，字段值不能为 null。权限点 provider:write。{_LOGIN_NOTE}{_WRITE_NOTE}",
+    response_model=AdminProviderSpecOut,
+    response_description="修改后的服务商规格配置",
+    responses=errors_doc(
+        *_AUTH, ErrorCode.NOT_FOUND, ErrorCode.SPEC_NOT_FOUND, ErrorCode.CONFLICT, ErrorCode.VALIDATION_ERROR
+    ),
+)
+def update_provider_spec(
+    entry_id: ProviderSpecIdPath, body: AdminProviderSpecUpdateIn, admin: ProviderWrite, db: DB
+):
+    return service.update_provider_spec(db, admin, entry_id, body)
+
+
+@admin_router.delete(
+    "/provider-specs/{entry_id}",
+    operation_id="admin_provider_specs_delete",
+    summary="删除服务商规格",
+    description=f"删除服务商规格配置后，引用该服务商和规格的规则无法匹配此配置。权限点 provider:write。{_LOGIN_NOTE}{_WRITE_NOTE}",
+    response_model=OkResponse,
+    response_description="服务商规格配置已删除",
+    responses=errors_doc(*_AUTH, ErrorCode.NOT_FOUND, ErrorCode.VALIDATION_ERROR),
+)
+def delete_provider_spec(entry_id: ProviderSpecIdPath, admin: ProviderWrite, db: DB):
+    return service.delete_provider_spec(db, admin, entry_id)
+
+
+@admin_router.post(
+    "/route-rules",
+    operation_id="admin_route_rules_create",
+    summary="新增路由规则",
+    description=f"配置规格在指定地区的候选服务商。地区为空表示不限。同一规格、地区与服务商只能有一条规则。实际路由还需匹配已启用的服务商规格。权限点 provider:write。{_LOGIN_NOTE}{_WRITE_NOTE}",
+    response_model=AdminRouteRuleOut,
+    response_description="新建的路由规则",
+    responses=errors_doc(
+        *_AUTH, ErrorCode.NOT_FOUND, ErrorCode.SPEC_NOT_FOUND, ErrorCode.CONFLICT, ErrorCode.VALIDATION_ERROR
+    ),
+)
+def create_route_rule(body: AdminRouteRuleCreateIn, admin: ProviderWrite, db: DB):
+    return service.create_route_rule(db, admin, body)
+
+
+@admin_router.patch(
+    "/route-rules/{rule_id}",
+    operation_id="admin_route_rules_update",
+    summary="修改路由规则",
+    description=f"按服务商列表提供的规则 ID 修改配置。省略的字段保持原值，地区可传 null 改为不限。权限点 provider:write。{_LOGIN_NOTE}{_WRITE_NOTE}",
+    response_model=AdminRouteRuleOut,
+    response_description="修改后的路由规则",
+    responses=errors_doc(
+        *_AUTH, ErrorCode.NOT_FOUND, ErrorCode.SPEC_NOT_FOUND, ErrorCode.CONFLICT, ErrorCode.VALIDATION_ERROR
+    ),
+)
+def update_route_rule(rule_id: RouteRuleIdPath, body: AdminRouteRuleUpdateIn, admin: ProviderWrite, db: DB):
+    return service.update_route_rule(db, admin, rule_id, body)
+
+
+@admin_router.delete(
+    "/route-rules/{rule_id}",
+    operation_id="admin_route_rules_delete",
+    summary="删除路由规则",
+    description=f"删除一个候选服务商规则，后续路由不再根据该规则选取服务商。权限点 provider:write。{_LOGIN_NOTE}{_WRITE_NOTE}",
+    response_model=OkResponse,
+    response_description="路由规则已删除",
+    responses=errors_doc(*_AUTH, ErrorCode.NOT_FOUND, ErrorCode.VALIDATION_ERROR),
+)
+def delete_route_rule(rule_id: RouteRuleIdPath, admin: ProviderWrite, db: DB):
+    return service.delete_route_rule(db, admin, rule_id)
+
+
+# ---------- 看板与通知 ----------
+
+
+@admin_router.get(
+    "/stats/overview",
+    operation_id="admin_stats_overview",
+    summary="后台数据看板",
+    description=f"查询累计用户数、订单数、支付过的订单数、实付总额和回执各状态数量。实付金额单位为分，包含已退款的原实付额。权限点 stats:read。{_LOGIN_NOTE}",
+    response_model=AdminStatsOverviewOut,
+    response_description="累计业务指标",
+    responses=errors_doc(*_AUTH),
+)
+def stats_overview(_: StatsRead, db: DB):
+    return service.stats_overview(db)
+
+
+@admin_router.get(
+    "/notify-tasks",
+    operation_id="admin_notify_tasks_list",
+    summary="通知任务列表",
+    description=f"按通知任务 ID 从大到小查询，可按状态筛选和游标翻页。返回任务状态、渠道、时间及关联记录 ID。权限点 notify:read。{_LOGIN_NOTE}",
+    response_model=AdminNotifyTaskPage,
+    response_description="通知任务分页列表",
+    responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR),
+)
+def list_notify_tasks(
+    _: NotifyRead,
+    db: DB,
+    page: Page,
+    status: Annotated[
+        NotifyStatus | None, Query(description=f"按状态筛选。{NOTIFY_STATUS_DOC}", examples=["pending"])
+    ] = None,
+):
+    return service.list_notify_tasks(db, status=status, page=page)
+
+
+# ---------- 管理员账号 ----------
+
+
+@admin_router.get(
+    "/admin-users",
+    operation_id="admin_accounts_list",
+    summary="管理员账号列表",
+    description=f"按账号 ID 从大到小分页，返回管理员角色和启用状态。权限点 admin:read（仅 owner）。{_LOGIN_NOTE}",
+    response_model=AdminAccountPage,
+    response_description="管理员账号分页列表",
+    responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR),
+)
+def list_admin_accounts(_: AdminAccountRead, db: DB, page: Page):
+    return service.list_admin_accounts(db, page)
+
+
+@admin_router.post(
+    "/admin-users",
+    operation_id="admin_accounts_create",
+    summary="新建管理员账号",
+    description=f"按用户名、初始密码和角色创建一个启用的后台账号。用户名区分大小写且唯一。权限点 admin:write（仅 owner）。{_LOGIN_NOTE}{_WRITE_NOTE}",
+    response_model=AdminAccountOut,
+    response_description="新建的后台账号资料",
+    responses=errors_doc(*_AUTH, ErrorCode.CONFLICT, ErrorCode.VALIDATION_ERROR),
+)
+def create_admin_account(body: AdminAccountCreateIn, admin: AdminAccountWrite, db: DB):
+    return service.create_admin_account(db, admin, body)
+
+
+@admin_router.post(
+    "/admin-users/{admin_id}/disable",
+    operation_id="admin_accounts_disable",
+    summary="停用管理员账号",
+    description=f"停用账号并吊销其所有会话，账号再次停用仍返回成功。不能停用自己或最后一个启用的 owner。权限点 admin:write（仅 owner）。{_LOGIN_NOTE}{_WRITE_NOTE}",
+    response_model=AdminAccountOut,
+    response_description="停用后的后台账号资料",
+    responses=errors_doc(*_AUTH, ErrorCode.NOT_FOUND, ErrorCode.CONFLICT, ErrorCode.VALIDATION_ERROR),
+)
+def disable_admin_account(admin_id: AdminIdPath, admin: AdminAccountWrite, db: DB):
+    return service.disable_admin_account(db, admin, admin_id)
+
+
+@admin_router.patch(
+    "/admin-users/{admin_id}/role",
+    operation_id="admin_accounts_update_role",
+    summary="修改管理员角色",
+    description=f"替换账号的角色，后续请求使用该角色的权限。不能降低自己或最后一个启用的 owner 的角色。权限点 admin:write（仅 owner）。{_LOGIN_NOTE}{_WRITE_NOTE}",
+    response_model=AdminAccountOut,
+    response_description="角色变更后的后台账号资料",
+    responses=errors_doc(*_AUTH, ErrorCode.NOT_FOUND, ErrorCode.CONFLICT, ErrorCode.VALIDATION_ERROR),
+)
+def update_admin_role(admin_id: AdminIdPath, body: AdminAccountRoleIn, admin: AdminAccountWrite, db: DB):
+    return service.update_admin_role(db, admin, admin_id, body)
+
+
+@admin_router.post(
+    "/admin-users/{admin_id}/reset-password",
+    operation_id="admin_accounts_reset_password",
+    summary="重置管理员密码",
+    description=f"为启用的账号生成一次性临时密码并吊销其所有会话。临时密码仅随本次响应返回，使用时须先在登录请求中设置正式密码。权限点 admin:write（仅 owner）。{_LOGIN_NOTE}{_WRITE_NOTE}",
+    response_model=AdminPasswordResetOut,
+    response_description="临时密码，成功使用一次即失效",
+    responses=errors_doc(*_AUTH, ErrorCode.NOT_FOUND, ErrorCode.ACCOUNT_DISABLED, ErrorCode.VALIDATION_ERROR),
+)
+def reset_admin_password(admin_id: AdminIdPath, response: Response, admin: AdminAccountWrite, db: DB):
+    out = service.reset_admin_password(db, admin, admin_id)
+    response.headers["Cache-Control"] = "no-store"
+    return out
 
 
 # ---------- 审计日志 ----------

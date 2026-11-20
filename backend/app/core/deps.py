@@ -93,6 +93,10 @@ ALL_PERMISSIONS: set[str] = {
     "provider:read",
     "provider:write",
     "audit:read",
+    "stats:read",
+    "notify:read",
+    "admin:read",
+    "admin:write",
 }
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
@@ -107,6 +111,8 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "spec:write",
         "provider:read",
         "audit:read",
+        "stats:read",
+        "notify:read",
     },
     "finance": {"user:read", "order:read", "refund:create", "plan:read", "audit:read"},
 }

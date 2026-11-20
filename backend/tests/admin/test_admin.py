@@ -555,7 +555,7 @@ def test_admin_api_docs_complete():
         if path.startswith("/api/v1/admin")
         for op in ops.values()
     ]
-    assert len(ids) == 21 and all(i.startswith("admin_") for i in ids)
+    assert len(ids) == 34 and len(ids) == len(set(ids)) and all(i.startswith("admin_") for i in ids)
     users_list = spec["paths"][f"{API}/users"]["get"]
     assert "phone" not in {p["name"] for p in users_list["parameters"]}
     users_search = spec["paths"][f"{API}/users/search"]["post"]

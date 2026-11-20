@@ -11,6 +11,7 @@ from app.modules.orders.schemas import OrderItemOut
 from app.modules.specs.schemas import SpecFormField
 
 AdminRole = Literal["owner", "operator", "finance"]
+AdminAccountStatus = Literal["active", "disabled"]
 UserStatus = Literal["active", "disabled", "cancelled"]
 OrderStatus = Literal["pending", "paid", "closed", "part_refunded", "refunded"]
 ApplicationStatus = Literal["pending", "processing", "rejected", "completed", "failed", "cancelled"]
@@ -21,9 +22,16 @@ PlanStatus = Literal["draft", "on_sale", "off_sale"]
 SpecStatus = Literal["active", "inactive"]
 SpecCategory = Literal["receipt", "normal", "exam"]
 ProviderStatus = Literal["enabled", "disabled", "circuit_open"]
+NotifyStatus = Literal["pending", "sent", "failed", "skipped", "cancelled"]
+NotifyEvent = Literal["receipt_rejected", "receipt_completed", "entitlement_expiring", "receipt_expiring"]
+NotifyChannel = Literal["mini_subscribe", "mp_template", "wecom", "sms", "voice", "manual_call"]
 
 _PLAN_STATUS_DOC = "draft = 草稿，用户看不到；on_sale = 在售（还要在销售时间窗口内才能买）；off_sale = 已下架，不能再买，已买的权益不受影响"
 _ROLE_DOC = "角色：owner = 所有者，拥有全部权限；operator = 运营，管用户/回执/规格，不能退款和改套餐；finance = 财务，可退款、看订单和用户"
+NOTIFY_STATUS_DOC = "pending = 待发送；sent = 已发送；failed = 发送失败；skipped = 跳过；cancelled = 已取消"
+AdminPassword = Annotated[str, StringConstraints(min_length=12, max_length=128)]
+RoutingCode = Annotated[str, StringConstraints(min_length=1, max_length=64)]
+RoutingRegionCode = Annotated[str, StringConstraints(min_length=1, max_length=32)]
 
 # ---------- 登录 ----------
 
@@ -35,7 +43,13 @@ class AdminLoginIn(Schema):
         min_length=1, max_length=64, description="后台账号用户名，区分大小写", examples=["ops_zhang"]
     )
     password: str = Field(
-        min_length=1, max_length=128, description="登录密码", examples=["a-long-password-123"]
+        min_length=1, max_length=128, repr=False, description="登录密码", examples=["a-long-password-123"]
+    )
+    new_password: AdminPassword | None = Field(
+        default=None,
+        repr=False,
+        description="使用重置得到的临时密码时必填，设置 12～128 字符且不同于临时密码的正式密码",
+        examples=["another-long-password-456"],
     )
 
 
@@ -67,6 +81,107 @@ class AdminMeOut(Schema):
         description="该账号拥有的全部权限点，格式 资源:动作（如 refund:create）。前端按它显示或隐藏菜单和按钮；owner 返回全部权限点",
         examples=[["user:read", "order:read", "application:read"]],
     )
+
+
+# ---------- 管理员账号 ----------
+
+
+class AdminAccountOut(AdminBriefOut):
+    """用于账号管理的管理员资料。"""
+
+    status: AdminAccountStatus = Field(description="active = 正常；disabled = 已停用", examples=["active"])
+    created_at: datetime = Field(description="创建时间（UTC，带时区）", examples=["2026-11-19T09:00:00Z"])
+    updated_at: datetime = Field(description="更新时间（UTC，带时区）", examples=["2026-11-19T09:00:00Z"])
+
+
+AdminAccountPage = page_model(AdminAccountOut, "AdminAccountPage")
+
+
+class AdminAccountCreateIn(Schema):
+    """新建启用的后台账号。"""
+
+    username: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^\S+$",
+        description="后台用户名，1～64 字符，区分大小写，不含空白字符",
+        examples=["ops_zhang"],
+    )
+    password: AdminPassword = Field(
+        repr=False, description="初始登录密码，12～128 字符", examples=["a-long-password-123"]
+    )
+    role: AdminRole = Field(description=_ROLE_DOC, examples=["operator"])
+
+
+class AdminAccountRoleIn(Schema):
+    """修改后台账号角色。"""
+
+    role: AdminRole = Field(description=_ROLE_DOC, examples=["finance"])
+
+
+class AdminPasswordResetOut(Schema):
+    """密码重置后仅本次响应提供的登录凭据。"""
+
+    temporary_password: str = Field(
+        repr=False,
+        description="临时密码，只在此响应提供。登录时须同时设置正式密码，成功后临时密码失效",
+        examples=["example-temporary-password"],
+    )
+
+
+# ---------- 看板与通知 ----------
+
+
+class AdminStatsOverviewOut(Schema):
+    """后台数据看板的全量累计指标。"""
+
+    user_count: int = Field(description="用户总数，含已停用和已注销的用户", examples=[120])
+    order_count: int = Field(description="全部订单数，含未支付和关闭的订单", examples=[95])
+    paid_order_count: int = Field(description="成功支付过的订单数，含部分退款和全额退款订单", examples=[80])
+    paid_total_fen: int = Field(description="订单累计实付金额，单位分，未扣减退款", examples=[319200])
+    receipt_count: int = Field(description="回执申请总数", examples=[25])
+    receipt_counts_by_status: dict[ApplicationStatus, int] = Field(
+        description=(
+            "各状态的回执申请数量，缺少记录的状态为 0。pending = 已创建未提交；processing = 办理中；"
+            "rejected = 已驳回；completed = 已完成；failed = 办理失败；cancelled = 已取消"
+        ),
+        examples=[
+            {"pending": 0, "processing": 2, "rejected": 1, "completed": 20, "failed": 1, "cancelled": 1}
+        ],
+    )
+
+
+class AdminNotifyTaskOut(Schema):
+    """通知任务的状态信息。"""
+
+    id: int = Field(description="通知任务 ID", examples=[76])
+    user_id: int = Field(description="接收通知的用户 ID", examples=[1024])
+    application_id: int | None = Field(description="关联回执申请 ID，关联权益时为空", examples=[81])
+    entitlement_id: int | None = Field(description="关联权益 ID，关联回执申请时为空", examples=[None])
+    event: NotifyEvent = Field(
+        description=(
+            "receipt_rejected = 回执驳回；receipt_completed = 回执办理完成；"
+            "entitlement_expiring = 权益即将到期；receipt_expiring = 回执即将到期"
+        ),
+        examples=["receipt_completed"],
+    )
+    step: int = Field(description="通知档位，用于区分升级步骤或到期提醒档次", examples=[1])
+    channel: NotifyChannel = Field(
+        description=(
+            "mini_subscribe = 小程序订阅消息；mp_template = 公众号模板消息；wecom = 企业微信；"
+            "sms = 短信；voice = 语音；manual_call = 人工电话"
+        ),
+        examples=["mini_subscribe"],
+    )
+    status: NotifyStatus = Field(description=NOTIFY_STATUS_DOC, examples=["pending"])
+    scheduled_at: datetime = Field(
+        description="计划发送时间（UTC，带时区）", examples=["2026-11-19T09:00:00Z"]
+    )
+    sent_at: datetime | None = Field(description="实际发送时间（UTC，带时区），未发送时为空", examples=[None])
+    created_at: datetime = Field(description="创建时间（UTC，带时区）", examples=["2026-11-19T09:00:00Z"])
+
+
+AdminNotifyTaskPage = page_model(AdminNotifyTaskOut, "AdminNotifyTaskPage")
 
 
 # ---------- 用户 ----------
@@ -567,9 +682,14 @@ class AdminSpecUpdateIn(Schema):
 class AdminProviderSpecOut(Schema):
     """服务商能办理的一个规格（覆盖矩阵的一行）。"""
 
+    id: int = Field(description="服务商规格记录 ID", examples=[71])
+    provider_code: str = Field(description="服务商编码", examples=["zheying"])
     spec_code: str = Field(description="规格编码", examples=["gd_idcard"])
     spec_name: str = Field(description="规格名称", examples=["广东省身份证"])
     provider_item_id: str = Field(description="服务商那边的规格 ID", examples=["713"])
+    param_mapping: dict[str, Any] = Field(
+        description="办理字段到服务商字段名的映射，空对象表示未配置", examples=[{"name": "text_name"}]
+    )
     cost_fen: int = Field(description="办理一次的成本，单位：分", examples=[300])
     is_enabled: bool = Field(description="该服务商是否启用此规格", examples=[True])
     last_synced_at: datetime | None = Field(
@@ -580,6 +700,8 @@ class AdminProviderSpecOut(Schema):
 class AdminRouteRuleOut(Schema):
     """路由规则的一行：某规格（可限地区）下的一个候选服务商。"""
 
+    id: int = Field(description="路由规则 ID", examples=[86])
+    provider_code: str = Field(description="服务商编码", examples=["zheying"])
     spec_code: str = Field(description="规格编码", examples=["gd_idcard"])
     region_code: str | None = Field(description="适用地区行政区划码；为空 = 不限地区", examples=[None])
     priority: int = Field(description="优先级，数字越小越优先", examples=[10])
@@ -613,6 +735,84 @@ class AdminProviderUpdateIn(Schema):
     )
 
 
+class AdminProviderSpecCreateIn(Schema):
+    """新增一项服务商规格配置。"""
+
+    provider_code: RoutingCode = Field(description="已存在的服务商编码", examples=["zheying"])
+    spec_code: RoutingCode = Field(
+        description="已存在的规格编码，同一服务商只能配置一次", examples=["gd_idcard"]
+    )
+    provider_item_id: str = Field(
+        min_length=1, max_length=128, description="服务商侧的规格 ID", examples=["713"]
+    )
+    param_mapping: dict[str, str] = Field(
+        default_factory=dict,
+        description="办理字段到服务商字段名的映射，默认空对象",
+        examples=[{"name": "text_name"}],
+    )
+    cost_fen: int = Field(ge=0, le=2_147_483_647, description="办理一次的成本，单位分", examples=[300])
+    is_enabled: bool = Field(default=True, description="是否启用此服务商规格，默认启用", examples=[True])
+
+
+class AdminProviderSpecUpdateIn(Schema):
+    """修改服务商规格配置。省略字段保持原值。"""
+
+    provider_code: RoutingCode | None = Field(
+        default=None, description="新的服务商编码", examples=["zheying"]
+    )
+    spec_code: RoutingCode | None = Field(default=None, description="新的规格编码", examples=["gd_idcard"])
+    provider_item_id: str | None = Field(
+        default=None, min_length=1, max_length=128, description="新的服务商侧规格 ID", examples=["714"]
+    )
+    param_mapping: dict[str, str] | None = Field(
+        default=None, description="新的办理字段映射，传空对象清空", examples=[{"name": "text_name"}]
+    )
+    cost_fen: int | None = Field(
+        default=None, ge=0, le=2_147_483_647, description="新的办理成本，单位分", examples=[350]
+    )
+    is_enabled: bool | None = Field(default=None, description="是否启用此服务商规格", examples=[False])
+
+
+class AdminRouteRuleCreateIn(Schema):
+    """新增一条路由规则。"""
+
+    provider_code: RoutingCode = Field(description="候选服务商编码", examples=["zheying"])
+    spec_code: RoutingCode = Field(description="适用规格编码", examples=["gd_idcard"])
+    region_code: RoutingRegionCode | None = Field(
+        default=None, description="适用地区行政区划码，空值表示不限地区", examples=["440300"]
+    )
+    priority: int = Field(
+        default=100,
+        ge=-2_147_483_648,
+        le=2_147_483_647,
+        description="候选顺序，数字越小越优先，默认 100",
+        examples=[10],
+    )
+    is_enabled: bool = Field(default=True, description="是否启用此规则，默认启用", examples=[True])
+
+
+class AdminRouteRuleUpdateIn(Schema):
+    """修改路由规则。省略字段保持原值。"""
+
+    provider_code: RoutingCode | None = Field(
+        default=None, description="新的候选服务商编码", examples=["zheying"]
+    )
+    spec_code: RoutingCode | None = Field(
+        default=None, description="新的适用规格编码", examples=["gd_idcard"]
+    )
+    region_code: RoutingRegionCode | None = Field(
+        default=None, description="新的行政区划码，显式传 null 改为不限地区", examples=[None]
+    )
+    priority: int | None = Field(
+        default=None,
+        ge=-2_147_483_648,
+        le=2_147_483_647,
+        description="新的优先级，数字越小越优先",
+        examples=[20],
+    )
+    is_enabled: bool | None = Field(default=None, description="是否启用此规则", examples=[False])
+
+
 # ---------- 审计日志 ----------
 
 
@@ -623,19 +823,21 @@ class AdminAuditLogOut(Schema):
     admin_id: int = Field(description="操作人后台账号 ID", examples=[3])
     admin_username: str | None = Field(description="操作人用户名", examples=["fin_li"])
     action: str = Field(
-        description="操作类型，如 refund.create、plan.update、application.cancel、auth.login",
+        description="操作类型，如 refund.create、route_rule.update、provider_spec.create、admin_user.disable",
         examples=["refund.create"],
     )
     target_type: str = Field(
-        description="操作对象类型，如 order、plan、spec、provider、receipt_application、admin_session",
+        description="操作对象类型，如 order、plan、provider_spec、route_rule、receipt_application、admin_user",
         examples=["order"],
     )
     target_id: int | None = Field(description="操作对象的内部 ID；没有具体对象为空", examples=[88])
     before: dict[str, Any] | None = Field(
-        description="操作前的关键字段；新建类操作为空", examples=[{"status": "paid", "refunded_fen": 0}]
+        description="操作前的关键字段；新建和密码重置时为空",
+        examples=[{"status": "paid", "refunded_fen": 0}],
     )
     after: dict[str, Any] | None = Field(
-        description="操作后的关键字段", examples=[{"status": "refunded", "refunded_fen": 3990}]
+        description="操作后的关键字段；删除和密码重置时为空",
+        examples=[{"status": "refunded", "refunded_fen": 3990}],
     )
     created_at: datetime = Field(description="操作时间（UTC，带时区）", examples=["2026-11-19T09:00:00Z"])
 
