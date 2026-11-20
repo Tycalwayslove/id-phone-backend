@@ -56,6 +56,7 @@ tests/<m>/test_*.py
 - `create_task(db, *, user_id, event, application_id=None, entitlement_id=None) -> NotifyTask`
   event ∈ receipt_rejected / receipt_completed / entitlement_expiring / receipt_expiring。
   同一目标同一事件已有 step=1 的任务时：若已发送过，重置为 pending 并更新 scheduled_at（再次驳回需要再通知）；否则直接返回已有任务。
+- `create_task_once(db, *, user_id, event, step, application_id=None, entitlement_id=None) -> bool`：按目标、事件、档位和小程序渠道去重，返回是否新建；已有任务保留原状态，到期提醒用 step=7 和 step=1。
 
 ## receipts（回执）
 

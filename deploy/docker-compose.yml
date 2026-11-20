@@ -1,5 +1,19 @@
 # 服务器上的部署：同一台机器跑数据库和后端。用法见 docs/deploy.md。
 # 如果改用云数据库（RDS），删掉 db 服务，把 DATABASE_URL 指向云数据库即可。
+x-backend: &backend
+  image: idphone-backend
+  build: ../backend
+  pull_policy: build
+  restart: unless-stopped
+  depends_on:
+    db:
+      condition: service_healthy
+  environment:
+    APP_ENV: prod
+    DATABASE_URL: postgresql+psycopg://idphone_app:${POSTGRES_PASSWORD}@db:5432/idphone_prod
+  volumes:
+    - storage:/app/storage
+
 services:
   db:
     image: postgres:18
@@ -16,20 +30,19 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    # 不映射端口：数据库只给同一台机器上的 api 用，不对外开放
+    # 不映射端口：数据库只给同一台机器上的 api 和 worker 用
 
   api:
-    build: ../backend
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      APP_ENV: prod
-      DATABASE_URL: postgresql+psycopg://idphone_app:${POSTGRES_PASSWORD}@db:5432/idphone_prod
+    <<: *backend
     # 只监听本机，外面由 HTTPS 反向代理转进来
     ports:
       - "127.0.0.1:8000:8000"
 
+  worker:
+    <<: *backend
+    command: ["python", "-m", "app.workers.runner"]
+    stop_grace_period: 60s
+
 volumes:
   pgdata:
+  storage:

@@ -40,6 +40,17 @@ def active_covering_photo(db: Session, user_id: int, photo_id: int, now: datetim
     return list(db.scalars(stmt))
 
 
+def active_expiring_between(db: Session, starts_after: datetime, ends_by: datetime) -> list[Entitlement]:
+    stmt = (
+        select(Entitlement)
+        .where(
+            Entitlement.status == "active", Entitlement.ends_at > starts_after, Entitlement.ends_at <= ends_by
+        )
+        .order_by(Entitlement.ends_at, Entitlement.id)
+    )
+    return list(db.scalars(stmt))
+
+
 def get_by_order_item(db: Session, order_item_id: int) -> Entitlement | None:
     return db.scalar(select(Entitlement).where(Entitlement.order_item_id == order_item_id))
 

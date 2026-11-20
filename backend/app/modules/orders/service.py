@@ -111,6 +111,16 @@ def _close_expired(db: Session, orders: list[Order]) -> None:
         db.refresh(o)
 
 
+def close_expired(db: Session, limit: int = 100) -> int:
+    """批量关闭过期的待支付订单及其待支付流水，返回订单数。"""
+    now = utcnow()
+    order_ids = repo.lock_expired_order_ids(db, now, limit)
+    if order_ids:
+        repo.close_expired(db, order_ids, now)
+    db.commit()
+    return len(order_ids)
+
+
 # ---------- 下单 ----------
 
 
