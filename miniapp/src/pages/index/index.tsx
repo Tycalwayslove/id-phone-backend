@@ -1,16 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Button, ScrollView, Text, View } from '@tarojs/components'
 import Taro, { usePullDownRefresh } from '@tarojs/taro'
 import type { components } from '../../api/schema'
-import { listSpecs } from '../../api/specs'
+import CityChip from '../../components/CityChip'
+import CityPicker from '../../components/CityPicker'
 import HeroFrame from '../../components/HeroFrame'
+import Loading from '../../components/Loading'
 import PageContainer from '../../components/PageContainer'
 import PrivacyPopup from '../../components/PrivacyPopup'
 import PrivateDomainCard from '../../components/PrivateDomainCard'
 import SearchBox from '../../components/SearchBox'
 import ShootGuide from '../../components/ShootGuide'
+import SpecGroups from '../../components/SpecGroups'
 import SpecPicker from '../../components/SpecPicker'
 import SpecTile from '../../components/SpecTile'
+import useCity from '../../hooks/useCity'
 import useCommonSpecs from '../../hooks/useCommonSpecs'
 import useShootFlow from '../../hooks/useShootFlow'
 import { handleError } from '../../utils/errors'
@@ -27,40 +31,51 @@ const REASONS = [
 ]
 
 export default function Index() {
-  const { specs, details, loading, load } = useCommonSpecs()
-  const [receipts, setReceipts] = useState<SpecOut[]>([])
+  const { city, setCity, regionCode } = useCity()
+  const { specs, loading, load } = useCommonSpecs(regionCode)
+  const receipts = useCommonSpecs(regionCode, { category: 'receipt', limit: 6 })
   const [picking, setPicking] = useState(false)
+  const [cityAction, setCityAction] = useState<'change' | { keyword?: string } | null>(null)
   const shoot = useShootFlow()
 
   async function refresh(): Promise<void> {
     const results = await Promise.allSettled([
       load(),
-      listSpecs({ category: 'receipt', limit: 6 }).then(({ items }) => setReceipts(items))
+      receipts.load()
     ])
     const failure = results.find((result) => result.status === 'rejected')
     if (failure?.status === 'rejected') await handleError(failure.reason)
   }
-
-  useEffect(() => {
-    void refresh()
-  }, [])
 
   usePullDownRefresh(() => {
     void refresh().finally(() => Taro.stopPullDownRefresh())
   })
 
   function pickSpec(spec: SpecOut): void {
+    if (!city) {
+      openPicker()
+      return
+    }
     setPicking(false)
-    void shoot.open(spec.code, details.get(spec.code))
+    void shoot.open(spec.code)
   }
 
   function openPicker(): void {
+    if (shoot.busy) return
     setPicking(true)
-    if (specs.length === 0) void load().catch(handleError)
+    if (city && specs.length === 0) void load().catch(handleError)
+  }
+
+  function openCatalog(keyword?: string): void {
+    if (city) void navigate(PAGES.specs, { keyword })
+    else setCityAction({ keyword })
   }
 
   return (
     <PageContainer>
+      <View className='home-city'>
+        <CityChip city={city} onClick={() => setCityAction('change')} />
+      </View>
       <View className='home-hero'>
         <Text className='home-hero__title'>在家拍证件照</Text>
         <Text className='home-hero__intro'>手机拍一张，自动换底色、裁尺寸，修得自然。</Text>
@@ -71,20 +86,20 @@ export default function Index() {
 
       <SearchBox
         placeholder='搜身份证、社保卡、教师资格证…'
-        onSearch={(keyword) => navigate(PAGES.specs, { keyword })}
+        onSearch={openCatalog}
       />
 
       <View className='home-section'>
         <View className='section-title'>
           <Text>常用规格</Text>
-          <Text className='home-link' onClick={() => navigate(PAGES.specs)}>全部</Text>
+          <Text className='home-link' onClick={() => openCatalog()}>全部</Text>
         </View>
+        {loading && specs.length === 0 ? <Loading /> : null}
         <View className='spec-tiles'>
           {specs.map((spec) => (
             <SpecTile
               key={spec.code}
               spec={spec}
-              supportsReceipt={details.get(spec.code)?.supports_receipt}
               onClick={() => pickSpec(spec)}
             />
           ))}
@@ -96,17 +111,22 @@ export default function Index() {
           <Text>办证要回执？</Text>
         </View>
         <Text className='home-receipt-copy'>身份证、社保卡、驾驶证等官方回执，拍好照片后在线提交，不用跑腿。</Text>
-        {receipts.length > 0 ? (
-          <ScrollView scrollX className='home-scroll' enhanced showScrollbar={false}>
-            <View className='home-scroll__row'>
-              {receipts.map((spec) => (
-                <Text key={spec.code} className='home-receipt' onClick={() => navigate(PAGES.specDetail, { code: spec.code })}>
-                  {spec.name}
-                </Text>
-              ))}
-            </View>
-          </ScrollView>
-        ) : null}
+        <SpecGroups city={city} specs={receipts.specs.filter((spec) => spec.supports_receipt)}>
+          {(items) => (
+            <ScrollView scrollX className='home-scroll' enhanced showScrollbar={false}>
+              <View className='home-scroll__row'>
+                {items.map((spec) => (
+                  <Text key={spec.code} className='home-receipt' onClick={() => {
+                    if (city) void navigate(PAGES.specDetail, { code: spec.code })
+                    else openPicker()
+                  }}>
+                    {spec.name}
+                  </Text>
+                ))}
+              </View>
+            </ScrollView>
+          )}
+        </SpecGroups>
       </View>
 
       <View className='home-section'>
@@ -122,10 +142,19 @@ export default function Index() {
       <SpecPicker
         open={picking}
         specs={specs}
-        details={details}
         loading={loading}
         onPick={pickSpec}
         onClose={() => setPicking(false)}
+      />
+      <CityPicker
+        open={cityAction !== null}
+        city={city}
+        onClose={() => setCityAction(null)}
+        onPick={(nextCity) => {
+          setCity(nextCity)
+          setCityAction(null)
+          if (cityAction && cityAction !== 'change') void navigate(PAGES.specs, { keyword: cityAction.keyword })
+        }}
       />
       <ShootGuide spec={shoot.spec} onChoose={shoot.choose} onClose={shoot.close} />
       <PrivacyPopup page={PAGES.index} />

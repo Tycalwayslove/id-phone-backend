@@ -10,10 +10,11 @@ import PageContainer from '../../components/PageContainer'
 import PhotoFrame from '../../components/PhotoFrame'
 import ShootGuide from '../../components/ShootGuide'
 import SpecPicker from '../../components/SpecPicker'
+import useCity from '../../hooks/useCity'
 import useCommonSpecs from '../../hooks/useCommonSpecs'
 import { usePagedList } from '../../hooks/usePagedList'
 import useShootFlow from '../../hooks/useShootFlow'
-import { describeError, handleError } from '../../utils/errors'
+import { describeError } from '../../utils/errors'
 import { formatDate } from '../../utils/format'
 import { PAGES, navigate } from '../../utils/nav'
 import './index.scss'
@@ -30,7 +31,8 @@ function accessLabel(p: PhotoOut): { text: string; ok: boolean } {
 
 export default function Photos() {
   const [picking, setPicking] = useState(false)
-  const common = useCommonSpecs()
+  const { city, regionCode } = useCity()
+  const common = useCommonSpecs(regionCode, { enabled: picking && city !== null })
   const shoot = useShootFlow()
   const { items, loading, loaded, hasMore, error, reload, loadMore } = usePagedList(
     (cursor) => listPhotos(cursor),
@@ -76,7 +78,6 @@ export default function Photos() {
           onAction={() => {
             if (shoot.busy) return
             setPicking(true)
-            if (common.specs.length === 0) void common.load().catch(handleError)
           }}
         />
       ) : null}
@@ -85,12 +86,11 @@ export default function Photos() {
       <SpecPicker
         open={picking}
         specs={common.specs}
-        details={common.details}
         loading={common.loading}
         onClose={() => setPicking(false)}
         onPick={(spec) => {
           setPicking(false)
-          void shoot.open(spec.code, common.details.get(spec.code))
+          void shoot.open(spec.code)
         }}
       />
       <ShootGuide spec={shoot.spec} onChoose={shoot.choose} onClose={shoot.close} />

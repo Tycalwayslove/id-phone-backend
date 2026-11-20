@@ -10,9 +10,16 @@
 .bottom-sheet {
   padding: 36px 32px calc(32px + env(safe-area-inset-bottom));
 
+  &__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin: 0 56px 28px 0;
+  }
+
   &__title {
     display: block;
-    margin: 0 56px 28px 0;
     font-size: var(--fs-title);
     font-weight: 600;
     color: var(--c-ink);

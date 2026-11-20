@@ -6,12 +6,13 @@ import './index.scss'
 interface Props {
   open: boolean
   title: string
+  titleAction?: ReactNode
   dismissible?: boolean
   onClose: () => void
   children: ReactNode
 }
 
-export default function BottomSheet({ open, title, dismissible = true, onClose, children }: Props) {
+export default function BottomSheet({ open, title, titleAction, dismissible = true, onClose, children }: Props) {
   return (
     <Popup
       className='bottom-sheet-popup'
@@ -19,11 +20,17 @@ export default function BottomSheet({ open, title, dismissible = true, onClose, 
       visible={open}
       closeable={dismissible}
       closeOnOverlayClick={dismissible}
-      onClose={onClose}
+      onClose={() => {
+        // NutUI 也会在 visible 变为 false 时调用 onClose。
+        if (open) onClose()
+      }}
       zIndex={80}
     >
       <View className='bottom-sheet'>
-        <Text className='bottom-sheet__title'>{title}</Text>
+        <View className='bottom-sheet__header'>
+          <Text className='bottom-sheet__title'>{title}</Text>
+          {titleAction}
+        </View>
         {children}
       </View>
     </Popup>

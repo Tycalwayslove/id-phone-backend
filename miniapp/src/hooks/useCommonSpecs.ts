@@ -1,35 +1,44 @@
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { components } from '../api/schema'
-import { getSpec, listSpecs } from '../api/specs'
+import { listSpecs, type SpecCategory } from '../api/specs'
+import { handleError } from '../utils/errors'
 
 type SpecOut = components['schemas']['SpecOut']
-type SpecDetail = components['schemas']['SpecDetail']
 
-export default function useCommonSpecs() {
-  const [specs, setSpecs] = useState<SpecOut[]>([])
-  const [details, setDetails] = useState<ReadonlyMap<string, SpecDetail>>(() => new Map())
+interface Options {
+  category?: SpecCategory
+  limit?: number
+  enabled?: boolean
+}
+
+export default function useCommonSpecs(regionCode: string, { category, limit = 8, enabled = true }: Options = {}) {
+  const [result, setResult] = useState<{ regionCode: string; specs: SpecOut[] }>()
   const [loading, setLoading] = useState(false)
-  const request = useRef<Promise<void> | null>(null)
+  const request = useRef<{ regionCode: string; promise: Promise<void> } | null>(null)
 
-  function load(): Promise<void> {
-    if (request.current) return request.current
+  const load = useCallback(() => {
+    if (request.current?.regionCode === regionCode) return request.current.promise
     setLoading(true)
-    request.current = listSpecs({ limit: 8 })
-      .then(async ({ items }) => {
-        setSpecs(items)
-        setDetails(new Map())
-        // 列表按运营排序，实际回执能力和默认底色由详情接口提供。
-        await Promise.allSettled(items.map(async ({ code }) => {
-          const detail = await getSpec(code)
-          setDetails((current) => new Map(current).set(code, detail))
-        }))
-      })
-      .finally(() => {
+
+    const promise = listSpecs({ category, limit, region_code: regionCode }).then(({ items }) => {
+      if (request.current?.promise === promise) setResult({ regionCode, specs: items })
+    }).catch((error: unknown) => {
+      if (request.current?.promise === promise) throw error
+    }).finally(() => {
+      if (request.current?.promise === promise) {
         request.current = null
         setLoading(false)
-      })
-    return request.current
-  }
+      }
+    })
+    request.current = { regionCode, promise }
+    return promise
+  }, [category, limit, regionCode])
 
-  return { specs, details, loading, load }
+  useEffect(() => {
+    if (!enabled) return
+    void load().catch(handleError)
+    return () => { request.current = null }
+  }, [enabled, load])
+
+  return { specs: result?.regionCode === regionCode ? result.specs : [], loading, load }
 }

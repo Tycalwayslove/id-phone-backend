@@ -1,0 +1,28 @@
+.city-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: auto;
+  min-height: 64px;
+  margin: 0;
+  padding: 0 20px;
+  border: 1px solid var(--c-line);
+  border-radius: 999px;
+  background: var(--c-surface);
+  color: var(--c-primary);
+  font-size: var(--fs-small);
+  line-height: 1.4;
+
+  &::after {
+    border: none;
+  }
+
+  &__arrow {
+    width: 10px;
+    height: 10px;
+    border: solid currentColor;
+    border-width: 0 2px 2px 0;
+    transform: translateY(-2px) rotate(45deg);
+  }
+}

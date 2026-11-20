@@ -1,0 +1,42 @@
+.city-picker {
+  &__list {
+    height: 46vh;
+  }
+
+  &__province + &__province {
+    margin-top: 16px;
+  }
+
+  &__heading {
+    display: block;
+    padding: 12px 16px 4px;
+    color: var(--c-text-2);
+    font-size: var(--fs-small);
+  }
+
+  &__option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    width: 100%;
+    min-height: 80px;
+    margin: 0;
+    padding: 0 16px;
+    border-radius: var(--radius-button);
+    background: var(--c-surface);
+    color: var(--c-ink);
+    font-size: var(--fs-body);
+    line-height: 1.4;
+
+    &::after {
+      border: none;
+    }
+
+    &--selected {
+      background: var(--c-bg);
+      color: var(--c-primary);
+      font-weight: 600;
+    }
+  }
+}
