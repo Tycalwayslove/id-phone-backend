@@ -22,7 +22,7 @@ Python 3.14 · uv · FastAPI · SQLAlchemy 2（同步）· Alembic · PostgreSQL
 - 前缀 `/api/v1/`；资源用复数。
 - 错误统一为 `{"code": "...", "message": "..."}`，错误码集中定义。
 - 金额用整数分，字段名带 `_fen`；时间用 timestamptz，库里一律 UTC。
-- 列表用游标分页，limit 上限 100。
+- 列表分页（见 [ADR 0008](docs/adr/0008-admin-offset-pagination.md)，工具都在 `app/core/pagination.py`）：C 端（小程序）用游标分页，`limit` 上限 100；运营后台用页码分页（`page`、`page_size` 10/20/50/100），返回总条数。
 - 下单、提交回执等接口支持 `Idempotency-Key` 请求头。
 - 接口文档必须写全，`scripts/check_api_docs.py` 在 CI 里检查，不全就不同步到 Apifox：
   - 每个接口：`tags`、固定的 `operation_id`（如 `photos_list`）、`summary`、`description`（说明用途、是否要登录、关键业务规则）、`response_description`。
