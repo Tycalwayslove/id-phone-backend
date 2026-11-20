@@ -23,6 +23,11 @@ tests/<m>/test_*.py
 
 - `revoke_all_for_user(db, user_id) -> int`：吊销该用户全部会话，返回数量。
 
+## users（用户）
+
+- `is_active_user(db, user_id) -> bool`：判断账户是否启用。
+- `get_notification_phone(db, user_id) -> str | None`：返回启用账户已绑定的手机号，仅供短信通道使用。缺失或无法解密时返回空。
+
 ## photos（照片与文件）
 
 - `save_file(db, *, user_id, kind, data, mime, ext, owner, spec_code=None, bg=None, beauty=None) -> File`
