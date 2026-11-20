@@ -85,7 +85,7 @@ async def upload(request: Request, me: Me, db: DB):
         user_id=me.id,
         data=data,
         content_type=content_type,
-        open_id=getattr(me, "wx_mini_open_id", None),
+        open_id=me.wx_mini_open_id,
     )
 
 
@@ -103,7 +103,7 @@ async def upload(request: Request, me: Me, db: DB):
     responses=errors_doc(*_AUTH, ErrorCode.UPLOAD_NOT_FOUND, ErrorCode.PROVIDER_UNAVAILABLE),
 )
 def create_photo(body: PhotoCreate, me: Me, db: DB):
-    return service.create_photo(db, user_id=me.id, body=body, open_id=getattr(me, "wx_mini_open_id", None))
+    return service.create_photo(db, user_id=me.id, body=body, open_id=me.wx_mini_open_id)
 
 
 @router.get(

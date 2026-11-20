@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "证件照与回执 API",
-    "description": "证件照制作、回执办理、权益和订单相关接口。\n\n- C 端接口需要登录的，请求头带 `Authorization: Bearer <token>`（登录接口返回）。\n- 后台接口使用登录后写入的 Cookie，修改类请求还要带 `X-CSRF-Token`。\n- 金额单位一律是分（字段名以 `_fen` 结尾）；时间是带时区的 ISO 8601。\n- 列表接口用游标翻页：第一页不传 cursor，之后传上一页的 next_cursor。\n- 出错时统一返回 `{\"code\": \"...\", \"message\": \"...\"}`，前端按 code 处理。\n\n## 错误码\n\n| 错误码 | HTTP 状态 | 默认提示 |\n|---|---|---|\n| VALIDATION_ERROR | 422 | 请求参数不正确 |\n| NOT_FOUND | 404 | 资源不存在 |\n| CONFLICT | 409 | 数据已存在 |\n| METHOD_NOT_ALLOWED | 405 | 不支持这种请求方式 |\n| RATE_LIMITED | 429 | 操作太频繁，请稍后再试 |\n| IDEMPOTENCY_CONFLICT | 409 | 同一个请求正在处理或参数不一致 |\n| INTERNAL_ERROR | 500 | 服务开小差了，请稍后再试 |\n| DB_UNAVAILABLE | 503 | 数据库暂时不可用，请稍后再试 |\n| AUTH_REQUIRED | 401 | 请先登录 |\n| AUTH_INVALID | 401 | 登录已失效，请重新登录 |\n| WECHAT_LOGIN_FAILED | 400 | 微信登录失败，请重试 |\n| ACCOUNT_DISABLED | 403 | 账号已被停用 |\n| PHONE_ALREADY_BOUND | 409 | 这个手机号已绑定其他账号，请联系客服 |\n| ADMIN_LOGIN_FAILED | 401 | 账号或密码错误 |\n| PERMISSION_DENIED | 403 | 没有这个操作的权限 |\n| SPEC_NOT_FOUND | 404 | 规格不存在 |\n| PHOTO_NOT_FOUND | 404 | 照片不存在 |\n| PHOTO_ACCESS_EXPIRED | 403 | 照片保管期已过，续费后可继续下载和换规格 |\n| PHOTO_NOT_READY | 409 | 照片还在处理中 |\n| UPLOAD_NOT_FOUND | 404 | 上传的文件不存在或已过期 |\n| UPLOAD_INVALID | 422 | 上传的文件格式或大小不符合要求 |\n| SPEC_CHANGE_NOT_ALLOWED | 403 | 当前权益不支持更换规格 |\n| PLAN_NOT_AVAILABLE | 409 | 这个套餐暂不可购买 |\n| ORDER_NOT_FOUND | 404 | 订单不存在 |\n| ORDER_NOT_PAYABLE | 409 | 订单当前不能支付 |\n| ORDER_NOT_CANCELLABLE | 409 | 订单当前不能取消 |\n| PAYMENT_SIGNATURE_INVALID | 401 | 支付通知签名不正确 |\n| REFUND_NOT_ALLOWED | 409 | 订单当前不能退款 |\n| ENTITLEMENT_NOT_FOUND | 404 | 权益不存在 |\n| ENTITLEMENT_EXPIRED | 403 | 权益已过期 |\n| QUOTA_EXHAUSTED | 409 | 回执次数已用完 |\n| ONE_PERSON_MISMATCH | 403 | 该权益仅限本人使用 |\n| RECEIPT_NOT_SUPPORTED | 409 | 这个规格暂不支持办理回执 |\n| APPLICATION_NOT_FOUND | 404 | 回执申请不存在 |\n| APPLICATION_NOT_RESUBMITTABLE | 409 | 当前状态不能重新提交 |\n| RESUBMIT_LIMIT_REACHED | 409 | 重新提交次数已用完 |\n| RECEIPT_NOT_READY | 409 | 回执还没有出来 |\n| PROVIDER_UNAVAILABLE | 503 | 回执通道暂时不可用，请稍后再试 |\n| CALLBACK_SIGNATURE_INVALID | 401 | 回调签名不正确 |\n",
+    "description": "证件照制作、回执办理、权益和订单相关接口。\n\n- C 端接口需要登录的，请求头带 `Authorization: Bearer <token>`（登录接口返回）。\n- 后台接口使用登录后写入的 Cookie，修改类请求还要带 `X-CSRF-Token`。\n- 金额单位一律是分（字段名以 `_fen` 结尾）；时间是带时区的 ISO 8601。\n- 列表接口用游标翻页：第一页不传 cursor，之后传上一页的 next_cursor。\n- 出错时统一返回 `{\"code\": \"...\", \"message\": \"...\"}`，前端按 code 处理。\n\n## 错误码\n\n| 错误码 | HTTP 状态 | 默认提示 |\n|---|---|---|\n| VALIDATION_ERROR | 422 | 请求参数不正确 |\n| NOT_FOUND | 404 | 资源不存在 |\n| CONFLICT | 409 | 数据已存在 |\n| METHOD_NOT_ALLOWED | 405 | 不支持这种请求方式 |\n| RATE_LIMITED | 429 | 操作太频繁，请稍后再试 |\n| IDEMPOTENCY_CONFLICT | 409 | 同一个请求正在处理或参数不一致 |\n| INTERNAL_ERROR | 500 | 服务开小差了，请稍后再试 |\n| DB_UNAVAILABLE | 503 | 数据库暂时不可用，请稍后再试 |\n| AUTH_REQUIRED | 401 | 请先登录 |\n| AUTH_INVALID | 401 | 登录已失效，请重新登录 |\n| WECHAT_LOGIN_FAILED | 400 | 微信登录失败，请重试 |\n| ACCOUNT_DISABLED | 403 | 账号已被停用 |\n| PHONE_ALREADY_BOUND | 409 | 这个手机号已绑定其他账号，请联系客服 |\n| ADMIN_LOGIN_FAILED | 401 | 账号或密码错误 |\n| PERMISSION_DENIED | 403 | 没有这个操作的权限 |\n| SPEC_NOT_FOUND | 404 | 规格不存在 |\n| PHOTO_NOT_FOUND | 404 | 照片不存在 |\n| PHOTO_ACCESS_EXPIRED | 403 | 照片保管期已过，续费后可继续下载和换规格 |\n| PHOTO_NOT_READY | 409 | 照片还在处理中 |\n| PHOTO_REJECTED | 403 | 照片未通过内容检测，请更换照片 |\n| UPLOAD_NOT_FOUND | 404 | 上传的文件不存在或已过期 |\n| UPLOAD_INVALID | 422 | 上传的文件格式或大小不符合要求 |\n| SPEC_CHANGE_NOT_ALLOWED | 403 | 当前权益不支持更换规格 |\n| PLAN_NOT_AVAILABLE | 409 | 这个套餐暂不可购买 |\n| ORDER_NOT_FOUND | 404 | 订单不存在 |\n| ORDER_NOT_PAYABLE | 409 | 订单当前不能支付 |\n| ORDER_NOT_CANCELLABLE | 409 | 订单当前不能取消 |\n| PAYMENT_SIGNATURE_INVALID | 401 | 支付通知签名不正确 |\n| REFUND_NOT_ALLOWED | 409 | 订单当前不能退款 |\n| ENTITLEMENT_NOT_FOUND | 404 | 权益不存在 |\n| ENTITLEMENT_EXPIRED | 403 | 权益已过期 |\n| QUOTA_EXHAUSTED | 409 | 回执次数已用完 |\n| ONE_PERSON_MISMATCH | 403 | 该权益仅限本人使用 |\n| RECEIPT_NOT_SUPPORTED | 409 | 这个规格暂不支持办理回执 |\n| APPLICATION_NOT_FOUND | 404 | 回执申请不存在 |\n| APPLICATION_NOT_RESUBMITTABLE | 409 | 当前状态不能重新提交 |\n| RESUBMIT_LIMIT_REACHED | 409 | 重新提交次数已用完 |\n| RECEIPT_NOT_READY | 409 | 回执还没有出来 |\n| PROVIDER_UNAVAILABLE | 503 | 回执通道暂时不可用，请稍后再试 |\n| CALLBACK_SIGNATURE_INVALID | 401 | 回调签名不正确 |\n",
     "version": "0.2.0"
   },
   "paths": {
@@ -682,7 +682,7 @@
           "照片"
         ],
         "summary": "上传原图",
-        "description": "上传一张照片原图（multipart 表单，文件字段名 file）。需要登录。只接受 JPEG / PNG，不超过 10MB，宽高都不小于 300 像素；文件内容会被校验，扩展名或 Content-Type 与实际内容不符也会被拒绝。上传成功后用返回的 file_id 调用创建照片接口。",
+        "description": "上传一张照片原图（multipart 表单，文件字段名 file）。需要登录。只接受 JPEG / PNG，不超过 10MB，宽高都不小于 300 像素；文件内容会被校验，Content-Type 与实际内容不符会被拒绝。上传时提交微信异步内容检测，上传成功后用 file_id 创建照片。",
         "operationId": "photos_upload",
         "requestBody": {
           "description": "multipart/form-data，只有一个文件字段 file",
@@ -735,6 +735,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "错误码：PROVIDER_UNAVAILABLE（回执通道暂时不可用，请稍后再试）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -750,7 +760,7 @@
           "照片"
         ],
         "summary": "创建照片",
-        "description": "用已上传的原图创建一张照片（底片）。需要登录。file_id 必须是本人上传、还没被其他照片使用的原图，否则返回 UPLOAD_NOT_FOUND。创建后尚未付费，只能生成带水印的预览。",
+        "description": "用已上传的原图创建一张照片（底片）。需要登录。file_id 必须是本人上传、还没被其他照片使用的原图，否则返回 UPLOAD_NOT_FOUND。创建时尝试生成抠图，失败时使用原图。图片内容检测通过后可导出，未付费时只提供带水印的预览。",
         "operationId": "photos_create",
         "security": [
           {
@@ -800,6 +810,16 @@
           },
           "404": {
             "description": "错误码：UPLOAD_NOT_FOUND（上传的文件不存在或已过期）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "错误码：PROVIDER_UNAVAILABLE（回执通道暂时不可用，请稍后再试）",
             "content": {
               "application/json": {
                 "schema": {
@@ -896,7 +916,7 @@
           "照片"
         ],
         "summary": "照片详情",
-        "description": "查看一张照片及其全部导出图。需要登录。只能查看自己的照片，否则返回 PHOTO_NOT_FOUND。保管期已过（access.active 为 false）时，只返回带水印的预览图。",
+        "description": "查看一张照片及其全部导出图。需要登录。只能查看自己的照片，否则返回 PHOTO_NOT_FOUND。内容检测通过后才返回原图链接及导出图。保管期已过（access.active 为 false）时，只返回带水印的预览图。",
         "operationId": "photos_detail",
         "security": [
           {
@@ -1044,7 +1064,7 @@
           "照片"
         ],
         "summary": "生成导出图",
-        "description": "按规格、底色、美颜档位生成导出图。需要登录。没有有效权益（未付费或已过保管期）时生成带水印的预览图（watermarked 为 true）；权益有效时生成无水印的正式图，但如果权益不允许换规格，且这张照片已有其他规格的无水印图，返回 SPEC_CHANGE_NOT_ALLOWED。bg_color 必须在规格的可选底色里，beauty_level 不能超过规格的 beauty_max，不符合时返回 VALIDATION_ERROR。相同参数重复请求会复用已有的图。",
+        "description": "按规格、底色、美颜档位生成导出图。需要登录。内容检测通过后才可导出，等待结果或检测失败返回 PHOTO_NOT_READY，有内容风险或需要复核返回 PHOTO_REJECTED。没有有效权益（未付费或已过保管期）时生成带水印的预览图（watermarked 为 true）；权益有效时生成无水印的正式图，但如果权益不允许换规格，且这张照片已有其他规格的无水印图，返回 SPEC_CHANGE_NOT_ALLOWED。bg_color 必须在规格的可选底色里，beauty_level 不能超过规格的 beauty_max，不符合时返回 VALIDATION_ERROR。相同参数重复请求会复用已有的图。",
         "operationId": "photos_render",
         "security": [
           {
@@ -1121,7 +1141,7 @@
             }
           },
           "403": {
-            "description": "错误码：SPEC_CHANGE_NOT_ALLOWED（当前权益不支持更换规格）",
+            "description": "错误码：SPEC_CHANGE_NOT_ALLOWED（当前权益不支持更换规格）、PHOTO_REJECTED（照片未通过内容检测，请更换照片）",
             "content": {
               "application/json": {
                 "schema": {
@@ -1149,7 +1169,7 @@
           "照片"
         ],
         "summary": "获取下载链接",
-        "description": "获取无水印导出图的下载链接，10 分钟内有效。需要登录。只有无水印的导出图、且照片在保管期内才能下载；带水印的预览图或已过保管期返回 PHOTO_ACCESS_EXPIRED，前端应引导用户付费或续费。",
+        "description": "获取无水印导出图的下载链接，10 分钟内有效。需要登录。照片须通过内容检测、仍在保管期内，且导出图无水印。带水印的预览图或已过保管期返回 PHOTO_ACCESS_EXPIRED，前端应引导用户付费或续费。",
         "operationId": "photos_render_download",
         "security": [
           {
@@ -1232,9 +1252,230 @@
             }
           },
           "403": {
-            "description": "错误码：PHOTO_ACCESS_EXPIRED（照片保管期已过，续费后可继续下载和换规格）",
+            "description": "错误码：PHOTO_ACCESS_EXPIRED（照片保管期已过，续费后可继续下载和换规格）、PHOTO_REJECTED（照片未通过内容检测，请更换照片）",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：PHOTO_NOT_READY（照片还在处理中）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/callbacks/wechat/media-check": {
+      "get": {
+        "tags": [
+          "回调"
+        ],
+        "summary": "验证微信消息推送地址",
+        "description": "小程序启用消息推送时由微信调用。无需登录，通过微信签名校验后回传校验串。",
+        "operationId": "photos_verify_wechat_callback",
+        "parameters": [
+          {
+            "name": "echostr",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256,
+              "description": "微信要求原样返回的校验串",
+              "examples": [
+                "123456789"
+              ],
+              "title": "Echostr"
+            },
+            "description": "微信要求原样返回的校验串"
+          },
+          {
+            "name": "signature",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 40,
+              "description": "微信消息推送签名",
+              "examples": [
+                "cccccccccccccccccccccccccccccccccccccccc"
+              ],
+              "title": "Signature"
+            },
+            "description": "微信消息推送签名"
+          },
+          {
+            "name": "timestamp",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 20,
+              "description": "微信推送时间戳，单位秒",
+              "examples": [
+                "1763452800"
+              ],
+              "title": "Timestamp"
+            },
+            "description": "微信推送时间戳，单位秒"
+          },
+          {
+            "name": "nonce",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "description": "微信签名使用的随机串",
+              "examples": [
+                "20517"
+              ],
+              "title": "Nonce"
+            },
+            "description": "微信签名使用的随机串"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "微信提供的校验串原文",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：CALLBACK_SIGNATURE_INVALID（回调签名不正确）",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "回调"
+        ],
+        "summary": "接收微信内容检测结果",
+        "description": "微信小程序通过明文 JSON 推送异步图片检测结果。无需登录，必须通过微信签名校验。依据 trace_id 更新照片内容检测状态，重复通知可以安全重试。",
+        "operationId": "photos_wechat_media_check_callback",
+        "parameters": [
+          {
+            "name": "signature",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 40,
+              "description": "微信消息推送签名",
+              "examples": [
+                "cccccccccccccccccccccccccccccccccccccccc"
+              ],
+              "title": "Signature"
+            },
+            "description": "微信消息推送签名"
+          },
+          {
+            "name": "timestamp",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 20,
+              "description": "微信推送时间戳，单位秒",
+              "examples": [
+                "1763452800"
+              ],
+              "title": "Timestamp"
+            },
+            "description": "微信推送时间戳，单位秒"
+          },
+          {
+            "name": "nonce",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "description": "微信签名使用的随机串",
+              "examples": [
+                "20517"
+              ],
+              "title": "Nonce"
+            },
+            "description": "微信签名使用的随机串"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WechatMediaEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "处理成功，返回纯文本 success",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：CALLBACK_SIGNATURE_INVALID（回调签名不正确）",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "错误码：PROVIDER_UNAVAILABLE（回执通道暂时不可用，请稍后再试）",
+            "content": {
+              "text/plain": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1286,7 +1527,7 @@
           "套餐与订单"
         ],
         "summary": "下单",
-        "description": "为当前用户创建一个待支付订单并返回拉起支付的参数。需要登录。照片范围为“单张”的套餐必须传 photo_id（本人的照片）；加购项必须传 parent_entitlement_id（本人有效的权益）。订单 30 分钟内有效。支持 Idempotency-Key：网络重试时带同一个 key，只会创建一个订单。",
+        "description": "为当前用户创建一个待支付订单并返回拉起支付的参数。需要登录。新购独立的单张照片套餐时传 photo_id。加购时传 parent_entitlement_id，付款时主权益失效会自动全额退款。续费时传 renew_entitlement_id 和 plan_code，选择照片范围一致且保管天数大于 0 的在售独立套餐。目标为本人未撤销的独立权益，到期前及到期后 30 天内可续费。续费从原到期时间与付款时间的较晚值起算，只延长目标权益的保管期。付款时目标失效会自动全额退款。订单 30 分钟内有效。支持 Idempotency-Key：网络重试时带同一个 key，只会创建一个订单。",
         "operationId": "orders_create",
         "security": [
           {
@@ -1402,7 +1643,7 @@
           "套餐与订单"
         ],
         "summary": "我的订单列表",
-        "description": "返回当前用户的订单，按下单时间从新到旧，游标分页。需要登录。待支付但已超过支付截止时间的订单，读取时会被自动改为已关闭。",
+        "description": "返回当前用户的订单，按下单时间从新到旧，游标分页。需要登录。待支付但已超过支付截止时间的订单，读取时会被自动改为已关闭。refund_pending 为 true 表示退款正在处理。",
         "operationId": "orders_list",
         "security": [
           {
@@ -1483,7 +1724,7 @@
           "套餐与订单"
         ],
         "summary": "订单详情",
-        "description": "按订单号查询当前用户的订单，支付后前端用它确认订单是否已变为 paid。需要登录。真实支付模式下，查询待支付订单时会向微信确认支付结果。别人的订单或不存在的订单号都返回 ORDER_NOT_FOUND。待支付但已超时的订单会被自动改为已关闭。",
+        "description": "按订单号查询当前用户的订单。需要登录。支付后可查询 status 和 refund_pending 确认支付与退款进度。真实支付模式下，查询待支付订单时会向微信确认支付结果。别人的订单或不存在的订单号都返回 ORDER_NOT_FOUND。待支付但已超时的订单会被自动改为已关闭。",
         "operationId": "orders_detail",
         "security": [
           {
@@ -1548,7 +1789,7 @@
             }
           },
           "409": {
-            "description": "错误码：ORDER_NOT_PAYABLE（订单当前不能支付）",
+            "description": "错误码：ORDER_NOT_PAYABLE（订单当前不能支付）、PLAN_NOT_AVAILABLE（这个套餐暂不可购买）、REFUND_NOT_ALLOWED（订单当前不能退款）、IDEMPOTENCY_CONFLICT（同一个请求正在处理或参数不一致）",
             "content": {
               "application/json": {
                 "schema": {
@@ -1669,7 +1910,7 @@
           "回调"
         ],
         "summary": "微信支付结果通知",
-        "description": "由微信支付服务器调用，无需登录。服务端验证签名并解密原始报文。重复通知不会重复发放权益。订单已关闭时自动发起全额退款，保留系统退款记录，不发放权益。联调（fake）模式下，签名放在 X-Fake-Signature 请求头，请求体是 JSON。回调使用微信支付协议。成功返回 HTTP 204 空响应。失败固定返回 {\"code\":\"FAIL\",\"message\":\"失败原因\"}，各状态码对应的内部错误仅供排查。",
+        "description": "由微信支付服务器调用，无需登录。服务端验证签名并解密原始报文。根据微信支付成功时间判断权益是否到期。重复通知只入账一次，续费只延期一次。订单已关闭、加购主权益或续费目标已失效时自动发起全额退款。退款由系统发起并记录审计，微信退款确认后更新已退款金额。联调（fake）模式下，签名放在 X-Fake-Signature 请求头，请求体是 JSON。回调使用微信支付协议。成功返回 HTTP 204 空响应。失败固定返回 {\"code\":\"FAIL\",\"message\":\"失败原因\"}，各状态码对应的内部错误仅供排查。",
         "operationId": "callbacks_wxpay",
         "responses": {
           "204": {
@@ -1696,7 +1937,7 @@
             }
           },
           "409": {
-            "description": "错误码：ORDER_NOT_PAYABLE（订单当前不能支付）",
+            "description": "错误码：ORDER_NOT_PAYABLE（订单当前不能支付）、PLAN_NOT_AVAILABLE（这个套餐暂不可购买）、REFUND_NOT_ALLOWED（订单当前不能退款）、IDEMPOTENCY_CONFLICT（同一个请求正在处理或参数不一致）",
             "content": {
               "application/json": {
                 "schema": {
@@ -1799,7 +2040,7 @@
           "联调"
         ],
         "summary": "模拟支付成功（仅开发测试）",
-        "description": "联调用，生产环境不存在此接口。需要登录，且只能操作自己的订单。效果等同于收到一笔支付成功的通知：订单变为已支付并发放权益。重复调用不会重复发放。下单返回 pay_params.mode=fake 时，前端改调这个接口代替微信支付。",
+        "description": "联调用，生产环境不存在此接口。需要登录，且只能操作自己的订单。效果等同于收到支付成功通知，可发放权益、续费或在主权益或续费目标失效时自动全额退款。重复调用不会重复发放、续费或退款。下单返回 pay_params.mode=fake 时，前端改调这个接口代替微信支付。",
         "operationId": "dev_orders_simulate_paid",
         "security": [
           {
@@ -1864,7 +2105,17 @@
             }
           },
           "409": {
-            "description": "错误码：ORDER_NOT_PAYABLE（订单当前不能支付）",
+            "description": "错误码：ORDER_NOT_PAYABLE（订单当前不能支付）、PLAN_NOT_AVAILABLE（这个套餐暂不可购买）、REFUND_NOT_ALLOWED（订单当前不能退款）、IDEMPOTENCY_CONFLICT（同一个请求正在处理或参数不一致）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "错误码：INTERNAL_ERROR（服务开小差了，请稍后再试）",
             "content": {
               "application/json": {
                 "schema": {
@@ -1882,7 +2133,7 @@
           "权益"
         ],
         "summary": "我的权益列表",
-        "description": "返回当前用户买到的权益（保管期、回执次数等），按到期时间从晚到早排序，最多 100 条，不分页。需要登录。默认只返回当前有效的权益；传 status=expired 查已到期的（用于展示“续费”），status=all 查全部。",
+        "description": "返回当前用户买到的权益（保管期、回执次数等），按到期时间从晚到早排序，最多 100 条，不分页。需要登录。默认只返回当前有效的权益。传 status=expired 查已到期或已撤销的权益，status=all 查全部。根据 can_renew 判断是否展示续费入口。",
         "operationId": "entitlements_list",
         "security": [
           {
@@ -1952,7 +2203,7 @@
           "权益"
         ],
         "summary": "权益详情",
-        "description": "按 ID 查看当前用户的一份权益。需要登录。别人的权益或不存在的 ID 都返回 ENTITLEMENT_NOT_FOUND。",
+        "description": "按 ID 查看当前用户的一份权益。需要登录。续费成功后，可查询同一权益的新到期时间。别人的权益或不存在的 ID 都返回 ENTITLEMENT_NOT_FOUND。",
         "operationId": "entitlements_detail",
         "security": [
           {
@@ -2095,7 +2346,7 @@
             }
           },
           "403": {
-            "description": "错误码：ACCOUNT_DISABLED（账号已被停用）、PHOTO_ACCESS_EXPIRED（照片保管期已过，续费后可继续下载和换规格）、ENTITLEMENT_EXPIRED（权益已过期）、ONE_PERSON_MISMATCH（该权益仅限本人使用）",
+            "description": "错误码：ACCOUNT_DISABLED（账号已被停用）、PHOTO_ACCESS_EXPIRED（照片保管期已过，续费后可继续下载和换规格）、PHOTO_REJECTED（照片未通过内容检测，请更换照片）、ENTITLEMENT_EXPIRED（权益已过期）、ONE_PERSON_MISMATCH（该权益仅限本人使用）",
             "content": {
               "application/json": {
                 "schema": {
@@ -2401,7 +2652,7 @@
             }
           },
           "403": {
-            "description": "错误码：ACCOUNT_DISABLED（账号已被停用）、ENTITLEMENT_EXPIRED（权益已过期）、PHOTO_ACCESS_EXPIRED（照片保管期已过，续费后可继续下载和换规格）",
+            "description": "错误码：ACCOUNT_DISABLED（账号已被停用）、ENTITLEMENT_EXPIRED（权益已过期）、PHOTO_ACCESS_EXPIRED（照片保管期已过，续费后可继续下载和换规格）、PHOTO_REJECTED（照片未通过内容检测，请更换照片）",
             "content": {
               "application/json": {
                 "schema": {
@@ -11341,6 +11592,14 @@
               true
             ]
           },
+          "can_renew": {
+            "type": "boolean",
+            "title": "Can Renew",
+            "description": "权益是否符合续费条件。未撤销的独立权益在到期前或到期后 30 天内为 true，其他情况为 false",
+            "examples": [
+              true
+            ]
+          },
           "spec_change": {
             "type": "boolean",
             "title": "Spec Change",
@@ -11399,6 +11658,7 @@
           "starts_at",
           "ends_at",
           "is_active",
+          "can_renew",
           "spec_change",
           "one_person",
           "receipt_quota_total",
@@ -11407,7 +11667,7 @@
           "resubmit_limit"
         ],
         "title": "EntitlementOut",
-        "description": "用户买到的一份权益：保管期、回执次数等，每次购买生成一条。"
+        "description": "用户买到的一份权益，包含保管期、回执次数等。续费更新原权益的到期时间。"
       },
       "ErrorResponse": {
         "properties": {
@@ -11749,7 +12009,7 @@
               }
             ],
             "title": "Photo Id",
-            "description": "要保管/办理的照片 ID，必须是本人的照片。照片范围为“单张”的套餐必填；其他套餐可不传",
+            "description": "要保管或办理的本人照片 ID。新购独立的单张照片套餐时必填。续费和加购时从原权益取得照片",
             "examples": [
               101
             ]
@@ -11765,7 +12025,23 @@
               }
             ],
             "title": "Parent Entitlement Id",
-            "description": "主权益 ID，必须是本人当前有效的权益。只有加购项套餐（如加办回执）必填，其他套餐不用传",
+            "description": "仅加购项套餐必填。主权益 ID，必须是本人当前有效的权益",
+            "examples": [
+              12
+            ]
+          },
+          "renew_entitlement_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Renew Entitlement Id",
+            "description": "续费目标权益 ID，来自本人权益列表或详情。未撤销的独立权益可在到期前或到期后 30 天内续费。续费时省略 photo_id 和 parent_entitlement_id",
             "examples": [
               12
             ]
@@ -11825,6 +12101,15 @@
             "description": "已退款金额，单位：分；没有退款为 0",
             "examples": [
               0
+            ]
+          },
+          "refund_pending": {
+            "type": "boolean",
+            "title": "Refund Pending",
+            "description": "是否有一笔或多笔退款在处理中。为 true 时可展示退款中，已退款金额在退款确认成功后更新",
+            "default": false,
+            "examples": [
+              false
             ]
           },
           "created_at": {
@@ -12028,6 +12313,15 @@
               0
             ]
           },
+          "refund_pending": {
+            "type": "boolean",
+            "title": "Refund Pending",
+            "description": "是否有一笔或多笔退款在处理中。为 true 时可展示退款中，已退款金额在退款确认成功后更新",
+            "default": false,
+            "examples": [
+              false
+            ]
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -12178,7 +12472,7 @@
               "purged"
             ],
             "title": "Status",
-            "description": "照片状态。draft = 草稿；active = 正常；expired = 保管期已过；purged = 已删除（接口不会返回此状态的照片）",
+            "description": "照片状态。active = 已创建；expired = 保管期已过；draft = 上传待创建的草稿，purged = 已删除，这两种状态不会返回。",
             "examples": [
               "active"
             ]
@@ -12195,7 +12489,7 @@
           "original_url": {
             "type": "string",
             "title": "Original Url",
-            "description": "原图的临时访问链接，约 10 分钟内有效，过期后重新请求接口获取",
+            "description": "原图的临时访问链接，约 10 分钟内有效；内容检测通过后才返回链接，否则为空字符串",
             "examples": [
               "https://api.example.com/files/..."
             ]
@@ -12210,7 +12504,7 @@
             },
             "type": "array",
             "title": "Renders",
-            "description": "已生成的导出图，按生成时间从早到晚；保管期过后只保留带水印的预览图"
+            "description": "已生成的导出图，按生成时间从早到晚；保管期过后只保留带水印的预览图，内容检测未通过时为空"
           }
         },
         "type": "object",
@@ -12257,7 +12551,7 @@
               "purged"
             ],
             "title": "Status",
-            "description": "照片状态。draft = 草稿；active = 正常；expired = 保管期已过；purged = 已删除（接口不会返回此状态的照片）",
+            "description": "照片状态。active = 已创建；expired = 保管期已过；draft = 上传待创建的草稿，purged = 已删除，这两种状态不会返回。",
             "examples": [
               "active"
             ]
@@ -12274,7 +12568,7 @@
           "original_url": {
             "type": "string",
             "title": "Original Url",
-            "description": "原图的临时访问链接，约 10 分钟内有效，过期后重新请求接口获取",
+            "description": "原图的临时访问链接，约 10 分钟内有效；内容检测通过后才返回链接，否则为空字符串",
             "examples": [
               "https://api.example.com/files/..."
             ]
@@ -12331,7 +12625,7 @@
           "storage_days": {
             "type": "integer",
             "title": "Storage Days",
-            "description": "照片保管天数，从付款成功起算；0 表示套餐不含保管期",
+            "description": "套餐配置的保管天数。续费时为增加的天数，0 表示未配置保管天数，不能用于续费",
             "default": 0,
             "examples": [
               365
@@ -13349,6 +13643,113 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WechatMediaEvent": {
+        "properties": {
+          "MsgType": {
+            "type": "string",
+            "title": "Msgtype",
+            "description": "消息类型，event 为事件",
+            "examples": [
+              "event"
+            ]
+          },
+          "Event": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event",
+            "description": "事件名，wxa_media_check 为图片内容检测",
+            "examples": [
+              "wxa_media_check"
+            ]
+          },
+          "appid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Appid",
+            "description": "发送检测请求的小程序 AppID",
+            "examples": [
+              "wx-dev-app"
+            ]
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id",
+            "description": "提交检测时返回的任务 ID",
+            "examples": [
+              "6281cfed-3a6f-b1d3"
+            ]
+          },
+          "errcode": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errcode",
+            "description": "检测错误码，0 表示结果有效",
+            "examples": [
+              0
+            ]
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WechatMediaResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "检测成功时的综合结果"
+          }
+        },
+        "type": "object",
+        "required": [
+          "MsgType"
+        ],
+        "title": "WechatMediaEvent",
+        "description": "小程序消息推送，使用明文 JSON 格式。"
+      },
+      "WechatMediaResult": {
+        "properties": {
+          "suggest": {
+            "type": "string",
+            "title": "Suggest",
+            "description": "处理建议，pass 为通过、risky 为有风险、review 为需要复核",
+            "examples": [
+              "pass"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "suggest"
+        ],
+        "title": "WechatMediaResult",
+        "description": "微信图片内容检测的综合结果。"
       },
       "WechatMiniLoginRequest": {
         "properties": {

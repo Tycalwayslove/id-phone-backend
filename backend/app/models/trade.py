@@ -183,7 +183,7 @@ class Refund(TimestampMixin, Base):
 
 
 class Entitlement(TimestampMixin, Base):
-    """权益：每次购买生成一条，续费也是新的一条，不改旧行。"""
+    """权益：每次购买生成一条；续费延长原权益的 ends_at，并在订单项快照中记录延长明细。"""
 
     __tablename__ = "entitlements"
     __table_args__ = (
