@@ -76,8 +76,10 @@ function listenForPrivacyAuthorization(): void {
 }
 
 function openPrivacyGuide(): void {
-  void Taro.openPrivacyContract().catch(() => {
-    void Taro.showToast({ title: '暂时无法打开隐私保护指引', icon: 'none' })
+  Taro.openPrivacyContract({
+    fail: () => {
+      void Taro.showToast({ title: '暂时无法打开隐私保护指引', icon: 'none' })
+    },
   })
 }
 
