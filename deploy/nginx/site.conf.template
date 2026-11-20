@@ -1,0 +1,49 @@
+upstream idphone_api {
+    zone idphone_api 64k;
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    server api:8000 resolve;
+}
+
+server {
+    listen 80;
+    server_name ${NGINX_SERVER_NAME};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/acme;
+        try_files $uri =404;
+    }
+
+    location / {
+        return 308 https://${NGINX_SERVER_NAME}$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name ${NGINX_SERVER_NAME};
+
+    ssl_certificate "${NGINX_TLS_CERT_FILE}";
+    ssl_certificate_key "${NGINX_TLS_KEY_FILE}";
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # 原图最多 10 MiB，预留 multipart 请求的开销。
+    client_max_body_size 11m;
+    root /usr/share/nginx/html;
+
+    # 回调与其他 API 共用 nginx.conf 中的访问日志格式。
+    location ~ ^/(api(/|$)|files/|health$|docs(/|$)|redoc$|openapi\.json$) {
+        proxy_pass http://idphone_api;
+        proxy_set_header Host $server_name;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $remote_addr;
+    }
+
+    location /assets/ {
+        try_files $uri =404;
+    }
+
+    location / {
+        add_header Cache-Control "no-cache";
+        try_files $uri $uri/ /index.html;
+    }
+}
