@@ -73,5 +73,5 @@
 | 公网 HTTPS 回调地址（`PUBLIC_BASE_URL`、`WXPAY_NOTIFY_URL`、`WXPAY_REFUND_NOTIFY_URL`；回执服务商回调白名单 IP） | 微信支付与回执回调 | 未提供，需服务器与域名 |
 | 企业微信主动发消息的员工确认流程 | 企业微信通道（real 目前跳过并升级） | 待产品决定 |
 | 授权测试照片 | 评估本地裁剪、精修效果与各档位过检率 | 已完成四张授权照片的双模型离线对照，待真实过检率验证 |
-| 微信内容安全消息推送配置（`WX_MSG_TOKEN`、公网 HTTPS 回调 `/wechat/media-check`） | 照片内容安全检测回写 | 未配置；真实微信模式下旧照片需重新上传 |
+| 微信内容安全消息推送配置（`WX_MSG_TOKEN`、公网 HTTPS 回调 `/wechat/media-check`） | 照片内容安全检测回写 | 未配置。本机开发用 `MEDIA_CHECK_MODE=fake`（可与真实微信登录搭配）；上线前在公众平台配置消息推送、填 `WX_MSG_TOKEN`，并把 `MEDIA_CHECK_MODE` 改为 `real`（生产禁止 fake） |
 | 续费订单全额退款后是否回退已延长的到期时间（产品决定） | 续费退款规则 | 待产品决定，当前不回退 |
