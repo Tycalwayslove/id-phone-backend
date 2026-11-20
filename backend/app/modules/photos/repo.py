@@ -53,6 +53,67 @@ def list_photos(db: Session, user_id: int, *, before_id: int | None, limit: int)
     return list(db.scalars(q.order_by(Photo.id.desc()).limit(limit)))
 
 
+def list_admin_photos(
+    db: Session,
+    *,
+    before_id: int | None,
+    limit: int,
+    user_id: int | None,
+    status: str | None,
+    matting_level: str | None,
+    quality_level: str | None,
+) -> list[tuple[Photo, File | None]]:
+    preview = (
+        select(File.id.label("file_id"))
+        .join(PhotoRender, PhotoRender.file_id == File.id)
+        .where(
+            PhotoRender.photo_id == Photo.id,
+            File.user_id == Photo.user_id,
+            File.kind == "preview",
+            File.status == "active",
+        )
+        .order_by(PhotoRender.id.desc())
+        .limit(1)
+        .correlate(Photo)
+        .scalar_subquery()
+    )
+    stmt = select(Photo, File).outerjoin(
+        File,
+        (File.id == func.coalesce(preview, Photo.original_file_id))
+        & (File.user_id == Photo.user_id)
+        & (File.status == "active")
+        & (Photo.status != "purged"),
+    )
+    if before_id is not None:
+        stmt = stmt.where(Photo.id < before_id)
+    if user_id is not None:
+        stmt = stmt.where(Photo.user_id == user_id)
+    if status is not None:
+        stmt = stmt.where(Photo.status == status)
+    if matting_level is not None:
+        stmt = stmt.where(Photo.matting_level == matting_level)
+    if quality_level is not None:
+        stmt = stmt.where(Photo.quality["level"].astext == quality_level)
+    return [
+        (photo, thumbnail) for photo, thumbnail in db.execute(stmt.order_by(Photo.id.desc()).limit(limit))
+    ]
+
+
+def get_admin_photo(db: Session, photo_id: int) -> Photo | None:
+    return db.get(Photo, photo_id)
+
+
+def list_admin_renders(db: Session, photo: Photo) -> list[tuple[PhotoRender, str, File | None]]:
+    stmt = (
+        select(PhotoRender, Spec.name, File)
+        .join(Spec, Spec.id == PhotoRender.spec_id)
+        .outerjoin(File, (File.id == PhotoRender.file_id) & (File.user_id == photo.user_id))
+        .where(PhotoRender.photo_id == photo.id)
+        .order_by(PhotoRender.id.desc())
+    )
+    return [(render, name, file) for render, name, file in db.execute(stmt)]
+
+
 def get_files(db: Session, user_id: int, file_ids: Iterable[int]) -> dict[int, File]:
     ids = list(file_ids)
     if not ids:

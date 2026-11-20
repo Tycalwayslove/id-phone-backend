@@ -1,7 +1,9 @@
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import User
+from app.core.config import settings
+from app.models import ClientApp, User
 from tests.conftest import login
 
 LOGIN = "/api/v1/auth/wechat-mini/login"
@@ -22,6 +24,34 @@ def test_login_same_code_same_user(client: TestClient):
     assert a["user"]["id"] == b["user"]["id"]
     assert b["user"]["is_new"] is False
     assert a["token"] != b["token"]
+
+
+def test_login_records_only_the_first_registration_app(client: TestClient, db: Session, monkeypatch):
+    monkeypatch.setattr(settings, "wx_mini_app_id", "wx-first-test")
+    first = client.post(LOGIN, json={"code": "dev:app-source"}).json()["user"]
+    assert first["is_new"] is True
+    user = db.get(User, first["id"])
+    source_id = user.source_app_id
+    app = db.get(ClientApp, source_id)
+    assert (app.name, app.app_id, app.platform, app.status) == (
+        "wx-first-test",
+        "wx-first-test",
+        "wx_mini",
+        "active",
+    )
+
+    monkeypatch.setattr(settings, "wx_mini_app_id", "wx-later-test")
+    # fake 模式使用同一个 union_id 模拟同一人在两个小程序登录。
+    later = client.post(LOGIN, json={"code": "dev:app-source"}).json()["user"]
+    assert later["id"] == user.id and later["is_new"] is False
+    assert user.source_app_id == source_id
+    later_app_id = db.scalar(select(ClientApp.id).where(ClientApp.app_id == "wx-later-test"))
+    assert later_app_id is not None and later_app_id != source_id
+
+    user.source_app_id = None
+    db.flush()
+    assert client.post(LOGIN, json={"code": "dev:app-source"}).json()["user"]["is_new"] is False
+    assert user.source_app_id is None
 
 
 def test_login_wechat_failed(client: TestClient):

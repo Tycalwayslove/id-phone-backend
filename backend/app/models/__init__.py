@@ -17,7 +17,7 @@ from app.models.trade import (
     PlanBenefit,
     Refund,
 )
-from app.models.user import Channel, User, UserIdentity, UserTag, WecomContact
+from app.models.user import Channel, ClientApp, User, UserIdentity, UserTag, WecomContact
 
 __all__ = [
     "AdminSession",
@@ -26,6 +26,7 @@ __all__ = [
     "AuthSession",
     "Base",
     "Channel",
+    "ClientApp",
     "Entitlement",
     "EntitlementLedger",
     "EntitlementQuota",

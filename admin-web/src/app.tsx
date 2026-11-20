@@ -1,6 +1,6 @@
 import {
-  AuditOutlined, BellOutlined, DashboardOutlined, FileImageOutlined, FileProtectOutlined,
-  IdcardOutlined, LogoutOutlined, PartitionOutlined, ProfileOutlined, SafetyCertificateOutlined, ShoppingOutlined, TeamOutlined,
+  AppstoreOutlined, AuditOutlined, BellOutlined, DashboardOutlined, FileImageOutlined, FileProtectOutlined,
+  IdcardOutlined, LogoutOutlined, PartitionOutlined, PictureOutlined, ProfileOutlined, SafetyCertificateOutlined, ShoppingOutlined, TeamOutlined,
 } from '@ant-design/icons'
 import { Alert, App as AntApp, Button, Layout, Menu, Result, Space, Tag } from 'antd'
 import { lazy, Suspense, useState } from 'react'
@@ -14,6 +14,8 @@ import { useSession } from './session'
 const pages = [
   { path: '/dashboard', label: '数据看板', permission: 'stats:read', icon: DashboardOutlined, Page: lazy(() => import('./pages/dashboard')) },
   { path: '/users', label: '用户', permission: 'user:read', icon: TeamOutlined, Page: lazy(() => import('./pages/users')) },
+  { path: '/photos', label: '照片', permission: 'photo:read', icon: PictureOutlined, Page: lazy(() => import('./pages/photos')) },
+  { path: '/client-apps', label: '应用', permission: 'app:write', icon: AppstoreOutlined, Page: lazy(() => import('./pages/client-apps')) },
   { path: '/orders', label: '订单', permission: 'order:read', icon: ShoppingOutlined, Page: lazy(() => import('./pages/orders')) },
   { path: '/receipts', label: '回执', permission: 'application:read', icon: FileProtectOutlined, Page: lazy(() => import('./pages/receipts')) },
   { path: '/plans', label: '套餐', permission: 'plan:read', icon: ProfileOutlined, Page: lazy(() => import('./pages/plans')) },

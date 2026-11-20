@@ -11,6 +11,8 @@ from app.models import (
     AdminSession,
     AdminUser,
     AuditLog,
+    Channel,
+    ClientApp,
     NotifyTask,
     Order,
     OrderItem,
@@ -112,6 +114,7 @@ def list_users(
     user_id: int | None,
     phone_hash: str | None,
     status: str | None,
+    source_app_id: int | None,
     before_id: int | None,
     limit: int,
 ) -> list[User]:
@@ -122,6 +125,8 @@ def list_users(
         stmt = stmt.where(User.phone_hash == phone_hash)
     if status is not None:
         stmt = stmt.where(User.status == status)
+    if source_app_id is not None:
+        stmt = stmt.where(User.source_app_id == source_app_id)
     if before_id is not None:
         stmt = stmt.where(User.id < before_id)
     return list(db.scalars(stmt.order_by(User.id.desc()).limit(limit)))
@@ -129,6 +134,40 @@ def list_users(
 
 def get_user(db: Session, user_id: int) -> User | None:
     return db.get(User, user_id)
+
+
+def user_sources(db: Session, user_ids: list[int]) -> dict[int, tuple[ClientApp | None, str | None]]:
+    if not user_ids:
+        return {}
+    stmt = (
+        select(User.id, ClientApp, Channel.name)
+        .outerjoin(ClientApp, ClientApp.id == User.source_app_id)
+        .outerjoin(Channel, Channel.id == User.first_channel_id)
+        .where(User.id.in_(user_ids))
+    )
+    return {user_id: (app, channel_name) for user_id, app, channel_name in db.execute(stmt)}
+
+
+def list_client_apps(db: Session, *, before_id: int | None, limit: int) -> list[ClientApp]:
+    stmt = select(ClientApp)
+    if before_id is not None:
+        stmt = stmt.where(ClientApp.id < before_id)
+    return list(db.scalars(stmt.order_by(ClientApp.id.desc()).limit(limit)))
+
+
+def client_app_user_counts(db: Session, app_ids: list[int]) -> dict[int, int]:
+    if not app_ids:
+        return {}
+    stmt = (
+        select(User.source_app_id, func.count())
+        .where(User.source_app_id.in_(app_ids))
+        .group_by(User.source_app_id)
+    )
+    return {app_id: count for app_id, count in db.execute(stmt)}
+
+
+def lock_client_app(db: Session, app_id: int) -> ClientApp | None:
+    return db.get(ClientApp, app_id, populate_existing=True, with_for_update={"key_share": True})
 
 
 def user_order_stats(db: Session, user_ids: Iterable[int]) -> dict[int, tuple[int, int]]:

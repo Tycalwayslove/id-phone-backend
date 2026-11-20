@@ -10,7 +10,10 @@ from app.core.pagination import PageParams
 from app.core.schemas import OkResponse
 from app.modules.admin import service
 from app.modules.admin.schemas import (
+    MATTING_LEVEL_DOC,
     NOTIFY_STATUS_DOC,
+    PHOTO_STATUS_DOC,
+    QUALITY_LEVEL_DOC,
     AdminAccountCreateIn,
     AdminAccountOut,
     AdminAccountPage,
@@ -18,6 +21,9 @@ from app.modules.admin.schemas import (
     AdminApplicationDetail,
     AdminApplicationPage,
     AdminAuditLogPage,
+    AdminClientAppOut,
+    AdminClientAppPage,
+    AdminClientAppUpdateIn,
     AdminLoginIn,
     AdminLoginOut,
     AdminManualReviewIn,
@@ -26,6 +32,8 @@ from app.modules.admin.schemas import (
     AdminOrderDetail,
     AdminOrderPage,
     AdminPasswordResetOut,
+    AdminPhotoDetail,
+    AdminPhotoPage,
     AdminPlanCreateIn,
     AdminPlanOut,
     AdminPlanUpdateIn,
@@ -50,7 +58,10 @@ from app.modules.admin.schemas import (
     AdminUserDetail,
     AdminUserPage,
     AdminUserSearchIn,
+    MattingLevel,
     NotifyStatus,
+    PhotoStatus,
+    QualityLevel,
     SpecCategory,
     SpecStatus,
 )
@@ -71,6 +82,8 @@ def _perm(point: str):
 
 
 UserRead = _perm("user:read")
+PhotoRead = _perm("photo:read")
+AppWrite = _perm("app:write")
 OrderRead = _perm("order:read")
 RefundCreate = _perm("refund:create")
 ApplicationRead = _perm("application:read")
@@ -90,6 +103,8 @@ AdminAccountWrite = _perm("admin:write")
 OrderNoPath = Annotated[str, Path(description="订单号", examples=["O20261119083012A1B2C3"])]
 AppNoPath = Annotated[str, Path(description="回执申请单号", examples=["R20261119083012A1B2C3"])]
 UserIdPath = Annotated[int, Path(description="用户 ID", ge=1, examples=[1024])]
+PhotoIdPath = Annotated[int, Path(ge=1, le=2**63 - 1, description="照片 ID", examples=[12])]
+ClientAppIdPath = Annotated[int, Path(ge=1, le=2**63 - 1, description="客户端应用记录 ID", examples=[3])]
 PlanCodePath = Annotated[str, Path(description="套餐编码", examples=["photo_year_39_9"])]
 SpecCodePath = Annotated[str, Path(description="规格编码", examples=["gd_idcard"])]
 ProviderCodePath = Annotated[str, Path(description="服务商编码", examples=["zheying"])]
@@ -180,7 +195,7 @@ def get_me(admin: Admin):
     summary="用户列表",
     description=(
         f"按注册时间从新到旧列出用户，游标分页，条件之间是“并且”。权限点 user:read。{_LOGIN_NOTE}"
-        "手机号只返回打码后的；按手机号筛选请调用 POST /api/v1/admin/users/search。"
+        "包含首次注册应用和推广渠道。手机号只返回打码后的；按手机号筛选请调用 POST /api/v1/admin/users/search。"
     ),
     response_model=AdminUserPage,
     response_description="用户分页列表",
@@ -199,8 +214,11 @@ def list_users(
             examples=["active"],
         ),
     ] = None,
+    source_app_id: Annotated[
+        int | None, Query(ge=1, le=2**63 - 1, description="按首次注册的应用记录 ID 筛选", examples=[3])
+    ] = None,
 ):
-    return service.list_users(db, user_id=user_id, status=status, page=page)
+    return service.list_users(db, user_id=user_id, status=status, page=page, source_app_id=source_app_id)
 
 
 @admin_router.post(
@@ -210,7 +228,7 @@ def list_users(
     description=(
         f"按注册时间从新到旧查询用户，游标分页，条件之间是“并且”。权限点 user:read。{_LOGIN_NOTE}"
         "请求头需带登录时返回的 X-CSRF-Token。按手机号筛选时在请求体传完整手机号，"
-        "服务端用哈希匹配，响应仅返回打码后的手机号。"
+        "服务端用哈希匹配，响应仅返回打码后的手机号。包含首次注册应用和推广渠道。"
     ),
     response_model=AdminUserPage,
     response_description="符合条件的用户分页列表",
@@ -223,6 +241,7 @@ def search_users(body: AdminUserSearchIn, _: UserRead, db: DB):
         status=body.status,
         page=PageParams.of(body),
         phone=body.phone,
+        source_app_id=body.source_app_id,
     )
 
 
@@ -230,13 +249,110 @@ def search_users(body: AdminUserSearchIn, _: UserRead, db: DB):
     "/users/{user_id}",
     operation_id="admin_users_detail",
     summary="用户详情",
-    description=f"按用户 ID 查看用户资料、登录身份、订单统计。权限点 user:read。{_LOGIN_NOTE}",
+    description=(
+        f"按用户 ID 查看资料、登录身份、订单统计、首次注册应用及推广渠道。权限点 user:read。{_LOGIN_NOTE}"
+        "拥有 photo:read 时同时返回最近 12 张照片的摘要和临时缩略图。"
+    ),
     response_model=AdminUserDetail,
     response_description="用户详情",
-    responses=errors_doc(*_AUTH, ErrorCode.NOT_FOUND),
+    responses=errors_doc(*_AUTH, ErrorCode.NOT_FOUND, ErrorCode.VALIDATION_ERROR),
 )
-def get_user(user_id: UserIdPath, _: UserRead, db: DB):
-    return service.get_user(db, user_id)
+def get_user(user_id: UserIdPath, admin: UserRead, db: DB, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return service.get_user(db, user_id, admin=admin)
+
+
+# ---------- 来源应用 ----------
+
+
+@admin_router.get(
+    "/client-apps",
+    operation_id="admin_client_apps_list",
+    summary="来源应用列表",
+    description=(
+        f"按应用记录 ID 倒序分页，包含已停用应用和各应用带来的首次注册用户数。权限点 user:read。{_LOGIN_NOTE}"
+    ),
+    response_model=AdminClientAppPage,
+    response_description="应用分页列表和各应用的注册用户数",
+    responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR),
+)
+def list_client_apps(_: UserRead, db: DB, page: Page):
+    return service.list_client_apps(db, page)
+
+
+@admin_router.patch(
+    "/client-apps/{id}",
+    operation_id="admin_client_apps_update",
+    summary="修改来源应用",
+    description=(
+        f"更新应用名称和运营状态，仅所有者可操作，权限点 app:write。{_LOGIN_NOTE}{_WRITE_NOTE}"
+        "历史用户仍归属于首次注册的应用，登录按原规则处理。"
+    ),
+    response_model=AdminClientAppOut,
+    response_description="更新后的应用及注册用户数",
+    responses=errors_doc(*_AUTH, ErrorCode.NOT_FOUND, ErrorCode.VALIDATION_ERROR),
+)
+def update_client_app(id: ClientAppIdPath, body: AdminClientAppUpdateIn, admin: AppWrite, db: DB):
+    return service.update_client_app(db, admin, id, body)
+
+
+# ---------- 照片 ----------
+
+
+@admin_router.get(
+    "/photos",
+    operation_id="admin_photos_list",
+    summary="照片列表",
+    description=(
+        f"按照片 ID 从新到旧游标分页，可组合筛选用户、照片状态、抠图精度和拍后检测等级。权限点 photo:read。{_LOGIN_NOTE}"
+        "缩略图链接有效期 10 分钟，缺少有效预览图时用原图。查询列表不写审计。"
+    ),
+    response_model=AdminPhotoPage,
+    response_description="照片摘要分页列表",
+    responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR),
+)
+def list_photos(
+    _: PhotoRead,
+    db: DB,
+    page: Page,
+    response: Response,
+    user_id: Annotated[
+        int | None, Query(ge=1, le=2**63 - 1, description="所属用户 ID", examples=[1024])
+    ] = None,
+    status: Annotated[PhotoStatus | None, Query(description=PHOTO_STATUS_DOC, examples=["active"])] = None,
+    matting_level: Annotated[
+        MattingLevel | None, Query(description=MATTING_LEVEL_DOC, examples=["fine"])
+    ] = None,
+    quality_level: Annotated[
+        QualityLevel | None, Query(description=QUALITY_LEVEL_DOC, examples=["warn"])
+    ] = None,
+):
+    response.headers["Cache-Control"] = "no-store"
+    return service.list_photos(
+        db,
+        page=page,
+        user_id=user_id,
+        status=status,
+        matting_level=matting_level,
+        quality_level=quality_level,
+    )
+
+
+@admin_router.get(
+    "/photos/{photo_id}",
+    operation_id="admin_photos_detail",
+    summary="照片详情",
+    description=(
+        f"查看原图、当前抠图底片、所有导出记录和拍后检测明细。权限点 photo:read。{_LOGIN_NOTE}"
+        "图片签名地址有效期 10 分钟，文件不可用时地址为空。每次成功查询都写入 photo.view 审计。"
+    ),
+    response_model=AdminPhotoDetail,
+    response_description="照片详情、拍后检测明细及临时图片地址",
+    responses=errors_doc(*_AUTH, ErrorCode.PHOTO_NOT_FOUND, ErrorCode.VALIDATION_ERROR),
+)
+def get_photo(photo_id: PhotoIdPath, admin: PhotoRead, db: DB, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return service.get_photo(db, admin, photo_id)
 
 
 # ---------- 订单 ----------

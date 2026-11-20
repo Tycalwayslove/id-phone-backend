@@ -9,11 +9,17 @@ from pydantic import Field, StringConstraints
 from app.core.pagination import PageIn
 from app.core.schemas import Schema, page_model
 from app.modules.orders.schemas import OrderItemOut
+from app.modules.photos.schemas import PhotoQuality
 from app.modules.specs.schemas import SpecFormField
 
 AdminRole = Literal["owner", "operator", "finance"]
 AdminAccountStatus = Literal["active", "disabled"]
 UserStatus = Literal["active", "disabled", "cancelled"]
+ClientAppPlatform = Literal["wx_mini", "wx_mp", "alipay_mini", "douyin_mini", "web"]
+ClientAppStatus = Literal["active", "disabled"]
+PhotoStatus = Literal["draft", "active", "expired", "purged"]
+MattingLevel = Literal["fast", "fine", "failed"]
+QualityLevel = Literal["ok", "warn", "fail"]
 OrderStatus = Literal["pending", "paid", "closed", "part_refunded", "refunded"]
 ApplicationStatus = Literal["pending", "processing", "rejected", "completed", "failed", "cancelled"]
 AttemptStatus = Literal[
@@ -30,6 +36,12 @@ NotifyChannel = Literal["mini_subscribe", "mp_template", "wecom", "sms", "voice"
 _PLAN_STATUS_DOC = "draft = 草稿，用户看不到；on_sale = 在售（还要在销售时间窗口内才能买）；off_sale = 已下架，不能再买，已买的权益不受影响"
 _ROLE_DOC = "角色：owner = 所有者，拥有全部权限；operator = 运营，管用户/回执/规格，不能退款和改套餐；finance = 财务，可退款、看订单和用户"
 NOTIFY_STATUS_DOC = "pending = 待发送；sent = 已发送；failed = 发送失败；skipped = 跳过；cancelled = 已取消"
+PHOTO_STATUS_DOC = "draft = 上传草稿；active = 已创建；expired = 权益已到期；purged = 文件已清理"
+MATTING_LEVEL_DOC = "fast = 快速底片；fine = 精细底片；failed = 精细抠图失败，继续使用原有底片"
+QUALITY_LEVEL_DOC = "ok = 合格；warn = 有调整建议；fail = 建议重拍"
+_CLIENT_APP_STATUS_DOC = (
+    "active = 启用；disabled = 运营已停用。该状态用于应用管理和归因统计，登录仍按原规则处理"
+)
 AdminPassword = Annotated[str, StringConstraints(min_length=12, max_length=128)]
 RoutingCode = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 RoutingRegionCode = Annotated[str, StringConstraints(min_length=1, max_length=32)]
@@ -199,11 +211,125 @@ class AdminUserSearchIn(PageIn):
         examples=["13800001234"],
     )
     user_id: int | None = Field(default=None, ge=1, description="按用户 ID 精确查找", examples=[1024])
+    source_app_id: int | None = Field(
+        default=None, ge=1, le=2**63 - 1, description="按首次注册的应用记录 ID 筛选", examples=[3]
+    )
     status: UserStatus | None = Field(
         default=None,
         description="按账号状态筛选：active = 正常；disabled = 已停用；cancelled = 已注销",
         examples=["active"],
     )
+
+
+# ---------- 来源应用 ----------
+
+
+class AdminClientAppBrief(Schema):
+    """首次注册来源应用。"""
+
+    id: int = Field(description="客户端应用记录 ID，用于筛选用户", examples=[3])
+    platform: ClientAppPlatform = Field(
+        description=(
+            "wx_mini = 微信小程序；wx_mp = 微信公众号；alipay_mini = 支付宝小程序；"
+            "douyin_mini = 抖音小程序；web = 网页"
+        ),
+        examples=["wx_mini"],
+    )
+    app_id: str = Field(description="平台分配的 AppID，与平台组合唯一", examples=["wx-dev-app"])
+    name: str = Field(description="运营用于识别应用的名称，初始值为 AppID", examples=["智拍证件照"])
+
+
+class AdminClientAppOut(AdminClientAppBrief):
+    """应用配置及首次注册用户数。"""
+
+    status: ClientAppStatus = Field(description=_CLIENT_APP_STATUS_DOC, examples=["active"])
+    user_count: int = Field(description="该应用带来的注册用户数，含已注销用户", examples=[120])
+
+
+AdminClientAppPage = page_model(AdminClientAppOut, "AdminClientAppPage")
+
+
+class AdminClientAppUpdateIn(Schema):
+    """更新客户端应用的名称和运营状态。"""
+
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)] | None = (
+        Field(default=None, description="应用名称，1～128 字符；为空则保留原值", examples=["智拍证件照"])
+    )
+    status: ClientAppStatus | None = Field(
+        default=None, description=f"{_CLIENT_APP_STATUS_DOC}；为空则保留原值", examples=["disabled"]
+    )
+
+
+# ---------- 照片 ----------
+
+
+class AdminPhotoOut(Schema):
+    """后台照片摘要及用于网格展示的临时图片链接。"""
+
+    id: int = Field(description="照片 ID", examples=[12])
+    user_id: int = Field(description="所属用户 ID", examples=[1024])
+    source: Literal["camera", "upload"] = Field(
+        description="camera = 小程序内拍照；upload = 从相册上传", examples=["upload"]
+    )
+    status: PhotoStatus = Field(description=PHOTO_STATUS_DOC, examples=["active"])
+    matting_level: MattingLevel | None = Field(
+        description=f"{MATTING_LEVEL_DOC}；尚未记录精度时为空", examples=["fine"]
+    )
+    quality_level: QualityLevel | None = Field(
+        description=f"拍后检测等级。{QUALITY_LEVEL_DOC}；没有检测记录时为空", examples=["warn"]
+    )
+    retain_until: datetime | None = Field(
+        description="文件保管到期时间（UTC，带时区）；没有设置保管期限时为空",
+        examples=["2027-11-19T08:30:00Z"],
+    )
+    created_at: datetime = Field(description="创建时间（UTC，带时区）", examples=["2026-11-19T08:30:00Z"])
+    thumbnail_url: str | None = Field(
+        description="有效期 10 分钟。优先使用预览图，缺少预览图时使用原图，文件不可用时为空",
+        examples=["https://api.example.com/files/preview.jpg"],
+    )
+
+
+AdminPhotoPage = page_model(AdminPhotoOut, "AdminPhotoPage")
+
+
+class AdminPhotoRenderOut(Schema):
+    """后台可查看的一条照片导出记录。"""
+
+    id: int = Field(description="导出记录 ID", examples=[7])
+    spec_name: str = Field(description="导出的规格名称", examples=["广东省身份证"])
+    bg_color: str = Field(description="导出的底色，十六进制颜色值", examples=["#FFFFFF"])
+    beauty_level: int = Field(description="美颜档位（0～5），0 表示只自动校正光影", examples=[0])
+    watermarked: bool = Field(description="是否带水印，true 表示带水印", examples=[True])
+    created_at: datetime = Field(description="生成时间（UTC，带时区）", examples=["2026-11-19T08:35:00Z"])
+    url: str | None = Field(
+        description="导出图签名地址，有效期 10 分钟；文件不可用时为空",
+        examples=["https://api.example.com/files/render.jpg"],
+    )
+
+
+class AdminPhotoDetail(AdminPhotoOut):
+    """后台照片详情，包含拍后检测明细及各版本的临时图片地址。"""
+
+    original_url: str | None = Field(
+        description="原图签名地址，有效期 10 分钟；文件不可用时为空",
+        examples=["https://api.example.com/files/original.jpg"],
+    )
+    matting_url: str | None = Field(
+        description="当前抠图底片签名地址，有效期 10 分钟；没有底片或文件不可用时为空",
+        examples=["https://api.example.com/files/matting.png"],
+    )
+    renders: list[AdminPhotoRenderOut] = Field(description="所有导出记录，从新到旧；未导出时为空列表")
+    quality: PhotoQuality | None = Field(
+        description="拍后检测等级和问题明细，没有检测记录时为空",
+        examples=[{"level": "warn", "issues": [{"code": "too_dark", "message": "请换到光线充足的地方"}]}],
+    )
+    urls_expire_at: datetime = Field(
+        description="详情内图片地址的统一刷新时间（UTC，带时区），到期后重新请求详情",
+        examples=["2026-11-19T08:45:00Z"],
+    )
+
+
+# ---------- 用户 ----------
 
 
 class AdminUserOut(Schema):
@@ -232,15 +358,22 @@ class AdminUserOut(Schema):
     paid_fen_total: int = Field(
         description="累计实付金额，单位：分；是各订单已支付金额之和，不扣除退款", examples=[3990]
     )
+    source_app: AdminClientAppBrief | None = Field(description="首次注册的应用；无来源记录时为空")
+    first_channel_name: str | None = Field(
+        description="首次注册的推广渠道名称；没有归因渠道时为空", examples=["门店二维码"]
+    )
 
 
 class AdminUserDetail(AdminUserOut):
-    """用户详情：在摘要基础上增加头像和回执申请数。"""
+    """用户详情，包含头像、回执申请数及有权查看的照片摘要。"""
 
     avatar_url: str | None = Field(
         description="头像链接；没设置时为空", examples=["https://example.com/a.png"]
     )
     applications_count: int = Field(description="该用户提交过的回执申请总数（含已取消）", examples=[1])
+    recent_photos: list[AdminPhotoOut] = Field(
+        description="有 photo:read 权限时返回最多 12 条最近照片；没有权限或没有照片时为空列表。查看全部时用本响应的 id 筛选 user_id"
+    )
 
 
 AdminUserPage = page_model(AdminUserOut, "AdminUserPage")

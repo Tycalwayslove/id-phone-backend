@@ -18,6 +18,13 @@ export const notifyStatus = { pending: '待发送', sent: '已发送', failed: '
 export const notifyEvent = { receipt_rejected: '回执驳回', receipt_completed: '回执办理完成', entitlement_expiring: '权益即将到期', receipt_expiring: '回执即将到期' } satisfies Record<NotifyTask['event'], string>
 export const notifyChannel = { mini_subscribe: '小程序订阅消息', mp_template: '公众号模板消息', wecom: '企业微信', sms: '短信', voice: '语音', manual_call: '人工电话' } satisfies Record<NotifyTask['channel'], string>
 export const identitySources: Record<string, string> = { wx_mini: '微信小程序', wx_mp: '微信公众号', alipay_mini: '支付宝小程序', douyin_mini: '抖音小程序', h5: '网页' }
+export const clientAppPlatforms = { wx_mini: '微信小程序', wx_mp: '微信公众号', alipay_mini: '支付宝小程序', douyin_mini: '抖音小程序', web: '网页' } satisfies Record<Schema['AdminClientAppBrief']['platform'], string>
+export const clientAppStatus = { active: '启用', disabled: '已停用' } satisfies Record<Schema['AdminClientAppOut']['status'], string>
+type Photo = Schema['AdminPhotoOut']
+export const photoStatus = { draft: '上传草稿', active: '已创建', expired: '权益已到期', purged: '已清理' } satisfies Record<Photo['status'], string>
+export const photoSources = { camera: '小程序拍照', upload: '相册上传' } satisfies Record<Photo['source'], string>
+export const mattingLevels = { fast: '快速', fine: '精细', failed: '精细抠图失败' } satisfies Record<NonNullable<Photo['matting_level']>, string>
+export const qualityLevels = { ok: '合格', warn: '有调整建议', fail: '建议重拍' } satisfies Record<NonNullable<Photo['quality_level']>, string>
 export const paymentChannels: Record<string, string> = { wxpay: '微信支付', alipay: '支付宝', douyin_pay: '抖音支付' }
 
 export const benefitTypes = {
@@ -43,9 +50,12 @@ export const auditActions: Record<string, string> = {
   'spec.update': '修改规格',
   'provider.update': '修改服务商状态',
   'provider.sync_specs': '同步服务商规格',
+  'photo.view': '查看照片',
+  'client_app.update': '修改应用',
 }
 export const auditTargets: Record<string, string> = {
   order: '订单', plan: '套餐', spec: '规格', provider: '服务商', receipt_application: '回执申请', admin_session: '后台会话',
+  photo: '照片', client_app: '应用',
 }
 
 export function labelFor(labels: Record<string, string>, value: string) {

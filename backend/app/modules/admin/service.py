@@ -27,8 +27,11 @@ from app.models import (
     AdminSession,
     AdminUser,
     AuditLog,
+    ClientApp,
+    File,
     Order,
     OrderItem,
+    Photo,
     Plan,
     PlanBenefit,
     ProviderSpec,
@@ -52,6 +55,10 @@ from app.modules.admin.schemas import (
     AdminAuditLogOut,
     AdminAuditLogPage,
     AdminBriefOut,
+    AdminClientAppBrief,
+    AdminClientAppOut,
+    AdminClientAppPage,
+    AdminClientAppUpdateIn,
     AdminLoginOut,
     AdminManualReviewIn,
     AdminMeOut,
@@ -62,6 +69,10 @@ from app.modules.admin.schemas import (
     AdminOrderPage,
     AdminPasswordResetOut,
     AdminPaymentOut,
+    AdminPhotoDetail,
+    AdminPhotoOut,
+    AdminPhotoPage,
+    AdminPhotoRenderOut,
     AdminPlanCreateIn,
     AdminPlanOut,
     AdminPlanUpdateIn,
@@ -90,6 +101,7 @@ from app.modules.admin.schemas import (
 )
 from app.modules.orders import service as order_service
 from app.modules.orders.schemas import OrderItemOut
+from app.modules.photos import service as photo_service
 from app.modules.receipts import service as receipt_service
 from app.modules.specs import service as spec_service
 from app.modules.specs.schemas import ProviderSyncResult
@@ -421,24 +433,36 @@ def _user_outs(db: Session, users: list[User]) -> list[dict]:
     ids = [u.id for u in users]
     stats = repo.user_order_stats(db, ids)
     idents = repo.identity_providers(db, ids)
-    return [
-        dict(
-            id=u.id,
-            nickname=u.nickname,
-            phone_masked=_phone_masked(u),
-            status=u.status,
-            created_at=u.created_at,
-            last_active_at=u.last_active_at,
-            identities=idents[u.id],
-            orders_count=stats.get(u.id, (0, 0))[0],
-            paid_fen_total=stats.get(u.id, (0, 0))[1],
+    sources = repo.user_sources(db, ids)
+    result = []
+    for u in users:
+        app, channel_name = sources[u.id]
+        result.append(
+            dict(
+                id=u.id,
+                nickname=u.nickname,
+                phone_masked=_phone_masked(u),
+                status=u.status,
+                created_at=u.created_at,
+                last_active_at=u.last_active_at,
+                identities=idents[u.id],
+                orders_count=stats.get(u.id, (0, 0))[0],
+                paid_fen_total=stats.get(u.id, (0, 0))[1],
+                source_app=AdminClientAppBrief.model_validate(app) if app is not None else None,
+                first_channel_name=channel_name,
+            )
         )
-        for u in users
-    ]
+    return result
 
 
 def list_users(
-    db: Session, *, user_id: int | None, status: str | None, page: PageParams, phone: str | None = None
+    db: Session,
+    *,
+    user_id: int | None,
+    status: str | None,
+    page: PageParams,
+    phone: str | None = None,
+    source_app_id: int | None = None,
 ) -> AdminUserPage:
     phone_hash = security.keyed_hash(phone.strip(), "phone") if phone else None
     rows = repo.list_users(
@@ -446,6 +470,7 @@ def list_users(
         user_id=user_id,
         phone_hash=phone_hash,
         status=status,
+        source_app_id=source_app_id,
         before_id=page.before_id(),
         limit=page.fetch_limit,
     )
@@ -453,15 +478,140 @@ def list_users(
     return AdminUserPage(items=[AdminUserOut(**d) for d in _user_outs(db, rows)], next_cursor=next_cursor)
 
 
-def get_user(db: Session, user_id: int) -> AdminUserDetail:
+def get_user(db: Session, user_id: int, *, admin: CurrentAdmin) -> AdminUserDetail:
     user = repo.get_user(db, user_id)
     if user is None:
         raise AppError(ErrorCode.NOT_FOUND, "用户不存在")
+    photos = (
+        photo_service.list_admin_photos(db, user_id=user.id, before_id=None, limit=12)
+        if admin.can("photo:read")
+        else []
+    )
     return AdminUserDetail(
         **_user_outs(db, [user])[0],
         avatar_url=user.avatar_url,
         applications_count=receipt_service.count_user_applications(db, user_id=user.id),
+        recent_photos=[_photo_summary(photo, thumbnail) for photo, thumbnail in photos],
     )
+
+
+# ---------- 来源应用 ----------
+
+
+def _client_app_out(app: ClientApp, counts: dict[int, int]) -> AdminClientAppOut:
+    return AdminClientAppOut(
+        **AdminClientAppBrief.model_validate(app).model_dump(),
+        status=app.status,
+        user_count=counts.get(app.id, 0),
+    )
+
+
+def list_client_apps(db: Session, page: PageParams) -> AdminClientAppPage:
+    rows = repo.list_client_apps(db, before_id=page.before_id(), limit=page.fetch_limit)
+    rows, next_cursor = page.slice(rows)
+    counts = repo.client_app_user_counts(db, [app.id for app in rows])
+    return AdminClientAppPage(items=[_client_app_out(app, counts) for app in rows], next_cursor=next_cursor)
+
+
+def update_client_app(
+    db: Session, admin: CurrentAdmin, app_id: int, body: AdminClientAppUpdateIn
+) -> AdminClientAppOut:
+    app = repo.lock_client_app(db, app_id)
+    if app is None:
+        raise AppError(ErrorCode.NOT_FOUND, "客户端应用不存在")
+    before = {"name": app.name, "status": app.status}
+    if body.name is not None:
+        app.name = body.name
+    if body.status is not None:
+        app.status = body.status
+    after = {"name": app.name, "status": app.status}
+    if after != before:
+        _audit(db, admin.id, "client_app.update", "client_app", app.id, before, after)
+    out = _client_app_out(app, repo.client_app_user_counts(db, [app.id]))
+    db.commit()
+    return out
+
+
+# ---------- 照片 ----------
+
+
+def _photo_file_url(photo: Photo, file: File | None) -> str | None:
+    if photo.status == "purged" or file is None or file.status != "active":
+        return None
+    return photo_service.file_url(file)
+
+
+def _photo_summary(photo: Photo, thumbnail: File | None) -> AdminPhotoOut:
+    return AdminPhotoOut(
+        id=photo.id,
+        user_id=photo.user_id,
+        source=photo.source,
+        status=photo.status,
+        matting_level=photo.matting_level,
+        quality_level=photo.quality.get("level") if photo.quality else None,
+        retain_until=photo.retain_until,
+        created_at=photo.created_at,
+        thumbnail_url=_photo_file_url(photo, thumbnail),
+    )
+
+
+def list_photos(
+    db: Session,
+    *,
+    page: PageParams,
+    user_id: int | None,
+    status: str | None,
+    matting_level: str | None,
+    quality_level: str | None,
+) -> AdminPhotoPage:
+    rows = photo_service.list_admin_photos(
+        db,
+        before_id=page.before_id(),
+        limit=page.fetch_limit,
+        user_id=user_id,
+        status=status,
+        matting_level=matting_level,
+        quality_level=quality_level,
+    )
+    rows, next_cursor = page.slice(rows, cursor_of=lambda row: {"i": row[0].id})
+    return AdminPhotoPage(
+        items=[_photo_summary(photo, thumbnail) for photo, thumbnail in rows], next_cursor=next_cursor
+    )
+
+
+def get_photo(db: Session, admin: CurrentAdmin, photo_id: int) -> AdminPhotoDetail:
+    photo, files, renders = photo_service.get_admin_photo_detail(db, photo_id=photo_id)
+    # 从签发前计时，确保统一刷新时间早于所有图片链接实际失效的时间。
+    expires_at = utcnow().replace(microsecond=0) + timedelta(seconds=photo_service.DOWNLOAD_URL_SECONDS)
+    original = files.get(photo.original_file_id)
+    preview = next(
+        (file for _, _, file in renders if file and file.kind == "preview" and file.status == "active"),
+        original,
+    )
+    detail = AdminPhotoDetail(
+        **_photo_summary(photo, preview).model_dump(),
+        original_url=_photo_file_url(photo, original),
+        matting_url=_photo_file_url(
+            photo, files.get(photo.matting_file_id) if photo.matting_file_id else None
+        ),
+        renders=[
+            AdminPhotoRenderOut(
+                id=render.id,
+                spec_name=name,
+                bg_color=render.bg_color,
+                beauty_level=render.beauty_level,
+                watermarked=render.watermarked,
+                created_at=render.created_at,
+                url=_photo_file_url(photo, file),
+            )
+            for render, name, file in renders
+        ],
+        quality=photo.quality,
+        urls_expire_at=expires_at,
+    )
+    _audit(db, admin.id, "photo.view", "photo", photo.id)
+    db.commit()
+    return detail
 
 
 # ---------- 订单 ----------

@@ -22,8 +22,8 @@ def _phone_masked(user: User) -> str | None:
     return security.mask_phone(security.decrypt(user.phone_enc, "phone"))
 
 
-def _new_user(db: Session) -> User:
-    user = User(status="active")
+def _new_user(db: Session, source_app_id: int) -> User:
+    user = User(status="active", source_app_id=source_app_id)
     db.add(user)
     db.flush()
     return user
@@ -31,6 +31,7 @@ def _new_user(db: Session) -> User:
 
 def _resolve_user(db: Session, ws: WechatSession) -> tuple[User, UserIdentity, bool]:
     """找到或创建 (用户, 身份)，第三项表示用户是否本次新建。"""
+    source_app_id = repo.ensure_client_app(db, platform=repo.client_app_platform(PROVIDER), app_id=ws.app_id)
     identity = repo.get_identity(db, PROVIDER, ws.app_id, ws.open_id)
     if identity is not None:
         user = db.get(User, identity.user_id)
@@ -41,7 +42,7 @@ def _resolve_user(db: Session, ws: WechatSession) -> tuple[User, UserIdentity, b
                 identity.union_id = ws.union_id
             return user, identity, False
         # 已注销：当作不存在，新建用户并把身份指向新用户
-        user = _new_user(db)
+        user = _new_user(db, source_app_id)
         identity.user_id = user.id
         identity.union_id = ws.union_id
         db.flush()
@@ -50,7 +51,7 @@ def _resolve_user(db: Session, ws: WechatSession) -> tuple[User, UserIdentity, b
     user = repo.find_live_user_by_union(db, ws.union_id) if ws.union_id else None
     is_new = user is None
     if user is None:
-        user = _new_user(db)
+        user = _new_user(db, source_app_id)
     elif user.status == "disabled":
         raise AppError(ErrorCode.ACCOUNT_DISABLED)
     identity = UserIdentity(

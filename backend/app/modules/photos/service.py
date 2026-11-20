@@ -120,6 +120,39 @@ def get_photo_for_user(db: Session, user_id: int, photo_id: int) -> Photo:
     return photo
 
 
+def list_admin_photos(
+    db: Session,
+    *,
+    before_id: int | None,
+    limit: int,
+    user_id: int | None = None,
+    status: str | None = None,
+    matting_level: str | None = None,
+    quality_level: str | None = None,
+) -> list[tuple[Photo, File | None]]:
+    return repo.list_admin_photos(
+        db,
+        before_id=before_id,
+        limit=limit,
+        user_id=user_id,
+        status=status,
+        matting_level=matting_level,
+        quality_level=quality_level,
+    )
+
+
+def get_admin_photo_detail(
+    db: Session, *, photo_id: int
+) -> tuple[Photo, dict[int, File], list[tuple[PhotoRender, str, File | None]]]:
+    photo = repo.get_admin_photo(db, photo_id)
+    if photo is None:
+        raise AppError(ErrorCode.PHOTO_NOT_FOUND)
+    file_ids = [photo.original_file_id]
+    if photo.matting_file_id is not None:
+        file_ids.append(photo.matting_file_id)
+    return photo, repo.get_files(db, photo.user_id, file_ids), repo.list_admin_renders(db, photo)
+
+
 def _check_status(photo: Photo) -> str:
     if photo.check_result is None:
         # 兼容启用审核前创建的照片。真实模式要求取得审核结果。

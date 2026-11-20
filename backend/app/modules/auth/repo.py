@@ -1,8 +1,27 @@
 from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.core.utils import utcnow
-from app.models import AuthSession, User, UserIdentity
+from app.models import AuthSession, ClientApp, User, UserIdentity
+
+
+def client_app_platform(provider: str) -> str:
+    return "web" if provider == "h5" else provider
+
+
+def ensure_client_app(db: Session, *, platform: str, app_id: str) -> int:
+    query = select(ClientApp.id).where(ClientApp.platform == platform, ClientApp.app_id == app_id)
+    existing_id = db.scalar(query)
+    if existing_id is not None:
+        return existing_id
+    new_id = db.scalar(
+        insert(ClientApp)
+        .values(platform=platform, app_id=app_id, name=app_id)
+        .on_conflict_do_nothing(constraint="uq_client_apps_platform_app_id")
+        .returning(ClientApp.id)
+    )
+    return new_id if new_id is not None else db.execute(query).scalar_one()
 
 
 def get_identity(db: Session, provider: str, app_id: str, open_id: str) -> UserIdentity | None:
