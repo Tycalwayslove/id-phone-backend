@@ -6,6 +6,8 @@ export default defineAppConfig({
     'pages/me/index',
     'pages/specs/index',
     'pages/spec-detail/index',
+    'pages/shoot-guide/index',
+    'pages/camera/index',
     'pages/editor/index',
     'pages/plans/index',
     'pages/receipt-apply/index',

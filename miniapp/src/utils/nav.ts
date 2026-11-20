@@ -5,6 +5,8 @@ export const PAGES = {
   index: '/pages/index/index',
   specs: '/pages/specs/index',
   specDetail: '/pages/spec-detail/index',
+  shootGuide: '/pages/shoot-guide/index',
+  camera: '/pages/camera/index',
   editor: '/pages/editor/index',
   plans: '/pages/plans/index',
   receiptApply: '/pages/receipt-apply/index',

@@ -1,3 +1,29 @@
+.editor-quality {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 8px 20px;
+  border-radius: var(--radius-button);
+  background: #e6effb;
+  font-size: var(--fs-small);
+
+  &__close {
+    flex: none;
+    min-height: 80px;
+    margin: 0 0 0 auto;
+    padding: 0 12px;
+    background: transparent;
+    color: var(--c-primary);
+    font-size: var(--fs-small);
+    line-height: 80px;
+
+    &::after {
+      border: none;
+    }
+  }
+}
+
 .editor-preview {
   display: flex;
   flex-direction: column;
