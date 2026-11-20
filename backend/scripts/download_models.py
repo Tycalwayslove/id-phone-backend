@@ -19,6 +19,11 @@ MODELS = {
         "https://github.com/Zeyi-Lin/HivisionIDPhotos/releases/download/pretrained-model/modnet_photographic_portrait_matting.onnx",
         "07c308cf0fc7e6e8b2065a12ed7fc07e1de8febb7dc7839d7b7f15dd66584df9",
     ),
+    # BiRefNet 通用分割 swin_v1_tiny（MIT），复杂背景下的精细抠图，CPU 约 5~8 秒/张，后台运行
+    "birefnet_general_swin_tiny.onnx": (
+        "https://github.com/ZhengPeng7/BiRefNet/releases/download/v1/BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx",
+        "5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333",
+    ),
     # OpenCV Zoo 的 YuNet 人脸检测（MIT），输出人脸框和 5 个关键点
     "face_detection_yunet_2023mar.onnx": (
         "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
