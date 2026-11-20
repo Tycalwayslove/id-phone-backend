@@ -6,12 +6,17 @@ apply_provider_status 只 flush，由调用方（回调、轮询、联调）统�
 """
 
 import hashlib
+import hmac
 import json
 import logging
 import re
 import secrets
-from datetime import timedelta
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from ipaddress import ip_address, ip_network
 from typing import Any
+from urllib.parse import quote
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -23,7 +28,7 @@ from app.core.errors import AppError, ErrorCode
 from app.core.idempotency import run_idempotent
 from app.core.schemas import OkResponse
 from app.core.utils import decode_cursor, encode_cursor, new_no, utcnow
-from app.integrations.receipt_providers import get_provider
+from app.integrations.receipt_providers import build_callback_url, get_provider
 from app.integrations.receipt_providers.base import ProviderStatus, SubmitRequest
 from app.integrations.receipt_providers.fake import FakeProvider
 from app.integrations.storage import get_storage
@@ -45,6 +50,7 @@ from app.modules.receipts.schemas import (
     ApplicationPage,
     AttemptOut,
     ReceiptCreate,
+    ReceiptProviderAck,
     ResubmitRequest,
     SimulateRequest,
 )
@@ -57,6 +63,11 @@ _TERMINAL = ("completed", "rejected", "failed", "abandoned")
 SUBMITTED_POLL_DELAY = timedelta(minutes=5)
 UNKNOWN_POLL_DELAY = timedelta(minutes=2)
 PROCESSING_POLL_DELAY = timedelta(minutes=10)
+_MANUAL_REVIEW_AFTER = timedelta(hours=2)
+
+
+def manual_review_deadline(attempt: ReceiptAttempt) -> datetime:
+    return (attempt.submitted_at or attempt.created_at) + _MANUAL_REVIEW_AFTER
 
 
 # ---------- 脱敏与表单 ----------
@@ -180,14 +191,22 @@ def get_application_detail(db: Session, *, user_id: int, app_no: str) -> Applica
 # ---------- 提交 ----------
 
 
-def _submit_attempt(
+@dataclass
+class Submission:
+    attempt_id: int
+    provider: Provider
+    request: SubmitRequest
+    nonce: str | None
+
+
+def _prepare_attempt(
     db: Session,
     app: ReceiptApplication,
     spec: Spec,
     form: dict[str, str],
     route: tuple[Provider, ProviderSpec],
-) -> ReceiptAttempt:
-    """生成一次提交记录并发给服务商。首次提交和驳回重提共用。"""
+) -> Submission:
+    """生成一次提交记录。首次提交和驳回重提共用。"""
     provider, provider_spec = route
     bg_color = spec.bg_colors[0] if spec.bg_colors else "#FFFFFF"
     render = photo_service.render(
@@ -202,6 +221,17 @@ def _submit_attempt(
     file = db.get(File, render.file_id)
     photo_bytes = get_storage().get(file.storage_key)
 
+    nonce = None
+    request_payload = {"spec_code": spec.code, "region_code": app.region_code, "form": mask_form(form)}
+    if settings.receipt_mode == "real":
+        callback_url = (
+            f"{settings.public_base_url.rstrip('/')}/api/v1/callbacks/receipt/{quote(provider.code, safe='')}"
+        )
+        _, nonce = build_callback_url(callback_url)
+        request_payload[repo.CALLBACK_NONCE_HASH] = _nonce_hash(nonce)
+        mapping = provider_spec.param_mapping or {}
+        form = {mapping.get(key, key): value for key, value in form.items()}
+
     repo.demote_current(db, app.id)  # 先把旧的当前提交置为非当前，避免部分唯一索引冲突
     attempt = ReceiptAttempt(
         application_id=app.id,
@@ -209,46 +239,97 @@ def _submit_attempt(
         provider_id=provider.id,
         render_id=render.id,
         is_current=True,
-        status="created",
-        request_payload={"spec_code": spec.code, "region_code": app.region_code, "form": mask_form(form)},
+        status="unknown" if nonce else "created",
+        next_poll_at=utcnow() + UNKNOWN_POLL_DELAY if nonce else None,
+        request_payload=request_payload,
     )
     db.add(attempt)
+    app.status = "processing"
     db.flush()
 
+    request = SubmitRequest(
+        attempt_ref=f"{app.app_no}-{attempt.seq}",
+        provider_item_id=provider_spec.provider_item_id,
+        photo=photo_bytes,
+        photo_mime=file.mime,
+        form=form,
+        region_code=app.region_code,
+    )
+    if nonce is None:
+        _send_attempt(db, app, attempt, provider, request)
+    return Submission(attempt.id, provider, request, nonce)
+
+
+def _send_attempt(
+    db: Session,
+    app: ReceiptApplication,
+    attempt: ReceiptAttempt,
+    provider: Provider,
+    request: SubmitRequest,
+    *,
+    nonce: str | None = None,
+) -> None:
     now = utcnow()
     try:
-        order_no = get_provider(provider.adapter, provider.code).submit(
-            SubmitRequest(
-                attempt_ref=f"{app.app_no}-{attempt.seq}",
-                provider_item_id=provider_spec.provider_item_id,
-                photo=photo_bytes,
-                photo_mime=file.mime,
-                form=form,
-                region_code=app.region_code,
-            )
-        )
+        order_no = get_provider(provider.adapter, provider.code, callback_nonce=nonce).submit(request)
     except TimeoutError:
-        # 无法确认对方是否收到：不算失败，稍后轮询核对
         attempt.status = "unknown"
         attempt.next_poll_at = now + UNKNOWN_POLL_DELAY
-        app.status = "processing"
     except Exception as e:
         log.warning("回执提交失败 app=%s seq=%s err=%s", app.app_no, attempt.seq, type(e).__name__)
         attempt.status = "failed"
         attempt.finished_at = now
+        attempt.next_poll_at = None
         app.status = "failed"
         ent_service.release_quota(db, app.entitlement_id, app.id)
     else:
-        attempt.status = "submitted"
-        attempt.provider_order_no = order_no
-        attempt.submitted_at = now
-        attempt.next_poll_at = now + SUBMITTED_POLL_DELAY
-        app.status = "processing"
+        if nonce is None or repo.bind_provider_order(db, attempt, order_no):
+            attempt.status = "submitted"
+            attempt.provider_order_no = order_no
+            attempt.submitted_at = now
+            attempt.next_poll_at = now + SUBMITTED_POLL_DELAY
+        else:
+            log.warning("回执提交返回已绑定的单号 attempt=%s", attempt.id)
     db.flush()
-    return attempt
 
 
-def _create(db: Session, user_id: int, payload: ReceiptCreate) -> ApplicationOut:
+def _submit_idempotently(
+    db: Session,
+    *,
+    user_id: int,
+    key: str | None,
+    scope: str,
+    request: dict,
+    prepare: Callable[[], tuple[ReceiptApplication, Submission]],
+) -> ApplicationOut:
+    submission: Submission | None = None
+
+    def produce() -> ApplicationOut:
+        nonlocal submission
+        app, submission = prepare()
+        return _build_out(db, app)
+
+    out = run_idempotent(
+        db, user_id=user_id, scope=scope, key=key, request=request, produce=produce, out_model=ApplicationOut
+    )
+    if submission is None or submission.nonce is None:
+        return out
+
+    # 真实通道在请求发出前提交 attempt 和幂等记录。进程中断后只等回调或人工核对。
+    locked = repo.lock_attempt(db, submission.attempt_id)
+    if locked is None:
+        return out
+    app, attempt = locked
+    if app.status == "processing" and attempt.is_current and attempt.status == "unknown":
+        _send_attempt(db, app, attempt, submission.provider, submission.request, nonce=submission.nonce)
+    out = _build_out(db, app)
+    if key:
+        repo.save_submit_response(db, user_id, scope, key, out.model_dump(mode="json"))
+    db.commit()
+    return out
+
+
+def _create(db: Session, user_id: int, payload: ReceiptCreate) -> tuple[ReceiptApplication, Submission]:
     from app.modules.specs import service as spec_service
 
     spec = spec_service.get_active_spec(db, payload.spec_code)
@@ -279,25 +360,25 @@ def _create(db: Session, user_id: int, payload: ReceiptCreate) -> ApplicationOut
     db.add(app)
     db.flush()
     ent_service.reserve_quota(db, ent.id, app.id)
-    _submit_attempt(db, app, spec, form, route)
-    return _build_out(db, app)
+    return app, _prepare_attempt(db, app, spec, form, route)
 
 
 def create_application(
     db: Session, *, user_id: int, idem_key: str | None, payload: ReceiptCreate
 ) -> ApplicationOut:
-    return run_idempotent(
+    return _submit_idempotently(
         db,
         user_id=user_id,
         scope="receipts.create",
         key=idem_key,
         request=payload.model_dump(mode="json"),
-        produce=lambda: _create(db, user_id, payload),
-        out_model=ApplicationOut,
+        prepare=lambda: _create(db, user_id, payload),
     )
 
 
-def _resubmit(db: Session, user_id: int, app_no: str, payload: ResubmitRequest) -> ApplicationOut:
+def _resubmit(
+    db: Session, user_id: int, app_no: str, payload: ResubmitRequest
+) -> tuple[ReceiptApplication, Submission]:
     app = _get_owned(db, user_id, app_no, for_update=True)
     if app.status != "rejected":
         raise AppError(ErrorCode.APPLICATION_NOT_RESUBMITTABLE)
@@ -319,21 +400,19 @@ def _resubmit(db: Session, user_id: int, app_no: str, payload: ResubmitRequest) 
         app.photo_id = payload.photo_id
     app.reject_reason = None
     app.rejected_at = None
-    _submit_attempt(db, app, spec, _load_form(app), route)
-    return _build_out(db, app)
+    return app, _prepare_attempt(db, app, spec, _load_form(app), route)
 
 
 def resubmit_application(
     db: Session, *, user_id: int, idem_key: str | None, app_no: str, payload: ResubmitRequest
 ) -> ApplicationOut:
-    return run_idempotent(
+    return _submit_idempotently(
         db,
         user_id=user_id,
         scope="receipts.resubmit",
         key=idem_key,
         request={"app_no": app_no, **payload.model_dump(mode="json")},
-        produce=lambda: _resubmit(db, user_id, app_no, payload),
-        out_model=ApplicationOut,
+        prepare=lambda: _resubmit(db, user_id, app_no, payload),
     )
 
 
@@ -382,6 +461,8 @@ def apply_provider_status(db: Session, attempt: ReceiptAttempt, status: Provider
     if status.result == "processing":
         attempt.status = "processing"
         attempt.next_poll_at = now + PROCESSING_POLL_DELAY
+        if (attempt.request_payload or {}).get(repo.CALLBACK_NONCE_HASH):
+            attempt.next_poll_at = min(attempt.next_poll_at, manual_review_deadline(attempt))
         app.status = "processing"
     elif status.result == "completed":
         spec = db.get(Spec, app.spec_id)
@@ -397,7 +478,7 @@ def apply_provider_status(db: Session, attempt: ReceiptAttempt, status: Provider
                 owner=f"a{app.id}",
             )
             app.receipt_file_id = file.id
-        else:
+        elif not status.raw.get("image_receipt"):
             log.warning("回执完成但没有回执图片 app=%s", app.app_no)
         expire_at = status.official_expire_at
         if expire_at is None and spec.official_valid_days:
@@ -438,10 +519,106 @@ def apply_provider_status(db: Session, attempt: ReceiptAttempt, status: Provider
 # ---------- 服务商回调 ----------
 
 
-def handle_callback(db: Session, *, provider_code: str, headers: dict[str, str], body: bytes) -> OkResponse:
+def _nonce_hash(nonce: str) -> str:
+    return hashlib.sha256(nonce.encode()).hexdigest()
+
+
+def _check_callback_ip(source_ip: str | None) -> None:
+    entries = [value.strip() for value in settings.receipt_callback_ip_allowlist.split(",") if value.strip()]
+    if not entries:
+        return
+    try:
+        address = ip_address(source_ip)
+        networks = [ip_network(entry, strict=False) for entry in entries]
+    except ValueError:
+        raise AppError(ErrorCode.CALLBACK_SIGNATURE_INVALID) from None
+    if not any(address in network for network in networks):
+        raise AppError(ErrorCode.CALLBACK_SIGNATURE_INVALID)
+
+
+def _lock_real_callback(
+    db: Session, provider: Provider, nonce: str | None
+) -> tuple[ReceiptApplication, ReceiptAttempt]:
+    if not nonce or len(nonce) > 128:
+        raise AppError(ErrorCode.CALLBACK_SIGNATURE_INVALID)
+    digest = _nonce_hash(nonce)
+    attempt_id = repo.find_attempt_by_nonce(db, provider.id, digest)
+    locked = repo.lock_attempt(db, attempt_id) if attempt_id is not None else None
+    payload = locked[1].request_payload if locked else None
+    saved_digest = (payload or {}).get(repo.CALLBACK_NONCE_HASH, "0" * 64)
+    matches = hmac.compare_digest(saved_digest, digest)
+    if not locked or not matches or locked[1].provider_id != provider.id:
+        raise AppError(ErrorCode.CALLBACK_SIGNATURE_INVALID)
+    return locked
+
+
+def _check_callback_order(db: Session, attempt: ReceiptAttempt, status: ProviderStatus) -> None:
+    if attempt.provider_order_no is not None:
+        if attempt.provider_order_no != status.provider_order_no:
+            raise AppError(ErrorCode.CALLBACK_SIGNATURE_INVALID)
+    elif (
+        not attempt.is_current
+        or attempt.status != "unknown"
+        or not repo.bind_provider_order(db, attempt, status.provider_order_no)
+    ):
+        raise AppError(ErrorCode.CALLBACK_SIGNATURE_INVALID)
+    elif attempt.submitted_at is None:
+        attempt.submitted_at = attempt.created_at
+
+
+def _apply_real_callback(
+    db: Session,
+    app: ReceiptApplication,
+    attempt: ReceiptAttempt,
+    status: ProviderStatus,
+    callback: ProviderCallback,
+) -> str:
+    if status.raw["status"] == "4":
+        if not attempt.is_current or app.status not in ("processing", "completed"):
+            return "stale"
+        callback.payload = {**callback.payload, "logistics_info": status.raw["logistics_info"]}
+        return "applied"
+
+    manual_review = (attempt.request_payload or {}).get(repo.MANUAL_REVIEW_REQUIRED)
+    if manual_review and status.result == "processing":
+        return "duplicate" if attempt.is_current and app.status == "processing" else "stale"
+
+    result = apply_provider_status(db, attempt, status)
+    if result == "applied" and status.result != "processing":
+        if manual_review:
+            attempt.request_payload = {
+                key: value
+                for key, value in attempt.request_payload.items()
+                if key != repo.MANUAL_REVIEW_REQUIRED
+            }
+        if status.result == "completed":
+            callback.payload = {
+                **callback.payload,
+                "has_receipt_image": True,
+                repo.RECEIPT_IMAGE_URL: security.encrypt(
+                    status.raw["image_receipt"], "receipt_image_url"
+                ).hex(),
+            }
+            attempt.next_poll_at = utcnow()
+    return result
+
+
+def handle_callback(
+    db: Session,
+    *,
+    provider_code: str,
+    headers: dict[str, str],
+    body: bytes,
+    nonce: str | None = None,
+    source_ip: str | None = None,
+) -> OkResponse | ReceiptProviderAck:
     provider = repo.get_provider_by_code(db, provider_code)
     if provider is None:
         raise AppError(ErrorCode.NOT_FOUND)
+    real = settings.receipt_mode == "real"
+    if real:
+        _check_callback_ip(source_ip)
+    ack = ReceiptProviderAck() if real else OkResponse()
     adapter = get_provider(provider.adapter, provider.code)
     try:
         status, dedupe_key = adapter.parse_callback(headers, body)
@@ -464,15 +641,24 @@ def handle_callback(db: Session, *, provider_code: str, headers: dict[str, str],
     except (ValueError, KeyError, TypeError) as e:
         raise AppError(ErrorCode.VALIDATION_ERROR, "回调内容格式不正确") from e
 
-    if repo.get_callback_by_dedupe(db, dedupe_key) is not None:
-        return OkResponse()  # 重复回调：已处理过，直接返回成功
+    if real:
+        if status.raw["status"] == "3" and not status.raw.get("image_receipt"):
+            raise AppError(ErrorCode.VALIDATION_ERROR, "回执回调缺少图片地址")
+        if status.raw["status"] == "4" and not status.raw.get("logistics_info"):
+            raise AppError(ErrorCode.VALIDATION_ERROR, "回执回调缺少物流信息")
+        app, attempt = _lock_real_callback(db, provider, nonce)
+        _check_callback_order(db, attempt, status)
+    else:
+        app = None
+        attempt = repo.get_attempt_by_order(db, provider.id, status.provider_order_no)
 
-    attempt = repo.get_attempt_by_order(db, provider.id, status.provider_order_no)
+    if repo.get_callback_by_dedupe(db, dedupe_key) is not None:
+        return ack
     callback = ProviderCallback(
         provider_id=provider.id,
         attempt_id=attempt.id if attempt else None,
         provider_order_no=status.provider_order_no,
-        event_status=status.result,
+        event_status=status.raw["status"] if real else status.result,
         payload=_callback_payload(status),
         signature_ok=True,
         dedupe_key=dedupe_key,
@@ -483,15 +669,17 @@ def handle_callback(db: Session, *, provider_code: str, headers: dict[str, str],
             db.add(callback)
             db.flush()
     except IntegrityError:
-        return OkResponse()  # 并发的同一回调已被另一个请求占住
+        return ack  # 并发的同一回调已被另一个请求占住
 
     if attempt is None:
         callback.process_result = "unmatched"
+    elif app is not None:
+        callback.process_result = _apply_real_callback(db, app, attempt, status, callback)
     else:
         callback.process_result = apply_provider_status(db, attempt, status)
     callback.processed_at = utcnow()
     db.commit()
-    return OkResponse()
+    return ack
 
 
 def _callback_payload(status: ProviderStatus) -> dict[str, Any]:

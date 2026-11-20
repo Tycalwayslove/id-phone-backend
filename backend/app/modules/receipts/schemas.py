@@ -13,6 +13,14 @@ AttemptStatus = Literal[
 ]
 
 
+class ReceiptProviderAck(Schema):
+    """鹧应和黔微云收到此响应后，确认回调已处理。"""
+
+    data: dict = Field(default_factory=dict, description="固定为空对象", examples=[{}])
+    code: Literal[0] = Field(default=0, description="固定为 0，表示同步成功", examples=[0])
+    msg: Literal["同步完成"] = Field(default="同步完成", description="固定为同步完成", examples=["同步完成"])
+
+
 class ReceiptCreate(Schema):
     """创建回执申请的请求。"""
 
@@ -73,7 +81,7 @@ class AttemptOut(Schema):
     status: AttemptStatus = Field(
         description=(
             "这次提交的状态。created = 已创建还没发出；submitted = 已提交等待结果；"
-            "unknown = 网络超时还不确定是否提交成功，系统会自动核对；processing = 对方办理中；"
+            "unknown = 提交结果未知或需人工核对；processing = 对方办理中；"
             "completed = 已出回执；rejected = 被驳回；failed = 办理失败；abandoned = 已放弃"
         ),
         examples=["rejected"],
@@ -126,7 +134,7 @@ class ApplicationOut(Schema):
     )
     receipt_url: str | None = Field(
         default=None,
-        description="回执图片的临时链接，约 10 分钟有效，过期后重新请求接口获取；只在 completed 时有值",
+        description="已转存回执图片的临时链接，约 10 分钟有效。正在转存或未出回执时为空，过期后重新查询",
         examples=["https://api.example.com/files/..."],
     )
     official_expire_at: datetime | None = Field(

@@ -111,5 +111,8 @@ class Settings(BaseSettings):
     def is_prod(self) -> bool:
         return self.app_env == "prod"
 
+    # 真实回执回调的来源 IP 或 CIDR，逗号分隔，留空则不限。
+    receipt_callback_ip_allowlist: str = ""
+
 
 settings = Settings()
