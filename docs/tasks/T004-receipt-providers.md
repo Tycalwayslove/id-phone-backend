@@ -1,6 +1,6 @@
 # T004 回执服务商正式对接
 
-- 状态：待开始（对接说明已完成，见 `docs/integrations/zheying.md`；编码需要用户提供鹧应、黔微云账号与密钥）
+- 状态：已完成（适配器，PR #5；receipts 模块接入见 T016；真实账号待用户提供）
 - 对接说明已完成（`docs/integrations/zheying.md`）。
 
 ## 目标

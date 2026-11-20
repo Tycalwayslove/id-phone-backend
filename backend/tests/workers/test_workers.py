@@ -125,10 +125,13 @@ def test_run_once_continues_after_task_raises(monkeypatch, caplog):
     monkeypatch.setattr(runner.notify, "send_due", lambda _: calls.append("send"))
     monkeypatch.setattr(runner.orders, "close_expired", lambda _: calls.append("close"))
     monkeypatch.setattr(runner.entitlements, "create_expiration_reminders", lambda _: calls.append("remind"))
+    monkeypatch.setattr(
+        runner.photos, "purge_orphan_uploads", lambda _db, _before: calls.append("purge") or 0
+    )
 
     runner.run_once(db)
 
-    assert calls == ["poll", "rollback", "send", "close", "remind"]
+    assert calls == ["poll", "rollback", "send", "close", "remind", "purge"]
     assert "task=poll_due err=RuntimeError" in caplog.text
     assert "sensitive payload" not in caplog.text
 

@@ -47,3 +47,8 @@
 | 0011 | 改用 Codex/ChatGPT 编码、Claude 决策 | 已完成 |
 | 0012 | [运营后台前端](0012-admin-web.md) | 已完成 |
 | 0013 | [多代理并行规划](0013-multi-agent-plan.md) | 进行中 |
+| 0014 | [定时任务 worker（T002）](0014-workers.md) | 已完成 |
+| 0015 | [后端收尾与后台前端适配（T003 + T010 第一段）](0015-backend-followups.md) | 已完成 |
+| 0016 | [抠图美颜、OSS 与配置项（T006 + T007）](0016-matting-oss.md) | 已完成 |
+| 0017 | [小程序合规与私域引导（T011）](0017-miniapp-compliance.md) | 已完成 |
+| 0018 | [回执服务商适配器（T004）](0018-receipt-providers.md) | 已完成适配器，接入见 T016 |

@@ -2,6 +2,7 @@
 
 import logging
 import signal
+from datetime import timedelta
 from threading import Event
 from time import monotonic
 
@@ -11,15 +12,25 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.db import SessionLocal, engine
+from app.core.utils import utcnow
 from app.modules.entitlements import service as entitlements
 from app.modules.notify import service as notify
 from app.modules.orders import service as orders
+from app.modules.photos import service as photos
 from app.modules.receipts import poller as receipts
 
 log = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL_SECONDS = 60
 ADVISORY_LOCK_KEY = 0x494450484F4E45  # IDPHONE
+ORPHAN_UPLOAD_HOURS = 24
+
+
+def purge_orphan_uploads(db: Session) -> int:
+    """清理上传超过 24 小时仍未创建照片的原图。"""
+    count = photos.purge_orphan_uploads(db, utcnow() - timedelta(hours=ORPHAN_UPLOAD_HOURS))
+    db.commit()
+    return count
 
 
 def run_once(db: Session) -> None:
@@ -29,6 +40,7 @@ def run_once(db: Session) -> None:
         notify.send_due,
         orders.close_expired,
         entitlements.create_expiration_reminders,
+        purge_orphan_uploads,
     ):
         try:
             task(db)
