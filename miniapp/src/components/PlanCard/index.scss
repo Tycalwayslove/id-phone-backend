@@ -4,11 +4,11 @@
   padding: 32px;
   border: 4px solid transparent;
   border-radius: var(--radius);
-  background: #fff;
+  background: var(--c-surface);
 
   &--selected {
     border-color: var(--c-primary);
-    background: rgba(43, 107, 255, 0.04);
+    background: #f4f8fe;
   }
 
   &__badge {
