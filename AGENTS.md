@@ -4,8 +4,8 @@
 
 ## 分工
 
-- 架构、跨模块决策、任务拆解由 Claude（Opus）负责，写在 `docs/tasks/` 里。
-- 编码代理按 `docs/tasks/` 里的任务单实现。任务单写了“只允许改的文件”，不要越界；需要改共享文件（`backend/app/core/`、`backend/app/main.py`、`backend/app/models/`、迁移、CI）时，在任务结束报告里提出，由 Claude 决定。
+- **被 Claude Code 命令行分派任务时**：架构、跨模块决策、任务拆解由 Claude（Opus）负责，写在 `docs/tasks/` 里；你按任务单实现。任务单写了“只允许改的文件”，不要越界；需要改共享文件（`backend/app/core/`、`backend/app/main.py`、`backend/app/models/`、迁移、CI）时，在任务结束报告里提出，由 Claude 决定。
+- **用户直接用 Codex 时**：用 Codex 默认模型，自己从规划到实现、文档一并完成，不需要等 Claude 拆任务；仍要遵守 `CLAUDE.md` 的全部项目规则。
 
 ## 做完一个任务必须
 

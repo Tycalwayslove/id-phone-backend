@@ -58,7 +58,11 @@ Python 3.14 · uv · FastAPI · SQLAlchemy 2（同步）· Alembic · PostgreSQL
   1. 开工前在 `docs/devlog/` 新建一篇（模板见 `docs/devlog/README.md`），写需求原文和拆解；
   2. 完成后补上方案、改动、验证、遗留，并更新 `docs/devlog/README.md` 目录和 `docs/progress.md`；
   3. 影响长期的设计决定写进 `docs/adr/`。
-- **分工**：架构、跨模块设计、评审由高级模型（Opus）负责；按模块的实现可交给 Sonnet 子代理，每个子代理只改自己模块目录和对应测试目录，共享文件（`app/core`、`app/main.py`、`app/models/__init__.py`、迁移）由主会话统一修改。
+- **模型分工（只在 Claude Code 命令行里生效）**：在终端里用 `claude` 命令工作时，按下面分工（详见 [ADR 0005](docs/adr/0005-multi-agent-workflow.md)）：
+  - **Opus 5.5**（主会话）：规划、架构、跨模块设计、拆任务单、评审、合并；共享文件（`app/core`、`app/main.py`、`app/models/__init__.py`、迁移）由主会话改。
+  - **Codex**（`gpt-6.2-sol`，effort high）：按任务单写具体代码，每个任务在手动建的、加锁的 git worktree 里跑，只改任务单允许的文件。
+  - **Sonnet 5.5**（子代理）：写文档（开发日志、进度看板、说明文档）。
+  - 在 Claude 桌面端、或直接用 Codex 时，**不套用这套分工**，用该工具默认的模型自己完成即可。
 - **验证靠 CI**：本地改完先 `ruff check` / `ruff format`；推送后看 GitHub Actions（迁移、`alembic check`、测试、接口文档检查）全部通过才算完成。
 - **提交**：一次提交做一件事，提交信息说明“做了什么、为什么”。推送到 GitHub `Tycalwayslove/id-phone-backend` 的 main；用户 Mac 上的仓库在 `/Users/mac/id-phone`，推送后同步过去（或用户自己 `git pull`）。CI 机器人会自动提交 uv.lock、pnpm-lock.yaml、docs/api/openapi.json，推送前先 `git pull --rebase`。
 - **用户本机才能做的事**（数据库在用户 Mac 上）：迁移、seed、启动服务。写成命令交给用户，输出存到 `backend/logs/`。
