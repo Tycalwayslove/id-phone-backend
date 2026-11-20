@@ -1,7 +1,8 @@
 import { client, result, type Schema } from './client'
 import type { operations } from './schema'
 
-export type UserFilters = NonNullable<operations['admin_users_list']['parameters']['query']>
+// 用户查询走 POST /admin/users/search：手机号放请求体，不进 URL 和访问日志
+export type UserFilters = Omit<Schema['AdminUserSearchIn'], 'cursor' | 'limit'>
 export type OrderFilters = NonNullable<operations['admin_orders_list']['parameters']['query']>
 export type ReceiptFilters = NonNullable<operations['admin_applications_list']['parameters']['query']>
 export type AuditFilters = NonNullable<operations['admin_audit_logs']['parameters']['query']>
@@ -14,8 +15,8 @@ export const adminApi = {
   me: async (signal?: AbortSignal) =>
     result(await client.GET('/api/v1/admin/me', { signal })),
 
-  users: async (query: UserFilters, signal: AbortSignal) =>
-    result(await client.GET('/api/v1/admin/users', { params: { query }, signal })),
+  users: async (filters: UserFilters & { cursor: string | null }, signal: AbortSignal) =>
+    result(await client.POST('/api/v1/admin/users/search', { body: { limit: 20, ...filters }, signal })),
   user: async (user_id: number, signal: AbortSignal) =>
     result(await client.GET('/api/v1/admin/users/{user_id}', { params: { path: { user_id } }, signal })),
   orders: async (query: OrderFilters, signal: AbortSignal) =>
