@@ -35,6 +35,7 @@ def test_backfill_uses_earliest_identity_and_is_idempotent(db):
     assert list(db.scalars(select(ClientApp))) == [app]
     assert apply_backfill(db, plan) == 1
     assert apply_backfill(db, plan) == 0
+    db.expire_all()  # 回填用批量 UPDATE，重新从数据库读取
     assert legacy.source_app_id == recorded.source_app_id == app.id
     assert no_identity.source_app_id is None
     assert plan_backfill(db) == []
