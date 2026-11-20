@@ -14,7 +14,7 @@ from app.core.db import get_db
 from app.core.errors import AppError, ErrorCode
 from app.core.security import hash_token, sign
 from app.core.utils import utcnow
-from app.models import AdminSession, AdminUser, AuthSession, User
+from app.models import AdminSession, AdminUser, AuthSession, User, UserIdentity
 
 DB = Annotated[Session, Depends(get_db)]
 
@@ -30,6 +30,22 @@ class CurrentUser:
     id: int
     session_id: int
     user: User
+    # 本次会话登录所用的小程序 openid（微信内容安全检测等需要）；非小程序登录时为空
+    wx_mini_open_id: str | None = None
+
+
+def _wx_mini_open_id(db: Session, session: AuthSession) -> str | None:
+    if session.identity_id is None:
+        return None
+    identity = db.get(UserIdentity, session.identity_id)
+    if (
+        identity is None
+        or identity.user_id != session.user_id
+        or identity.provider != "wx_mini"
+        or identity.app_id != settings.wx_mini_app_id
+    ):
+        return None
+    return identity.open_id
 
 
 def _load_user_session(db: Session, token: str) -> CurrentUser:
@@ -54,7 +70,9 @@ def _load_user_session(db: Session, token: str) -> CurrentUser:
         )
         user.last_active_at = now
         db.commit()
-    return CurrentUser(id=user.id, session_id=session.id, user=user)
+    return CurrentUser(
+        id=user.id, session_id=session.id, user=user, wx_mini_open_id=_wx_mini_open_id(db, session)
+    )
 
 
 def current_user(
