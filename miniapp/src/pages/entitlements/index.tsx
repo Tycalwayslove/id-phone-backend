@@ -1,55 +1,43 @@
-import { useRef, useState } from 'react'
 import { View } from '@tarojs/components'
-import Taro, { useDidShow, usePullDownRefresh } from '@tarojs/taro'
-import type { components } from '../../api/schema'
+import Taro, { useDidShow, usePullDownRefresh, useReachBottom } from '@tarojs/taro'
 import { listEntitlements } from '../../api/entitlements'
 import EntitlementCard from '../../components/EntitlementCard'
 import EmptyState from '../../components/EmptyState'
 import Loading from '../../components/Loading'
 import PageContainer from '../../components/PageContainer'
-import { handleError } from '../../utils/errors'
-
-type EntitlementOut = components['schemas']['EntitlementOut']
+import { usePagedList } from '../../hooks/usePagedList'
+import { describeError } from '../../utils/errors'
 
 export default function Entitlements() {
-  const [list, setList] = useState<EntitlementOut[] | null>(null)
-  const requestId = useRef(0)
-
-  async function load(): Promise<void> {
-    const id = ++requestId.current
-    try {
-      const entitlements = await listEntitlements('all')
-      if (id === requestId.current) setList(entitlements)
-    } catch (e) {
-      if (id !== requestId.current) return
-      setList((prev) => prev ?? [])
-      await handleError(e)
-    }
-  }
+  const { items, loading, loaded, hasMore, error, reload, loadMore } = usePagedList(
+    (cursor) => listEntitlements('all', cursor),
+    [],
+    { auto: false }
+  )
 
   useDidShow(() => {
-    void load()
+    void reload()
   })
   usePullDownRefresh(() => {
-    void load().finally(() => Taro.stopPullDownRefresh())
+    void reload().finally(() => Taro.stopPullDownRefresh())
   })
-
-  if (list === null) {
-    return (
-      <PageContainer>
-        <Loading />
-      </PageContainer>
-    )
-  }
+  useReachBottom(() => {
+    void loadMore()
+  })
 
   return (
     <PageContainer>
-      {list.length === 0 ? <EmptyState emoji='🎫' title='还没有权益' desc='购买套餐后会显示在这里' /> : null}
       <View className='list-gap'>
-        {list.map((e) => (
+        {items.map((e) => (
           <EntitlementCard key={e.id} entitlement={e} showDetails />
         ))}
       </View>
+      {loading ? <Loading /> : null}
+      {loaded && !loading && items.length === 0 ? (
+        <EmptyState emoji='🎫' title='还没有权益' desc='购买套餐后会显示在这里' />
+      ) : null}
+      {error ? <View className='list-footer'>{describeError(error).message}，下拉重试</View> : null}
+      {loaded && !hasMore && items.length > 0 ? <View className='list-footer'>没有更多了</View> : null}
     </PageContainer>
   )
 }

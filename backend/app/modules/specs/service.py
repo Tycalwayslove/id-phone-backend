@@ -5,9 +5,9 @@ from dataclasses import replace
 
 from sqlalchemy.orm import Session
 
-from app.core.deps import PageParams
 from app.core.errors import AppError, ErrorCode
-from app.core.utils import decode_cursor, encode_cursor, utcnow
+from app.core.pagination import PageParams
+from app.core.utils import utcnow
 from app.integrations.receipt_providers import open_catalog_provider
 from app.integrations.receipt_providers.base import ProviderItem
 from app.models import ProviderSpec, Spec
@@ -30,8 +30,8 @@ def get_active_spec(db: Session, code: str) -> Spec:
     return spec
 
 
-def _parse_cursor(cursor: str | None) -> tuple[int, int] | None:
-    data = decode_cursor(cursor)
+def _parse_cursor(page: PageParams) -> tuple[int, int] | None:
+    data = page.cursor_values()
     if not data:
         return None
     s, i = data.get("s"), data.get("i")
@@ -45,12 +45,10 @@ def list_specs(db: Session, *, category: str | None, keyword: str | None, page: 
         db,
         category=category,
         keyword=keyword.strip() if keyword else None,
-        after=_parse_cursor(page.cursor),
-        limit=page.limit + 1,
+        after=_parse_cursor(page),
+        limit=page.fetch_limit,
     )
-    has_more = len(rows) > page.limit
-    rows = rows[: page.limit]
-    next_cursor = encode_cursor({"s": rows[-1].sort, "i": rows[-1].id}) if has_more else None
+    rows, next_cursor = page.slice(rows, cursor_of=lambda r: {"s": r.sort, "i": r.id})
     return SpecPage(items=[SpecOut.model_validate(r) for r in rows], next_cursor=next_cursor)
 
 

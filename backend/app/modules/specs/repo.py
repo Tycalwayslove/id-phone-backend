@@ -4,11 +4,8 @@ from sqlalchemy import exists, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from app.core.utils import contains_pattern
 from app.models import Provider, ProviderSpec, RouteRule, Spec
-
-
-def _escape_like(s: str) -> str:
-    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def list_active(
@@ -24,7 +21,7 @@ def list_active(
     if category:
         q = q.where(Spec.category == category)
     if keyword:
-        q = q.where(Spec.name.ilike(f"%{_escape_like(keyword)}%", escape="\\"))
+        q = q.where(Spec.name.ilike(contains_pattern(keyword), escape="\\"))
     if after is not None:
         q = q.where(tuple_(Spec.sort, Spec.id) > tuple_(after[0], after[1]))
     return list(db.scalars(q.order_by(Spec.sort, Spec.id).limit(limit)))

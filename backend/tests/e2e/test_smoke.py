@@ -167,7 +167,7 @@ def test_photo_receipt_renewal_and_refund(
     paid = _ok(client.post(f"{API}/dev/orders/{order_no}/simulate-paid", headers=headers))
     assert (paid["order_no"], paid["status"], paid["paid_fen"]) == (order_no, "paid", plan.price_fen)
     assert paid["paid_at"]
-    (entitlement,) = _ok(client.get(f"{API}/entitlements", headers=headers))
+    (entitlement,) = _ok(client.get(f"{API}/entitlements", headers=headers))["items"]
     entitlement_id = entitlement["id"]
     entitlement_url = f"{API}/entitlements/{entitlement_id}"
     ends_at = datetime.fromisoformat(entitlement["ends_at"])
@@ -245,7 +245,7 @@ def test_photo_receipt_renewal_and_refund(
     assert (renewal_item["item_type"], renewal_item["photo_id"]) == ("renew", photo_id)
     renewal_paid = _ok(client.post(f"{API}/dev/orders/{renewal_no}/simulate-paid", headers=headers))
     assert (renewal_paid["status"], renewal_paid["paid_fen"]) == ("paid", plan.price_fen)
-    (renewed,) = _ok(client.get(f"{API}/entitlements", headers=headers))
+    (renewed,) = _ok(client.get(f"{API}/entitlements", headers=headers))["items"]
     assert renewed["id"] == entitlement_id and renewed["receipt_quota_used"] == 1
     assert datetime.fromisoformat(renewed["ends_at"]) == ends_at + timedelta(days=7)
 

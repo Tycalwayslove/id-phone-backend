@@ -5,7 +5,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import or_, select, tuple_, update
 from sqlalchemy.orm import Session
 
 from app.models import Entitlement, EntitlementLedger, EntitlementQuota, OrderItem, Photo, Plan
@@ -13,8 +13,19 @@ from app.models import Entitlement, EntitlementLedger, EntitlementQuota, OrderIt
 RECEIPT_QUOTA = "receipt_quota"
 
 
-def list_for_user(db: Session, user_id: int, *, status: str, now: datetime, limit: int) -> list[Entitlement]:
+def list_for_user(
+    db: Session,
+    user_id: int,
+    *,
+    status: str,
+    now: datetime,
+    after: tuple[datetime, int] | None,
+    limit: int,
+) -> list[Entitlement]:
+    """按到期时间从晚到早、再按 id 倒序；after 是上一页最后一条的 (ends_at, id)。"""
     stmt = select(Entitlement).where(Entitlement.user_id == user_id)
+    if after is not None:
+        stmt = stmt.where(tuple_(Entitlement.ends_at, Entitlement.id) < after)
     if status == "active":
         stmt = stmt.where(Entitlement.status == "active", Entitlement.ends_at > now)
     elif status == "expired":

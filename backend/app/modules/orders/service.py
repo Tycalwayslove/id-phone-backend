@@ -16,7 +16,8 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.idempotency import run_idempotent
-from app.core.utils import decode_cursor, encode_cursor, new_no, utcnow
+from app.core.pagination import PageParams
+from app.core.utils import new_no, utcnow
 from app.integrations.payment import PaymentGateway, PayNotify, RefundResult, RefundStatus, get_payment
 from app.models import Order, OrderItem, Payment, Plan, Refund
 from app.modules.entitlements import service as entitlement_service
@@ -229,17 +230,10 @@ def _do_create_order(db: Session, user_id: int, payload: OrderCreateIn) -> Order
 # ---------- 查询、取消 ----------
 
 
-def list_orders(db: Session, user_id: int, cursor_str: str | None, limit: int):
-    cursor = decode_cursor(cursor_str) or {}
-    try:
-        before_id = int(cursor["id"]) if "id" in cursor else None
-    except TypeError, ValueError:
-        before_id = None
-    rows = repo.list_orders_for_user(db, user_id, before_id=before_id, limit=limit + 1)
-    has_more = len(rows) > limit
-    rows = rows[:limit]
+def list_orders(db: Session, user_id: int, page: PageParams) -> OrderPage:
+    rows = repo.list_orders_for_user(db, user_id, before_id=page.before_id(), limit=page.fetch_limit)
+    rows, next_cursor = page.slice(rows)
     _close_expired(db, rows)
-    next_cursor = encode_cursor({"id": rows[-1].id}) if has_more and rows else None
     return OrderPage(items=_orders_out(db, rows), next_cursor=next_cursor)
 
 

@@ -23,11 +23,11 @@ from sqlalchemy.orm import Session
 
 from app.core import security
 from app.core.config import settings
-from app.core.deps import PageParams
 from app.core.errors import AppError, ErrorCode
 from app.core.idempotency import run_idempotent
+from app.core.pagination import PageParams
 from app.core.schemas import OkResponse
-from app.core.utils import decode_cursor, encode_cursor, new_no, utcnow
+from app.core.utils import new_no, utcnow
 from app.integrations.receipt_providers import build_callback_url, get_provider
 from app.integrations.receipt_providers.base import ProviderStatus, SubmitRequest
 from app.integrations.receipt_providers.fake import FakeProvider
@@ -226,12 +226,8 @@ def count_user_applications(db: Session, *, user_id: int) -> int:
 
 
 def list_applications(db: Session, *, user_id: int, page: PageParams) -> ApplicationPage:
-    cur = decode_cursor(page.cursor)
-    before_id = cur.get("i") if cur and isinstance(cur.get("i"), int) else None
-    rows = repo.list_applications(db, user_id, before_id=before_id, limit=page.limit + 1)
-    has_more = len(rows) > page.limit
-    rows = rows[: page.limit]
-    next_cursor = encode_cursor({"i": rows[-1].id}) if has_more else None
+    rows = repo.list_applications(db, user_id, before_id=page.before_id(), limit=page.fetch_limit)
+    rows, next_cursor = page.slice(rows)
     return ApplicationPage(items=_build_outs(db, rows), next_cursor=next_cursor)
 
 

@@ -51,17 +51,49 @@ def test_list_and_detail_filters(client, db):
         db, uid, plans["photo_year_39_9"], photo_id=p2.id, paid_at=utcnow() - timedelta(days=400)
     )
 
-    active = client.get(f"{API}/entitlements", headers=h).json()
+    active = client.get(f"{API}/entitlements", headers=h).json()["items"]
     assert [e["id"] for e in active] == [live.id]
-    expired = client.get(f"{API}/entitlements", params={"status": "expired"}, headers=h).json()
+    expired = client.get(f"{API}/entitlements", params={"status": "expired"}, headers=h).json()["items"]
     assert [e["id"] for e in expired] == [old.id]
     assert expired[0]["is_active"] is False
-    all_ = client.get(f"{API}/entitlements", params={"status": "all"}, headers=h).json()
+    all_ = client.get(f"{API}/entitlements", params={"status": "all"}, headers=h).json()["items"]
     assert {e["id"] for e in all_} == {live.id, old.id}
 
     r = client.get(f"{API}/entitlements/{live.id}", headers=h)
     assert r.status_code == 200
     assert r.json()["plan_name"] == plans["photo_year_39_9"].name
+
+
+def test_list_paginates_by_expiry(client, db):
+    plans = make_standard_plans(db)
+    h, uid = _user(client, db)
+    ents = [
+        grant_plan(
+            db,
+            uid,
+            plans["photo_year_39_9"],
+            photo_id=make_photo(db, uid).id,
+            paid_at=utcnow() - timedelta(days=d),
+        )
+        for d in (3, 1, 2, 1)
+    ]
+    expected = [e.id for e in sorted(ents, key=lambda e: (e.ends_at, e.id), reverse=True)]
+
+    seen, cursor = [], None
+    while True:
+        params = {"status": "all", "limit": 2} | ({"cursor": cursor} if cursor else {})
+        body = client.get(f"{API}/entitlements", params=params, headers=h).json()
+        assert len(body["items"]) <= 2
+        seen += [e["id"] for e in body["items"]]
+        cursor = body["next_cursor"]
+        if not cursor:
+            break
+    assert seen == expected
+
+    # 非法游标当作第一页
+    body = client.get(f"{API}/entitlements", params={"status": "all", "cursor": "bad!"}, headers=h).json()
+    assert [e["id"] for e in body["items"]] == expected
+    assert client.get(f"{API}/entitlements", params={"limit": 101}, headers=h).status_code == 422
 
 
 def test_detail_of_others_or_missing_is_404(client, db):
