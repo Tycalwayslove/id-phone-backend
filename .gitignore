@@ -13,3 +13,6 @@ backups/
 # 图像模型（scripts/download_models.py 下载）
 backend/models/*.onnx
 backend/models/*.part
+
+# 本地照片评估输入和报告
+/backend/eval/

@@ -111,7 +111,8 @@ def test_upload_rejects_invalid(client, alice):
     assert r.json()["code"] == "UPLOAD_INVALID"
 
 
-def test_upload_create_list(client, alice):
+def test_upload_create_list(client, db, alice, monkeypatch):
+    monkeypatch.setattr(photo_service.face_detection, "detect_faces", lambda _image: [])
     r = upload(client, alice)
     assert r.status_code == 200
     up = r.json()
@@ -123,10 +124,16 @@ def test_upload_create_list(client, alice):
     photo = r.json()
     assert photo["source"] == "camera" and photo["status"] == "active"
     assert photo["access"]["active"] is False
+    assert photo["quality"]["level"] == "fail"
+    assert [issue["code"] for issue in photo["quality"]["issues"]] == ["no_face"]
+    assert db.get(Photo, photo["id"]).quality == photo["quality"]
 
     items = client.get("/api/v1/photos", headers=alice).json()["items"]
     assert [i["id"] for i in items] == [photo["id"]]
     assert "renders" not in items[0]
+    assert items[0]["quality"] == photo["quality"]
+    detail = client.get(f"/api/v1/photos/{photo['id']}", headers=alice).json()
+    assert detail["quality"] == photo["quality"]
 
     # 同一个文件不能再创建第二张照片
     r = client.post("/api/v1/photos", json={"file_id": up["file_id"], "source": "camera"}, headers=alice)
@@ -161,6 +168,25 @@ def test_create_saves_rgba_matting_and_render_uses_it(client, db, alice, monkeyp
     image = client.get(f"{url.path}?{url.query}")
     with Image.open(io.BytesIO(image.content)) as rendered:
         assert rendered.getpixel((10, 10)) == pytest.approx((0x43, 0x8E, 0xDB), abs=3)
+
+
+def test_blemish_points_distinguish_render_variants(client, db, alice):
+    spec = make_spec(db, "ph_blemish")
+    photo_id = make_photo(client, alice)
+    path = f"/api/v1/photos/{photo_id}/renders"
+    a, b = {"x": 0.4, "y": 0.5}, {"x": 0.5, "y": 0.6}
+
+    def render(points):
+        response = client.post(path, json={"spec_code": spec.code, "blemishes": points}, headers=alice)
+        assert response.status_code == 200, response.text
+        return response.json()["id"]
+
+    plain = render([])
+    edited = render([a, b])
+    assert edited != plain
+    assert render([b, a, b]) == edited
+    assert render([a]) not in (plain, edited)
+    assert render([]) == plain
 
 
 @pytest.mark.parametrize("error", [TimeoutError, RuntimeError])
@@ -417,6 +443,27 @@ def test_render_validation(client, db, alice):
     assert (r.status_code, r.json()["code"]) == (422, "VALIDATION_ERROR")
     r = client.post(url, json={"spec_code": "ph_e", "beauty_level": 4}, headers=alice)
     assert r.json()["code"] == "VALIDATION_ERROR"
+
+
+def test_render_normalizes_legacy_spec_colors_before_cache_lookup(client, db, alice):
+    spec = make_spec(db, "ph_legacy_colors", bg_colors=["blue", "white", "red"])
+    pid = make_photo(client, alice)
+    url = f"/api/v1/photos/{pid}/renders"
+    payload = {"spec_code": spec.code}
+
+    result = client.post(url, json=payload, headers=alice)
+    assert result.status_code == 200, result.text
+    expected = result.json()
+    assert expected["bg_color"] == "#438EDB"
+    for color in (" Blue ", "#438edb"):
+        result = client.post(url, json=payload | {"bg_color": color}, headers=alice)
+        assert result.status_code == 200, result.text
+        assert result.json()["id"] == expected["id"]
+
+    spec.bg_colors = ["rebeccapurple"]
+    db.flush()
+    result = client.post(url, json=payload, headers=alice)
+    assert (result.status_code, result.json()["code"]) == (422, "VALIDATION_ERROR")
 
 
 def test_delete_removes_files_and_hides_photo(client, db, alice):

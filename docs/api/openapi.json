@@ -867,7 +867,7 @@
           "照片"
         ],
         "summary": "创建照片",
-        "description": "用已上传的原图创建一张照片（底片）。需要登录。file_id 必须是本人上传、还没被其他照片使用的原图，否则返回 UPLOAD_NOT_FOUND。创建时尝试生成抠图，失败时使用原图。图片内容检测通过后可导出，未付费时只提供带水印的预览。",
+        "description": "用已上传的原图创建一张照片（底片）。需要登录。file_id 必须是本人上传、还没被其他照片使用的原图，否则返回 UPLOAD_NOT_FOUND。抠图处理失败时使用原图。服务器缺少本地模型时返回 PROVIDER_UNAVAILABLE。返回拍后快速检测结果，供用户决定是否重拍。图片内容检测通过后可导出，未付费时提供带水印的预览。",
         "operationId": "photos_create",
         "security": [
           {
@@ -886,7 +886,7 @@
         },
         "responses": {
           "200": {
-            "description": "创建成功，返回照片信息",
+            "description": "创建成功，返回照片信息和拍后快速检测结果",
             "content": {
               "application/json": {
                 "schema": {
@@ -1177,7 +1177,7 @@
           "照片"
         ],
         "summary": "生成导出图",
-        "description": "按规格、底色、美颜档位生成导出图。需要登录。内容检测通过后才可导出，等待结果或检测失败返回 PHOTO_NOT_READY，有内容风险或需要复核返回 PHOTO_REJECTED。没有有效权益（未付费或已过保管期）时生成带水印的预览图（watermarked 为 true）；权益有效时生成无水印的正式图，但如果权益不允许换规格，且这张照片已有其他规格的无水印图，返回 SPEC_CHANGE_NOT_ALLOWED。bg_color 必须在规格的可选底色里，beauty_level 不能超过规格的 beauty_max，不符合时返回 VALIDATION_ERROR。相同参数重复请求会复用已有的图。",
+        "description": "按规格、底色、美颜档位生成导出图。需要登录。内容检测通过后才可导出，等待结果或检测失败返回 PHOTO_NOT_READY，有内容风险或需要复核返回 PHOTO_REJECTED。没有有效权益（未付费或已过保管期）时生成带水印的预览图（watermarked 为 true）；权益有效时生成无水印的正式图，但如果权益不允许换规格，且这张照片已有其他规格的无水印图，返回 SPEC_CHANGE_NOT_ALLOWED。bg_color 必须在规格的可选底色里，beauty_level 不能超过规格的 beauty_max，不符合时返回 VALIDATION_ERROR。始终自动校正人像光影，可用 blemishes 指定最多 10 个祛痘位置。位置以成品图左上角为原点，横纵坐标都在 0～1 内。规格、底色、档位、水印和祛痘位置相同时复用已有的图。",
         "operationId": "photos_render",
         "security": [
           {
@@ -12621,6 +12621,37 @@
         "title": "BindPhoneRequest",
         "description": "绑定手机号请求。"
       },
+      "BlemishPoint": {
+        "properties": {
+          "x": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "X",
+            "description": "成品图横坐标，从左到右归一化至 0～1",
+            "examples": [
+              0.34
+            ]
+          },
+          "y": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Y",
+            "description": "成品图纵坐标，从上到下归一化至 0～1",
+            "examples": [
+              0.52
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "BlemishPoint",
+        "description": "用户在成品图上点选的一处痘印。"
+      },
       "CancelAccountRequest": {
         "properties": {
           "confirm": {
@@ -13670,6 +13701,17 @@
             "$ref": "#/components/schemas/AccessOut",
             "description": "权益状态，决定能否下载、能否换规格"
           },
+          "quality": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhotoQuality"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "创建时的本地拍后检测结果。缺少检测结果时为空，例如这项功能上线前创建的照片。"
+          },
           "renders": {
             "items": {
               "$ref": "#/components/schemas/RenderOut"
@@ -13748,6 +13790,17 @@
           "access": {
             "$ref": "#/components/schemas/AccessOut",
             "description": "权益状态，决定能否下载、能否换规格"
+          },
+          "quality": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhotoQuality"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "创建时的本地拍后检测结果。缺少检测结果时为空，例如这项功能上线前创建的照片。"
           }
         },
         "type": "object",
@@ -13791,6 +13844,38 @@
         ],
         "title": "PhotoPage",
         "description": "分页列表：一张照片（底片）。"
+      },
+      "PhotoQuality": {
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "warn",
+              "fail"
+            ],
+            "title": "Level",
+            "description": "检测等级。ok = 合格，无需提示。warn = 有建议，可继续制作。fail = 建议重拍，用户仍可继续。",
+            "examples": [
+              "warn"
+            ]
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/QualityIssue"
+            },
+            "type": "array",
+            "title": "Issues",
+            "description": "检测发现的问题，合格时为空列表"
+          }
+        },
+        "type": "object",
+        "required": [
+          "level",
+          "issues"
+        ],
+        "title": "PhotoQuality",
+        "description": "本地拍后快速检测结果，用于提示用户调整照片。"
       },
       "PlanBenefitsOut": {
         "properties": {
@@ -14057,6 +14142,43 @@
         "title": "ProviderSyncResult",
         "description": "同步服务商目录后的统计与逐条结果。"
       },
+      "QualityIssue": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "no_face",
+              "multiple_faces",
+              "face_too_small",
+              "face_off_center",
+              "too_dark",
+              "too_bright",
+              "not_frontal",
+              "uneven_light"
+            ],
+            "title": "Code",
+            "description": "问题编码。no_face = 未检测到人脸，multiple_faces = 检测到多张人脸，face_too_small = 脸太小，face_off_center = 脸偏离轮廓框，too_dark = 脸太暗，too_bright = 脸太亮，not_frontal = 没正对镜头，uneven_light = 左右脸光照不均。",
+            "examples": [
+              "face_too_small"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "可直接提示用户的中文问题和重拍建议",
+            "examples": [
+              "脸有点小，请靠近一点再拍"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "QualityIssue",
+        "description": "拍后检测发现的一项问题。"
+      },
       "ReceiptCreate": {
         "properties": {
           "photo_id": {
@@ -14187,10 +14309,27 @@
             "maximum": 5.0,
             "minimum": 0.0,
             "title": "Beauty Level",
-            "description": "美颜档位，0 表示不美颜；不能超过该规格的 beauty_max",
+            "description": "美颜档位，0 表示只自动校正光影。最高为该规格的 beauty_max。",
             "default": 0,
             "examples": [
               0
+            ]
+          },
+          "blemishes": {
+            "items": {
+              "$ref": "#/components/schemas/BlemishPoint"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Blemishes",
+            "description": "用户在当前规格成品图上点选的祛痘位置，最多 10 个。省略或空数组表示不祛痘。",
+            "examples": [
+              [
+                {
+                  "x": 0.34,
+                  "y": 0.52
+                }
+              ]
             ]
           }
         },
@@ -14238,7 +14377,7 @@
           "beauty_level": {
             "type": "integer",
             "title": "Beauty Level",
-            "description": "美颜档位，0 表示不美颜",
+            "description": "美颜档位，0 表示只自动校正光影",
             "examples": [
               0
             ]

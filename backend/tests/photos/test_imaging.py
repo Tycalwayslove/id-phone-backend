@@ -1,11 +1,12 @@
 import io
 import os
-from itertools import pairwise
 
 import pytest
-from PIL import Image, ImageDraw, ImageStat
+from PIL import Image, ImageDraw
 
+from app.core.errors import AppError, ErrorCode
 from app.modules.photos import imaging
+from app.modules.photos.pipeline.face import Face
 from tests.photos.helpers import jpeg_bytes, png_rgba_bytes
 
 
@@ -32,6 +33,18 @@ def test_transparent_gets_background_color():
     out = Image.open(io.BytesIO(_render(png_rgba_bytes()))).convert("RGB")
     r, g, b = out.getpixel((10, 10))
     assert abs(r - 0x43) < 8 and abs(g - 0x8E) < 8 and abs(b - 0xDB) < 8
+
+
+@pytest.mark.parametrize(("name", "hex_color"), [(" Blue ", "#438EDB"), ("dark_blue", "#1A3B8C")])
+def test_legacy_background_name_matches_hex(name, hex_color):
+    data = png_rgba_bytes()
+    assert _render(data, bg_color=name) == _render(data, bg_color=hex_color)
+
+
+def test_unknown_background_name_reports_validation_error():
+    with pytest.raises(AppError) as error:
+        _render(jpeg_bytes(), bg_color="rebeccapurple")
+    assert error.value.code == ErrorCode.VALIDATION_ERROR
 
 
 def test_watermark_changes_image():
@@ -85,7 +98,7 @@ def textured_image():
     return img, buf.getvalue()
 
 
-def test_beauty_zero_matches_original_render_pixels(textured_image):
+def test_auto_light_leaves_balanced_gray_unchanged(textured_image):
     original, data = textured_image
     legacy = io.BytesIO()
     original.save(legacy, "JPEG", quality=95, dpi=(300, 300), optimize=True)
@@ -96,14 +109,20 @@ def test_beauty_zero_matches_original_render_pixels(textured_image):
         assert out.tobytes() == expected.tobytes()
 
 
-def test_beauty_smooths_and_brightens_more_at_higher_levels(textured_image):
-    _, data = textured_image
-    stats = []
-    for level in range(6):
-        result = _render(data, width_px=64, height_px=64, beauty_level=level)
-        with Image.open(io.BytesIO(result)) as out:
-            stats.append(ImageStat.Stat(out.crop((16, 16, 48, 48)).convert("L")))
+def test_crop_padding_is_not_a_foreground_mask_for_white_balance():
+    warm = (224, 148, 95)
+    buf = io.BytesIO()
+    Image.new("RGB", (400, 500), warm).save(buf, "PNG")
+    face = Face(0, 10, 160, 194, ((43, 67), (117, 67), (80, 109), (52, 144), (108, 144)), 0.95)
 
-    for lower, higher in pairwise(stats):
-        assert higher.mean[0] > lower.mean[0]
-        assert higher.stddev[0] < lower.stddev[0]
+    result = _render(buf.getvalue(), width_px=350, height_px=450, face=face)
+    with Image.open(io.BytesIO(result)) as out:
+        assert out.getpixel((5, 5)) == pytest.approx((67, 142, 219), abs=3)
+        assert out.getpixel((175, 225)) == pytest.approx(warm, abs=2)
+
+
+def test_no_face_beauty_leaves_background_texture_alone(textured_image):
+    _, data = textured_image
+    baseline = _render(data, width_px=64, height_px=64, beauty_level=0)
+    strong = _render(data, width_px=64, height_px=64, beauty_level=5)
+    assert strong == baseline

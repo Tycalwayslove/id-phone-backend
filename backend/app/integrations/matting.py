@@ -1,15 +1,74 @@
 """抠图适配器，统一返回带透明通道的 PNG。"""
 
 import io
-from typing import Protocol
+from pathlib import Path
+from threading import Lock
+from typing import TYPE_CHECKING, Protocol
 
 import httpx
+import numpy as np
 from PIL import Image, ImageChops, ImageOps
 
 from app.core.config import settings
 
+if TYPE_CHECKING:
+    from onnxruntime import InferenceSession
+
 DEFAULT_TIMEOUT_SECONDS = 5.0
 BACKGROUND_TOLERANCE = 24
+MODNET_MODEL = "modnet_photographic_portrait_matting.onnx"
+MODEL_SHORT_SIDE = 512
+MODEL_MAX_SIDE = 1536
+MODEL_ALIGNMENT = 32
+_session_lock = Lock()
+_model_path: Path | None = None
+_session: InferenceSession | None = None
+
+
+def _get_modnet_session() -> InferenceSession:
+    global _model_path, _session
+    path = settings.photo_models_dir / MODNET_MODEL
+    with _session_lock:
+        if _session is None or _model_path != path:
+            if not path.is_file():
+                raise FileNotFoundError(
+                    f"缺少抠图模型 {MODNET_MODEL}，请在 backend 目录运行 uv run python -m scripts.download_models"
+                )
+            import onnxruntime as ort
+
+            ort.disable_telemetry_events()
+            options = ort.SessionOptions()
+            options.intra_op_num_threads = 2
+            _session = ort.InferenceSession(
+                str(path), sess_options=options, providers=["CPUExecutionProvider"]
+            )
+            _model_path = path
+        return _session
+
+
+class LocalMatting:
+    """用 MODNet 在本机生成透明人像底片。"""
+
+    def matte(self, data: bytes) -> bytes:
+        session = _get_modnet_session()
+        with Image.open(io.BytesIO(data)) as src:
+            ImageOps.exif_transpose(src, in_place=True)
+            # 普通照片以短边 512 推理。极端长宽比优先限制长边，控制内存。
+            scale = min(MODEL_SHORT_SIDE / min(src.size), MODEL_MAX_SIDE / max(src.size))
+            size = tuple(
+                max(MODEL_ALIGNMENT, round(side * scale / MODEL_ALIGNMENT) * MODEL_ALIGNMENT)
+                for side in src.size
+            )
+            resized = src.resize(size, Image.Resampling.BILINEAR).convert("RGB")
+            image = src.convert("RGBA")
+        model_input = np.asarray(resized, dtype=np.float32) / 127.5 - 1
+        alpha = session.run(None, {session.get_inputs()[0].name: model_input.transpose(2, 0, 1)[None]})[0]
+        mask = Image.fromarray(np.round(np.clip(alpha[0, 0], 0, 1) * 255).astype(np.uint8))
+        mask = mask.resize(image.size, Image.Resampling.BILINEAR)
+        image.putalpha(ImageChops.multiply(mask, image.getchannel("A")))
+        with io.BytesIO() as buf:
+            image.save(buf, format="PNG")
+            return buf.getvalue()
 
 
 class MattingClient(Protocol):
@@ -50,7 +109,12 @@ class RealMatting:
         raise NotImplementedError("正式抠图服务待接入")
 
 
+_local = LocalMatting()
+
+
 def get_matting() -> MattingClient:
+    if settings.matting_mode == "local":
+        return _local
     if settings.matting_mode == "fake":
         return FakeMatting()
     return RealMatting(timeout_seconds=settings.matting_timeout_seconds)
