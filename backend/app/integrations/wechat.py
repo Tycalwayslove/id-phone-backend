@@ -264,8 +264,8 @@ def get_wechat() -> WechatMiniClient:
 
 
 def media_check_async(*, media_url: str, open_id: str | None) -> str | None:
-    """提交小程序图片内容检测，返回回调任务 ID。fake 模式返回 None，表示直接通过。"""
-    if settings.wechat_mode == "fake":
+    """提交小程序图片内容检测，返回回调任务 ID。MEDIA_CHECK_MODE=fake 时返回 None，表示直接通过。"""
+    if settings.media_check_mode == "fake":
         return None
     if not open_id:
         raise DeliveryError("no_mini_identity", "failed")

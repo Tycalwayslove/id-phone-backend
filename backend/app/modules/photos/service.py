@@ -156,7 +156,7 @@ def get_admin_photo_detail(
 def _check_status(photo: Photo) -> str:
     if photo.check_result is None:
         # 兼容启用审核前创建的照片。真实模式要求取得审核结果。
-        return "passed" if settings.wechat_mode == "fake" else "failed"
+        return "passed" if settings.media_check_mode == "fake" else "failed"
     return photo.check_result.get("status", "failed")
 
 
@@ -341,7 +341,7 @@ def _render_out(render_row: PhotoRender, spec: Spec, file: File) -> RenderOut:
 
 
 def _submit_media_check(original: File, open_id: str | None) -> dict[str, str]:
-    if settings.wechat_mode == "real":
+    if settings.media_check_mode == "real":
         if not settings.wx_msg_token:
             raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, "照片内容检测暂时不可用，请稍后重试")
         if not open_id:

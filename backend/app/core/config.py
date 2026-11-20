@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     wx_mini_app_id: str = "wx-dev-app"
     wx_mini_app_secret: str = ""
     wx_msg_token: str = Field(default="", repr=False)
+    # 照片内容安全检测：real = 提交微信 mediaCheckAsync（需 WX_MSG_TOKEN、公网可访问的照片地址和 HTTPS 回调）；
+    # fake = 直接通过（本机开发用；可与 WECHAT_MODE=real 搭配，真实登录但不做内容检测）。生产禁止 fake。
+    media_check_mode: Literal["fake", "real"] = "fake"
 
     # 微信支付
     pay_mode: Literal["fake", "wechat"] = "fake"
@@ -110,6 +113,7 @@ class Settings(BaseSettings):
             name
             for name, fake in (
                 ("WECHAT_MODE", self.wechat_mode == "fake"),
+                ("MEDIA_CHECK_MODE", self.media_check_mode == "fake"),
                 ("PAY_MODE", self.pay_mode == "fake"),
                 ("RECEIPT_MODE", self.receipt_mode == "fake"),
                 ("SECRET_KEY", self.secret_key.startswith("dev-only-")),

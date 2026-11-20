@@ -44,6 +44,7 @@ def no_access(monkeypatch):
 def real_media(client, db, alice, monkeypatch):
     # 在登录后换为真实模式；使用主会话约定提供的已验证 OpenID。
     monkeypatch.setattr(settings, "wechat_mode", "real")
+    monkeypatch.setattr(settings, "media_check_mode", "real")
     monkeypatch.setattr(settings, "wx_msg_token", "test-message-token")
     identity = db.scalar(select(UserIdentity).where(UserIdentity.open_id == "alice"))
     auth_user = SimpleNamespace(id=identity.user_id, wx_mini_open_id=identity.open_id)

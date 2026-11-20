@@ -16,7 +16,7 @@ CALLBACK = "/api/v1/callbacks/wechat/media-check"
 
 
 def test_fake_media_check_does_not_use_wechat(monkeypatch):
-    monkeypatch.setattr(settings, "wechat_mode", "fake")
+    monkeypatch.setattr(settings, "media_check_mode", "fake")
     client = Mock()
     monkeypatch.setattr(wechat, "get_real_wechat", client)
     assert wechat.media_check_async(media_url="https://files.example.test/p.jpg", open_id=None) is None
@@ -25,6 +25,7 @@ def test_fake_media_check_does_not_use_wechat(monkeypatch):
 
 def test_real_media_check_reuses_mini_program_token(monkeypatch):
     monkeypatch.setattr(settings, "wechat_mode", "real")
+    monkeypatch.setattr(settings, "media_check_mode", "real")
     monkeypatch.setattr(settings, "wx_mini_app_id", "test-app")
     monkeypatch.setattr(settings, "wx_mini_app_secret", "test-secret")
     monkeypatch.setattr(wechat, "_real", wechat.RealWechat())
@@ -95,3 +96,13 @@ def test_wechat_post_checks_signature_and_persists_verdict(callback, monkeypatch
     lookup.assert_called_once_with(db, "trace-1")
     db.commit.assert_called_once_with()
     assert photo.check_result == {"status": expected, "trace_id": "trace-1"}
+
+
+def test_real_login_with_fake_media_check_skips_wechat(monkeypatch):
+    """本机开发：WECHAT_MODE=real 登录，MEDIA_CHECK_MODE=fake 不调用微信内容检测。"""
+    monkeypatch.setattr(settings, "wechat_mode", "real")
+    monkeypatch.setattr(settings, "media_check_mode", "fake")
+    client = Mock()
+    monkeypatch.setattr(wechat, "get_real_wechat", client)
+    assert wechat.media_check_async(media_url="https://files.example.test/p.jpg", open_id="o-test") is None
+    client.assert_not_called()

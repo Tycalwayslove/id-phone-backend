@@ -28,7 +28,8 @@ const TABLE: Record<string, ErrorInfo> = {
   PHONE_ALREADY_BOUND: { message: '这个手机号已绑定其他账号，请联系客服', action: 'contact', actionText: '联系客服' },
   ONE_PERSON_MISMATCH: { message: '该权益仅限本人使用，请使用办理人本人的证件信息', action: 'none' },
   RECEIPT_NOT_SUPPORTED: { message: '这个规格暂不支持办理回执', action: 'none' },
-  PROVIDER_UNAVAILABLE: { message: '回执通道暂时不可用，请稍后再试', action: 'retry' },
+  // 后端多个外部服务（回执、内容检测、抠图模型）共用此错误码，优先显示后端给的具体原因
+  PROVIDER_UNAVAILABLE: { message: '服务暂时不可用，请稍后再试', action: 'retry' },
   APPLICATION_NOT_RESUBMITTABLE: { message: '当前状态不能重新提交', action: 'none' },
   PLAN_NOT_AVAILABLE: { message: '这个套餐暂不可购买', action: 'none' },
   ORDER_NOT_PAYABLE: { message: '订单当前不能支付，请重新下单', action: 'none' },
@@ -60,6 +61,7 @@ export function describeError(err: unknown): ErrorInfo {
   if (err instanceof UserFacingError) return { message: err.message, action: 'none' }
   if (err instanceof ApiError) {
     const hit = TABLE[err.code]
+    if (hit && err.code === 'PROVIDER_UNAVAILABLE' && err.message) return { ...hit, message: err.message }
     if (hit) return hit
     return { message: err.message || '操作失败，请稍后再试', action: 'none' }
   }
