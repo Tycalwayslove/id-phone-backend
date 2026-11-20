@@ -106,7 +106,7 @@ SPECS = [
         441,
         26,
         32,
-        ["white"],
+        ["#FFFFFF"],
         2,
         FORM_MOBILE_CITY,
         "713",
@@ -121,7 +121,7 @@ SPECS = [
         441,
         26,
         32,
-        ["white"],
+        ["#FFFFFF"],
         2,
         [{"key": "mobile", "label": "手机号", "required": True}],
         "625",
@@ -136,7 +136,7 @@ SPECS = [
         441,
         26,
         32,
-        ["white"],
+        ["#FFFFFF"],
         2,
         [{"key": "mobile", "label": "手机号", "required": True}],
         "755",
@@ -151,7 +151,7 @@ SPECS = [
         579,
         35,
         49,
-        ["white"],
+        ["#FFFFFF"],
         2,
         FORM_DRIVER,
         "622",
@@ -166,7 +166,7 @@ SPECS = [
         579,
         35,
         49,
-        ["white"],
+        ["#FFFFFF"],
         2,
         FORM_DRIVER,
         "736",
@@ -181,7 +181,7 @@ SPECS = [
         441,
         26,
         32,
-        ["white"],
+        ["#FFFFFF"],
         2,
         FORM_MOBILE_CITY,
         "712",
@@ -196,7 +196,7 @@ SPECS = [
         441,
         26,
         32,
-        ["white"],
+        ["#FFFFFF"],
         2,
         FORM_MOBILE_CITY,
         "714",
@@ -211,13 +211,41 @@ SPECS = [
         567,
         33,
         48,
-        ["white"],
+        ["#FFFFFF"],
         0,
         FORM_MOBILE_CITY,
         "624",
     ),
-    ("one-inch", "一寸", "normal", "other", None, 295, 413, 25, 35, ["blue", "white", "red"], 4, [], None),
-    ("two-inch", "二寸", "normal", "other", None, 413, 579, 35, 49, ["blue", "white", "red"], 4, [], None),
+    (
+        "one-inch",
+        "一寸",
+        "normal",
+        "other",
+        None,
+        295,
+        413,
+        25,
+        35,
+        ["#438EDB", "#FFFFFF", "#FF0000"],
+        4,
+        [],
+        None,
+    ),
+    (
+        "two-inch",
+        "二寸",
+        "normal",
+        "other",
+        None,
+        413,
+        579,
+        35,
+        49,
+        ["#438EDB", "#FFFFFF", "#FF0000"],
+        4,
+        [],
+        None,
+    ),
 ]
 
 
@@ -300,7 +328,7 @@ def seed() -> None:
                 height_px=p.height_px,
                 width_mm=p.width_mm,
                 height_mm=p.height_mm,
-                bg_colors=["white"],
+                bg_colors=["#FFFFFF"],
                 beauty_max=2,
                 form_schema=FORM_MOBILE_CITY,
                 official_valid_days=180,
@@ -452,7 +480,7 @@ def seed() -> None:
                 alice,
                 kind,
                 f"p{photo.id}",
-                f"_{spec_code}_{color}_b{beauty}",
+                f"_{spec_code}_{color.removeprefix('#')}_b{beauty}",
                 "jpg",
                 "image/jpeg",
                 60_000,
@@ -469,10 +497,10 @@ def seed() -> None:
             db.flush()
             return r
 
-        render(photo_v1, "gd-idcard", "white", 2, True)  # 付费前的带水印预览
-        r_v1 = render(photo_v1, "gd-idcard", "white", 2, False)  # 第一次提交用的
-        r_v2 = render(photo_v2, "gd-idcard", "white", 1, False)  # 驳回后重拍、降低美化
-        r_inch = render(photo_v2, "one-inch", "blue", 1, False)  # 同一底片改规格
+        render(photo_v1, "gd-idcard", "#FFFFFF", 2, True)  # 付费前的带水印预览
+        r_v1 = render(photo_v1, "gd-idcard", "#FFFFFF", 2, False)  # 第一次提交用的
+        r_v2 = render(photo_v2, "gd-idcard", "#FFFFFF", 1, False)  # 驳回后重拍、降低美化
+        r_inch = render(photo_v2, "one-inch", "#438EDB", 1, False)  # 同一底片改规格
         db.add(
             ShareLink(
                 render_id=r_inch.id,

@@ -7,6 +7,7 @@ from dataclasses import replace
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.pagination import PageParams
 from app.core.regions import province_of, region_name, resolve_region
@@ -114,7 +115,20 @@ def list_spec_regions(db: Session) -> list[SpecRegionProvince]:
 
 
 def get_spec_detail(db: Session, code: str) -> SpecDetail:
-    spec = get_active_spec(db, code)
+    return _spec_detail(db, get_active_spec(db, code))
+
+
+def get_preview_spec(db: Session) -> SpecDetail:
+    configured_code = settings.preview_spec_code
+    spec = repo.get_active_by_code(db, configured_code) if configured_code else None
+    if spec is None:
+        spec = repo.get_default_preview_spec(db)
+    if spec is None:
+        raise AppError(ErrorCode.SPEC_NOT_FOUND)
+    return _spec_detail(db, spec)
+
+
+def _spec_detail(db: Session, spec: Spec) -> SpecDetail:
     return SpecDetail(
         **_spec_fields(spec),
         dpi=spec.dpi,

@@ -69,6 +69,23 @@ def list_spec_regions(db: DB):
 
 
 @router.get(
+    "/specs/preview",
+    operation_id="specs_preview",
+    summary="默认预览规格",
+    description=(
+        "返回用户还没选证件类型时用来制作预览的规格。不需要登录。"
+        "优先使用配置中指定的已上架规格。否则优先使用已上架且名称为‘一寸’的普通规格（normal），"
+        "再使用排序最靠前的已上架普通规格。排序值相同按 ID 升序。没有可用规格时返回 SPEC_NOT_FOUND。"
+    ),
+    response_model=SpecDetail,
+    response_description="预览所用的规格详情，包含可选底色和美颜上限",
+    responses=errors_doc(ErrorCode.SPEC_NOT_FOUND),
+)
+def preview_spec(db: DB):
+    return service.get_preview_spec(db)
+
+
+@router.get(
     "/specs/{code}",
     operation_id="specs_detail",
     summary="规格详情",

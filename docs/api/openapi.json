@@ -682,6 +682,48 @@
         }
       }
     },
+    "/api/v1/specs/preview": {
+      "get": {
+        "tags": [
+          "规格"
+        ],
+        "summary": "默认预览规格",
+        "description": "返回用户还没选证件类型时用来制作预览的规格。不需要登录。优先使用配置中指定的已上架规格。否则优先使用已上架且名称为‘一寸’的普通规格（normal），再使用排序最靠前的已上架普通规格。排序值相同按 ID 升序。没有可用规格时返回 SPEC_NOT_FOUND。",
+        "operationId": "specs_preview",
+        "responses": {
+          "200": {
+            "description": "预览所用的规格详情，包含可选底色和美颜上限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpecDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：SPEC_NOT_FOUND（规格不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/specs/{code}": {
       "get": {
         "tags": [
