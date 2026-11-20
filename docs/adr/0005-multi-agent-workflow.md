@@ -3,8 +3,9 @@
 - 状态：已采纳（2026-11-19）
 
 ## 决定
+- **适用范围**（2026-11-19 补充）：本分工只在用户用 Claude Code 命令行（终端 `claude`）时生效；用户在 Claude 桌面端或直接用 Codex 时，用该工具默认模型自行完成，不套用分工。
 - **Opus**：全局规划、架构、评审与合并，写任务单与 ADR。
-- **Codex**：每个任务在独立 git worktree 里按任务单实现。
+- **Codex**（`gpt-6.2-sol`，effort high）：每个任务在手动建的、加锁的 git worktree 里按任务单实现。
 - **Sonnet**：写文档、改项目说明类文件。
 - 任务单“只允许改的文件”互不重叠，从根上避免冲突。
 - 共享文件（`backend/app/core/`、`app/main.py`、`app/models/__init__.py`、`.env.example`、`CONTRACTS.md`、CI）由主会话线性合入；任务分支把需求写进报告。
