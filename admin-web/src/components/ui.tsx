@@ -59,10 +59,12 @@ export function IdFilter({ name = 'user_id', label = '用户 ID' }: { name?: str
   )
 }
 
-export function FilterForm<T>({ children, onFinish }: { children: ReactNode; onFinish: FormProps<T>['onFinish'] }) {
+export function FilterForm<T extends object>({ children, onFinish, initialValues }: {
+  children: ReactNode; onFinish: FormProps<T>['onFinish']; initialValues?: T
+}) {
   const [form] = Form.useForm<T>()
   return (
-    <Form<T> form={form} layout="vertical" className="filter-bar" onFinish={onFinish}>
+    <Form<T> form={form} layout="vertical" className="filter-bar" onFinish={onFinish} initialValues={initialValues}>
       {children}
       <Space className="filter-actions">
         <Button type="primary" htmlType="submit">查询</Button>

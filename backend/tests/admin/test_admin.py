@@ -722,7 +722,7 @@ def test_admin_api_docs_complete():
         if path.startswith("/api/v1/admin")
         for op in ops.values()
     ]
-    assert len(ids) == 39 and len(ids) == len(set(ids)) and all(i.startswith("admin_") for i in ids)
+    assert len(ids) == 43 and len(ids) == len(set(ids)) and all(i.startswith("admin_") for i in ids)
     assert (
         spec["paths"][f"{API}/providers/{{code}}/sync-specs"]["post"]["operationId"]
         == "admin_providers_sync_specs"
@@ -735,6 +735,7 @@ def test_admin_api_docs_complete():
     assert set(spec["components"]["schemas"]["AdminUserSearchIn"]["properties"]) == {
         "phone",
         "user_id",
+        "source_app_id",
         "status",
         "cursor",
         "limit",

@@ -3,6 +3,8 @@ import type { operations } from './schema'
 
 // 用户查询走 POST /admin/users/search：手机号放请求体，不进 URL 和访问日志
 export type UserFilters = Omit<Schema['AdminUserSearchIn'], 'cursor' | 'limit'>
+export type PhotoFilters = NonNullable<operations['admin_photos_list']['parameters']['query']>
+type ClientAppFilters = NonNullable<operations['admin_client_apps_list']['parameters']['query']>
 export type OrderFilters = NonNullable<operations['admin_orders_list']['parameters']['query']>
 export type ReceiptFilters = NonNullable<operations['admin_applications_list']['parameters']['query']>
 export type AuditFilters = NonNullable<operations['admin_audit_logs']['parameters']['query']>
@@ -28,6 +30,14 @@ export const adminApi = {
     result(await client.POST('/api/v1/admin/users/search', { body: { limit: 20, ...filters }, signal })),
   user: async (user_id: number, signal: AbortSignal) =>
     result(await client.GET('/api/v1/admin/users/{user_id}', { params: { path: { user_id } }, signal })),
+  photos: async (query: PhotoFilters, signal: AbortSignal) =>
+    result(await client.GET('/api/v1/admin/photos', { params: { query }, signal })),
+  photo: async (photo_id: number, signal: AbortSignal) =>
+    result(await client.GET('/api/v1/admin/photos/{photo_id}', { params: { path: { photo_id } }, signal })),
+  clientApps: async (query: ClientAppFilters, signal: AbortSignal) =>
+    result(await client.GET('/api/v1/admin/client-apps', { params: { query }, signal })),
+  updateClientApp: async (id: number, body: Schema['AdminClientAppUpdateIn']) =>
+    result(await client.PATCH('/api/v1/admin/client-apps/{id}', { params: { path: { id } }, body })),
   orders: async (query: OrderFilters, signal: AbortSignal) =>
     result(await client.GET('/api/v1/admin/orders', { params: { query }, signal })),
   order: async (order_no: string, signal: AbortSignal) =>

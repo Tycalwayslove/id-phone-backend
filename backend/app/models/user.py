@@ -1,4 +1,4 @@
-"""用户与私域：users、user_identities、channels、wecom_contacts、user_tags。"""
+"""用户与私域：users、user_identities、client_apps、channels、wecom_contacts、user_tags。"""
 
 from datetime import datetime
 
@@ -19,6 +19,8 @@ from app.models.base import Base, TimestampMixin
 
 USER_STATUSES = ("active", "disabled", "cancelled")
 IDENTITY_PROVIDERS = ("wx_mini", "wx_mp", "alipay_mini", "douyin_mini", "h5")
+CLIENT_APP_PLATFORMS = ("wx_mini", "wx_mp", "alipay_mini", "douyin_mini", "web")
+CLIENT_APP_STATUSES = ("active", "disabled")
 TAG_SOURCES = ("auto", "manual", "wecom")
 
 
@@ -29,6 +31,23 @@ class Channel(TimestampMixin, Base):
     code: Mapped[str] = mapped_column(Text, unique=True)
     name: Mapped[str] = mapped_column(Text)
     source_type: Mapped[str] = mapped_column(Text)
+
+
+class ClientApp(TimestampMixin, Base):
+    """首次注册来源的客户端应用，由登录登记，名称和状态由运营维护。"""
+
+    __tablename__ = "client_apps"
+    __table_args__ = (
+        UniqueConstraint("platform", "app_id", name="uq_client_apps_platform_app_id"),
+        check_in("platform", CLIENT_APP_PLATFORMS, "platform_valid"),
+        check_in("status", CLIENT_APP_STATUSES, "status_valid"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    platform: Mapped[str] = mapped_column(Text)
+    app_id: Mapped[str] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, server_default="active")
 
 
 class User(TimestampMixin, Base):
@@ -42,6 +61,9 @@ class User(TimestampMixin, Base):
     phone_hash: Mapped[str | None] = mapped_column(Text, unique=True)
     first_channel_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("channels.id", ondelete="SET NULL"), index=True
+    )
+    source_app_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("client_apps.id", ondelete="SET NULL"), index=True
     )
     status: Mapped[str] = mapped_column(Text, server_default="active")
     last_active_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

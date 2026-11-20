@@ -36,6 +36,8 @@ tests/<m>/test_*.py
 - `get_photo_for_user(db, user_id, photo_id) -> Photo`：不是本人的或不存在 → `AppError(PHOTO_NOT_FOUND)`。
 - `render(db, *, user_id, photo_id, spec: Spec, bg_color, beauty_level, watermarked) -> PhotoRender`：同参数已有就复用；没有就用 Pillow 生成并保存。
 - `purge_all_for_user(db, user_id) -> int`：删除该用户全部存储文件，files 标记 purged，photos 标记 purged。
+- `list_admin_photos(db, *, before_id, limit, user_id=None, status=None, matting_level=None, quality_level=None)`：供后台按照片 ID 倒序筛选，返回 `(Photo, File | None)`。文件优先取最新的有效预览，缺少预览时取有效原图，已清理的照片无文件。调用方检查 `photo:read`。
+- `get_admin_photo_detail(db, *, photo_id)`：供后台读取照片、按文件 ID 索引的原图和当前底片，以及导出记录和规格名称。照片不存在时抛 `PHOTO_NOT_FOUND`。调用方检查 `photo:read`、仅为有效文件签名并写入查看审计。
 
 ## entitlements（权益）
 
@@ -82,4 +84,4 @@ tests/<m>/test_*.py
 
 ## admin（后台）例外
 
-- 回执申请查询与操作使用 receipts service。其他后台列表和详情可以直接只读查询业务表，写操作仍调用对应模块的 service。
+- 回执申请查询与操作使用 receipts service，照片查询使用 photos service。其他后台列表和详情可以直接只读查询业务表，写操作仍调用对应模块的 service。

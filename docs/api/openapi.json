@@ -3464,7 +3464,7 @@
           "后台"
         ],
         "summary": "用户列表",
-        "description": "按注册时间从新到旧列出用户，游标分页，条件之间是“并且”。权限点 user:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。手机号只返回打码后的；按手机号筛选请调用 POST /api/v1/admin/users/search。",
+        "description": "按注册时间从新到旧列出用户，游标分页，条件之间是“并且”。权限点 user:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。包含首次注册应用和推广渠道。手机号只返回打码后的；按手机号筛选请调用 POST /api/v1/admin/users/search。",
         "operationId": "admin_users_list",
         "security": [
           {
@@ -3515,6 +3515,29 @@
               "title": "Status"
             },
             "description": "按账号状态筛选：active = 正常；disabled = 已停用；cancelled = 已注销"
+          },
+          {
+            "name": "source_app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 9223372036854775807,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按首次注册的应用记录 ID 筛选",
+              "examples": [
+                3
+              ],
+              "title": "Source App Id"
+            },
+            "description": "按首次注册的应用记录 ID 筛选"
           },
           {
             "name": "cursor",
@@ -3623,7 +3646,7 @@
           "后台"
         ],
         "summary": "按条件查询用户",
-        "description": "按注册时间从新到旧查询用户，游标分页，条件之间是“并且”。权限点 user:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。请求头需带登录时返回的 X-CSRF-Token。按手机号筛选时在请求体传完整手机号，服务端用哈希匹配，响应仅返回打码后的手机号。",
+        "description": "按注册时间从新到旧查询用户，游标分页，条件之间是“并且”。权限点 user:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。请求头需带登录时返回的 X-CSRF-Token。按手机号筛选时在请求体传完整手机号，服务端用哈希匹配，响应仅返回打码后的手机号。包含首次注册应用和推广渠道。",
         "operationId": "admin_users_search",
         "security": [
           {
@@ -3710,7 +3733,7 @@
           "后台"
         ],
         "summary": "用户详情",
-        "description": "按用户 ID 查看用户资料、登录身份、订单统计。权限点 user:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "description": "按用户 ID 查看资料、登录身份、订单统计、首次注册应用及推广渠道。权限点 user:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。拥有 photo:read 时同时返回最近 12 张照片的摘要和临时缩略图。",
         "operationId": "admin_users_detail",
         "security": [
           {
@@ -3795,6 +3818,554 @@
           },
           "404": {
             "description": "错误码：NOT_FOUND（资源不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/client-apps": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "来源应用列表",
+        "description": "按应用记录 ID 倒序分页，包含已停用应用和各应用带来的首次注册用户数。权限点 user:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "operationId": "admin_client_apps_list",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
+              "examples": [
+                "eyJpIjoxMDI0fQ"
+              ],
+              "title": "Cursor"
+            },
+            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数，1～100，默认 20",
+              "examples": [
+                20
+              ],
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，1～100，默认 20"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "应用分页列表和各应用的注册用户数",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminClientAppPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/client-apps/{id}": {
+      "patch": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "修改来源应用",
+        "description": "更新应用名称和运营状态，仅所有者可操作，权限点 app:write。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。历史用户仍归属于首次注册的应用，登录按原规则处理。",
+        "operationId": "admin_client_apps_update",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "description": "客户端应用记录 ID",
+              "examples": [
+                3
+              ],
+              "title": "Id"
+            },
+            "description": "客户端应用记录 ID"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminClientAppUpdateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "更新后的应用及注册用户数",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminClientAppOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：NOT_FOUND（资源不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/photos": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "照片列表",
+        "description": "按照片 ID 从新到旧游标分页，可组合筛选用户、照片状态、抠图精度和拍后检测等级。权限点 photo:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。缩略图链接有效期 10 分钟，缺少有效预览图时用原图。查询列表不写审计。",
+        "operationId": "admin_photos_list",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 9223372036854775807,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "所属用户 ID",
+              "examples": [
+                1024
+              ],
+              "title": "User Id"
+            },
+            "description": "所属用户 ID"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "draft",
+                    "active",
+                    "expired",
+                    "purged"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "draft = 上传草稿；active = 已创建；expired = 权益已到期；purged = 文件已清理",
+              "examples": [
+                "active"
+              ],
+              "title": "Status"
+            },
+            "description": "draft = 上传草稿；active = 已创建；expired = 权益已到期；purged = 文件已清理"
+          },
+          {
+            "name": "matting_level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "fast",
+                    "fine",
+                    "failed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "fast = 快速底片；fine = 精细底片；failed = 精细抠图失败，继续使用原有底片",
+              "examples": [
+                "fine"
+              ],
+              "title": "Matting Level"
+            },
+            "description": "fast = 快速底片；fine = 精细底片；failed = 精细抠图失败，继续使用原有底片"
+          },
+          {
+            "name": "quality_level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "ok",
+                    "warn",
+                    "fail"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ok = 合格；warn = 有调整建议；fail = 建议重拍",
+              "examples": [
+                "warn"
+              ],
+              "title": "Quality Level"
+            },
+            "description": "ok = 合格；warn = 有调整建议；fail = 建议重拍"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
+              "examples": [
+                "eyJpIjoxMDI0fQ"
+              ],
+              "title": "Cursor"
+            },
+            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数，1～100，默认 20",
+              "examples": [
+                20
+              ],
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，1～100，默认 20"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "照片摘要分页列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPhotoPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/photos/{photo_id}": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "照片详情",
+        "description": "查看原图、当前抠图底片、所有导出记录和拍后检测明细。权限点 photo:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。图片签名地址有效期 10 分钟，文件不可用时地址为空。每次成功查询都写入 photo.view 审计。",
+        "operationId": "admin_photos_detail",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "photo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "description": "照片 ID",
+              "examples": [
+                12
+              ],
+              "title": "Photo Id"
+            },
+            "description": "照片 ID"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "照片详情、拍后检测明细及临时图片地址",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPhotoDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：PHOTO_NOT_FOUND（照片不存在）",
             "content": {
               "application/json": {
                 "schema": {
@@ -8843,6 +9414,205 @@
         "title": "AdminBriefOut",
         "description": "后台账号的简要信息。"
       },
+      "AdminClientAppBrief": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "客户端应用记录 ID，用于筛选用户",
+            "examples": [
+              3
+            ]
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "wx_mini",
+              "wx_mp",
+              "alipay_mini",
+              "douyin_mini",
+              "web"
+            ],
+            "title": "Platform",
+            "description": "wx_mini = 微信小程序；wx_mp = 微信公众号；alipay_mini = 支付宝小程序；douyin_mini = 抖音小程序；web = 网页",
+            "examples": [
+              "wx_mini"
+            ]
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "description": "平台分配的 AppID，与平台组合唯一",
+            "examples": [
+              "wx-dev-app"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "运营用于识别应用的名称，初始值为 AppID",
+            "examples": [
+              "智拍证件照"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "platform",
+          "app_id",
+          "name"
+        ],
+        "title": "AdminClientAppBrief",
+        "description": "首次注册来源应用。"
+      },
+      "AdminClientAppOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "客户端应用记录 ID，用于筛选用户",
+            "examples": [
+              3
+            ]
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "wx_mini",
+              "wx_mp",
+              "alipay_mini",
+              "douyin_mini",
+              "web"
+            ],
+            "title": "Platform",
+            "description": "wx_mini = 微信小程序；wx_mp = 微信公众号；alipay_mini = 支付宝小程序；douyin_mini = 抖音小程序；web = 网页",
+            "examples": [
+              "wx_mini"
+            ]
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id",
+            "description": "平台分配的 AppID，与平台组合唯一",
+            "examples": [
+              "wx-dev-app"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "运营用于识别应用的名称，初始值为 AppID",
+            "examples": [
+              "智拍证件照"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled"
+            ],
+            "title": "Status",
+            "description": "active = 启用；disabled = 运营已停用。该状态用于应用管理和归因统计，登录仍按原规则处理",
+            "examples": [
+              "active"
+            ]
+          },
+          "user_count": {
+            "type": "integer",
+            "title": "User Count",
+            "description": "该应用带来的注册用户数，含已注销用户",
+            "examples": [
+              120
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "platform",
+          "app_id",
+          "name",
+          "status",
+          "user_count"
+        ],
+        "title": "AdminClientAppOut",
+        "description": "应用配置及首次注册用户数。"
+      },
+      "AdminClientAppPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminClientAppOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本页数据，按创建时间从新到旧"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "下一页游标；为空表示没有更多了"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AdminClientAppPage",
+        "description": "分页列表：应用配置及首次注册用户数。"
+      },
+      "AdminClientAppUpdateIn": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "应用名称，1～128 字符；为空则保留原值",
+            "examples": [
+              "智拍证件照"
+            ]
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "disabled"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status",
+            "description": "active = 启用；disabled = 运营已停用。该状态用于应用管理和归因统计，登录仍按原规则处理；为空则保留原值",
+            "examples": [
+              "disabled"
+            ]
+          }
+        },
+        "type": "object",
+        "title": "AdminClientAppUpdateIn",
+        "description": "更新客户端应用的名称和运营状态。"
+      },
       "AdminLoginIn": {
         "properties": {
           "username": {
@@ -9549,6 +10319,470 @@
         ],
         "title": "AdminPaymentOut",
         "description": "订单的一条支付流水。"
+      },
+      "AdminPhotoDetail": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "照片 ID",
+            "examples": [
+              12
+            ]
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id",
+            "description": "所属用户 ID",
+            "examples": [
+              1024
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "camera",
+              "upload"
+            ],
+            "title": "Source",
+            "description": "camera = 小程序内拍照；upload = 从相册上传",
+            "examples": [
+              "upload"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "expired",
+              "purged"
+            ],
+            "title": "Status",
+            "description": "draft = 上传草稿；active = 已创建；expired = 权益已到期；purged = 文件已清理",
+            "examples": [
+              "active"
+            ]
+          },
+          "matting_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "fast",
+                  "fine",
+                  "failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matting Level",
+            "description": "fast = 快速底片；fine = 精细底片；failed = 精细抠图失败，继续使用原有底片；尚未记录精度时为空",
+            "examples": [
+              "fine"
+            ]
+          },
+          "quality_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "warn",
+                  "fail"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quality Level",
+            "description": "拍后检测等级。ok = 合格；warn = 有调整建议；fail = 建议重拍；没有检测记录时为空",
+            "examples": [
+              "warn"
+            ]
+          },
+          "retain_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retain Until",
+            "description": "文件保管到期时间（UTC，带时区）；没有设置保管期限时为空",
+            "examples": [
+              "2027-11-19T08:30:00Z"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T08:30:00Z"
+            ]
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url",
+            "description": "有效期 10 分钟。优先使用预览图，缺少预览图时使用原图，文件不可用时为空",
+            "examples": [
+              "https://api.example.com/files/preview.jpg"
+            ]
+          },
+          "original_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Url",
+            "description": "原图签名地址，有效期 10 分钟；文件不可用时为空",
+            "examples": [
+              "https://api.example.com/files/original.jpg"
+            ]
+          },
+          "matting_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matting Url",
+            "description": "当前抠图底片签名地址，有效期 10 分钟；没有底片或文件不可用时为空",
+            "examples": [
+              "https://api.example.com/files/matting.png"
+            ]
+          },
+          "renders": {
+            "items": {
+              "$ref": "#/components/schemas/AdminPhotoRenderOut"
+            },
+            "type": "array",
+            "title": "Renders",
+            "description": "所有导出记录，从新到旧；未导出时为空列表"
+          },
+          "quality": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhotoQuality"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "拍后检测等级和问题明细，没有检测记录时为空",
+            "examples": [
+              {
+                "issues": [
+                  {
+                    "code": "too_dark",
+                    "message": "请换到光线充足的地方"
+                  }
+                ],
+                "level": "warn"
+              }
+            ]
+          },
+          "urls_expire_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Urls Expire At",
+            "description": "详情内图片地址的统一刷新时间（UTC，带时区），到期后重新请求详情",
+            "examples": [
+              "2026-11-19T08:45:00Z"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "source",
+          "status",
+          "matting_level",
+          "quality_level",
+          "retain_until",
+          "created_at",
+          "thumbnail_url",
+          "original_url",
+          "matting_url",
+          "renders",
+          "quality",
+          "urls_expire_at"
+        ],
+        "title": "AdminPhotoDetail",
+        "description": "后台照片详情，包含拍后检测明细及各版本的临时图片地址。"
+      },
+      "AdminPhotoOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "照片 ID",
+            "examples": [
+              12
+            ]
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id",
+            "description": "所属用户 ID",
+            "examples": [
+              1024
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "camera",
+              "upload"
+            ],
+            "title": "Source",
+            "description": "camera = 小程序内拍照；upload = 从相册上传",
+            "examples": [
+              "upload"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "expired",
+              "purged"
+            ],
+            "title": "Status",
+            "description": "draft = 上传草稿；active = 已创建；expired = 权益已到期；purged = 文件已清理",
+            "examples": [
+              "active"
+            ]
+          },
+          "matting_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "fast",
+                  "fine",
+                  "failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matting Level",
+            "description": "fast = 快速底片；fine = 精细底片；failed = 精细抠图失败，继续使用原有底片；尚未记录精度时为空",
+            "examples": [
+              "fine"
+            ]
+          },
+          "quality_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "warn",
+                  "fail"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quality Level",
+            "description": "拍后检测等级。ok = 合格；warn = 有调整建议；fail = 建议重拍；没有检测记录时为空",
+            "examples": [
+              "warn"
+            ]
+          },
+          "retain_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retain Until",
+            "description": "文件保管到期时间（UTC，带时区）；没有设置保管期限时为空",
+            "examples": [
+              "2027-11-19T08:30:00Z"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "创建时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T08:30:00Z"
+            ]
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url",
+            "description": "有效期 10 分钟。优先使用预览图，缺少预览图时使用原图，文件不可用时为空",
+            "examples": [
+              "https://api.example.com/files/preview.jpg"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "source",
+          "status",
+          "matting_level",
+          "quality_level",
+          "retain_until",
+          "created_at",
+          "thumbnail_url"
+        ],
+        "title": "AdminPhotoOut",
+        "description": "后台照片摘要及用于网格展示的临时图片链接。"
+      },
+      "AdminPhotoPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminPhotoOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本页数据，按创建时间从新到旧"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "下一页游标；为空表示没有更多了"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AdminPhotoPage",
+        "description": "分页列表：后台照片摘要及用于网格展示的临时图片链接。"
+      },
+      "AdminPhotoRenderOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "导出记录 ID",
+            "examples": [
+              7
+            ]
+          },
+          "spec_name": {
+            "type": "string",
+            "title": "Spec Name",
+            "description": "导出的规格名称",
+            "examples": [
+              "广东省身份证"
+            ]
+          },
+          "bg_color": {
+            "type": "string",
+            "title": "Bg Color",
+            "description": "导出的底色，十六进制颜色值",
+            "examples": [
+              "#FFFFFF"
+            ]
+          },
+          "beauty_level": {
+            "type": "integer",
+            "title": "Beauty Level",
+            "description": "美颜档位（0～5），0 表示只自动校正光影",
+            "examples": [
+              0
+            ]
+          },
+          "watermarked": {
+            "type": "boolean",
+            "title": "Watermarked",
+            "description": "是否带水印，true 表示带水印",
+            "examples": [
+              true
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "生成时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T08:35:00Z"
+            ]
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url",
+            "description": "导出图签名地址，有效期 10 分钟；文件不可用时为空",
+            "examples": [
+              "https://api.example.com/files/render.jpg"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "spec_name",
+          "bg_color",
+          "beauty_level",
+          "watermarked",
+          "created_at",
+          "url"
+        ],
+        "title": "AdminPhotoRenderOut",
+        "description": "后台可查看的一条照片导出记录。"
       },
       "AdminPlanCreateIn": {
         "properties": {
@@ -11990,6 +13224,32 @@
               3990
             ]
           },
+          "source_app": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminClientAppBrief"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "首次注册的应用；无来源记录时为空"
+          },
+          "first_channel_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Channel Name",
+            "description": "首次注册的推广渠道名称；没有归因渠道时为空",
+            "examples": [
+              "门店二维码"
+            ]
+          },
           "avatar_url": {
             "anyOf": [
               {
@@ -12012,6 +13272,14 @@
             "examples": [
               1
             ]
+          },
+          "recent_photos": {
+            "items": {
+              "$ref": "#/components/schemas/AdminPhotoOut"
+            },
+            "type": "array",
+            "title": "Recent Photos",
+            "description": "有 photo:read 权限时返回最多 12 条最近照片；没有权限或没有照片时为空列表。查看全部时用本响应的 id 筛选 user_id"
           }
         },
         "type": "object",
@@ -12025,11 +13293,14 @@
           "identities",
           "orders_count",
           "paid_fen_total",
+          "source_app",
+          "first_channel_name",
           "avatar_url",
-          "applications_count"
+          "applications_count",
+          "recent_photos"
         ],
         "title": "AdminUserDetail",
-        "description": "用户详情：在摘要基础上增加头像和回执申请数。"
+        "description": "用户详情，包含头像、回执申请数及有权查看的照片摘要。"
       },
       "AdminUserOut": {
         "properties": {
@@ -12137,6 +13408,32 @@
             "examples": [
               3990
             ]
+          },
+          "source_app": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminClientAppBrief"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "首次注册的应用；无来源记录时为空"
+          },
+          "first_channel_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Channel Name",
+            "description": "首次注册的推广渠道名称；没有归因渠道时为空",
+            "examples": [
+              "门店二维码"
+            ]
           }
         },
         "type": "object",
@@ -12149,7 +13446,9 @@
           "last_active_at",
           "identities",
           "orders_count",
-          "paid_fen_total"
+          "paid_fen_total",
+          "source_app",
+          "first_channel_name"
         ],
         "title": "AdminUserOut",
         "description": "用户摘要（后台列表用）。手机号只返回打码后的。"
@@ -12243,6 +13542,23 @@
             "description": "按用户 ID 精确查找",
             "examples": [
               1024
+            ]
+          },
+          "source_app_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 9.223372036854776e+18,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source App Id",
+            "description": "按首次注册的应用记录 ID 筛选",
+            "examples": [
+              3
             ]
           },
           "status": {
