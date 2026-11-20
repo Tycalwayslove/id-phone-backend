@@ -12,6 +12,7 @@ import PageContainer from '../../components/PageContainer'
 import { handleError } from '../../utils/errors'
 import { createKeyKeeper } from '../../utils/idempotency'
 import { PAGES, redirect, toInt } from '../../utils/nav'
+import { pickAndCreatePhoto } from '../../utils/pickPhoto'
 import { isIdCard18 } from '../../utils/validators'
 import './index.scss'
 
@@ -42,14 +43,15 @@ async function askSubscribe(templates: TemplateOut[]): Promise<string[]> {
 /** 回执办理页。路由参数：photo_id、spec_code */
 export default function ReceiptApply() {
   const { params } = useRouter()
-  const photoId = toInt(params.photo_id)
   const specCode = params.spec_code ?? ''
 
+  const [replacementId, setReplacementId] = useState<number>()
   const [spec, setSpec] = useState<SpecDetail | null>(null)
   const [form, setForm] = useState<Record<string, string>>({})
   const [templates, setTemplates] = useState<TemplateOut[]>([])
   const [submitting, setSubmitting] = useState(false)
   const keeper = useRef(createKeyKeeper())
+  const photoId = replacementId ?? toInt(params.photo_id)
 
   useEffect(() => {
     if (!specCode) return
@@ -107,7 +109,13 @@ export default function ReceiptApply() {
       keeper.current.release()
       await redirect(PAGES.receiptDetail, { app_no: app.app_no })
     } catch (e) {
-      await handleError(e, { photoId })
+      await handleError(e, {
+        photoId,
+        onRetake: async () => {
+          const photo = await pickAndCreatePhoto('camera')
+          if (photo) setReplacementId(photo.id)
+        }
+      })
     } finally {
       setSubmitting(false)
     }
@@ -155,6 +163,9 @@ export default function ReceiptApply() {
       <Text className='hint apply-note'>
         信息仅用于办理官方照片回执，平台加密保存，不会用于其他用途。提交时会请求订阅消息授权，用于结果通知。
       </Text>
+      {replacementId !== undefined ? (
+        <Text className='hint apply-note'>已更换照片，请提交办理。</Text>
+      ) : null}
       <View className='bottom-bar'>
         <Button block type='primary' loading={submitting} onClick={submit}>
           提交办理

@@ -22,10 +22,11 @@
     font-weight: 600;
   }
 
-  &__renew {
-    margin-top: 16px;
-    font-size: var(--fs-body);
-    color: var(--c-primary);
+  &__placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--c-bg);
   }
 }
 

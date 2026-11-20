@@ -45,7 +45,11 @@ export default function Photos() {
           const label = accessLabel(p)
           return (
             <View key={p.id} className='photo-grid__cell' onClick={() => navigate(PAGES.photoDetail, { id: p.id })}>
-              <Image className='photo-grid__img' src={resolveUrl(p.original_url)} mode='aspectFill' lazyLoad />
+              {p.original_url ? (
+                <Image className='photo-grid__img' src={resolveUrl(p.original_url)} mode='aspectFill' lazyLoad />
+              ) : (
+                <View className='photo-grid__placeholder hint'>暂无法预览</View>
+              )}
               <Text className={`photo-grid__tag${label.ok ? ' photo-grid__tag--ok' : ''}`}>{label.text}</Text>
             </View>
           )

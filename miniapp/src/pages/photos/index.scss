@@ -18,6 +18,13 @@
     height: 100%;
   }
 
+  &__placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+  }
+
   &__tag {
     position: absolute;
     left: 0;

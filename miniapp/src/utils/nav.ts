@@ -14,7 +14,9 @@ export const PAGES = {
   photoDetail: '/pages/photo-detail/index',
   me: '/pages/me/index',
   orders: '/pages/orders/index',
-  entitlements: '/pages/entitlements/index'
+  orderDetail: '/pages/order-detail/index',
+  entitlements: '/pages/entitlements/index',
+  entitlementDetail: '/pages/entitlement-detail/index'
 } as const
 
 type QueryValue = string | number | null | undefined

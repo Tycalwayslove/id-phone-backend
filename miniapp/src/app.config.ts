@@ -13,7 +13,9 @@ export default defineAppConfig({
     'pages/receipt-detail/index',
     'pages/photo-detail/index',
     'pages/orders/index',
+    'pages/order-detail/index',
     'pages/entitlements/index',
+    'pages/entitlement-detail/index',
     'pages/legal/agreement/index',
     'pages/legal/privacy/index'
   ],

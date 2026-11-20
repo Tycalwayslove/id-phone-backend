@@ -37,6 +37,21 @@ export const ORDER_STATUS: Record<S['OrderOut']['status'], StatusMeta> = {
   refunded: { text: '已退款', tone: 'default' }
 }
 
+export function orderStatus(order: Pick<S['OrderOut'], 'status' | 'refund_pending'>): StatusMeta {
+  return order.refund_pending ? { text: '退款中', tone: 'warning' } : ORDER_STATUS[order.status]
+}
+
+export const ORDER_ITEM_TYPE_TEXT: Record<S['OrderItemOut']['item_type'], string> = {
+  plan: '套餐',
+  addon: '加购项',
+  renew: '续费'
+}
+
+export const PHOTO_SOURCE_TEXT: Record<S['PhotoOut']['source'], string> = {
+  camera: '拍照',
+  upload: '相册'
+}
+
 export const SPEC_CATEGORY_TEXT: Record<S['SpecOut']['category'], string> = {
   receipt: '回执',
   normal: '常用',
