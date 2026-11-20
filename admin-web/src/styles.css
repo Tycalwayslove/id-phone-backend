@@ -55,7 +55,9 @@ body {
 .data-surface > .ant-alert { margin: 12px; }
 .table-footer { display: flex; justify-content: space-between; align-items: center; min-height: 56px; padding: 10px 16px; color: #526563; }
 .detail-section { margin-top: 24px; }
-.detail-section h3 { font-size: 15px; margin: 0 0 10px; }
+.detail-section-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.detail-section h3 { font-size: 15px; margin: 0; }
+.dashboard-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; }
 .loading { display: grid; place-items: center; min-height: 140px; }
 .session-problem { margin: 10vh auto; width: min(90%, 560px); }
 .amount { font-variant-numeric: tabular-nums; white-space: nowrap; }

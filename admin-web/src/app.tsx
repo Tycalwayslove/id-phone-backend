@@ -1,6 +1,6 @@
 import {
-  AuditOutlined, FileImageOutlined, FileProtectOutlined, IdcardOutlined, LogoutOutlined,
-  ProfileOutlined, ShoppingOutlined, TeamOutlined, PartitionOutlined,
+  AuditOutlined, BellOutlined, DashboardOutlined, FileImageOutlined, FileProtectOutlined,
+  IdcardOutlined, LogoutOutlined, PartitionOutlined, ProfileOutlined, SafetyCertificateOutlined, ShoppingOutlined, TeamOutlined,
 } from '@ant-design/icons'
 import { Alert, App as AntApp, Button, Layout, Menu, Result, Space, Tag } from 'antd'
 import { lazy, Suspense, useState } from 'react'
@@ -12,12 +12,15 @@ import Login from './pages/login'
 import { useSession } from './session'
 
 const pages = [
+  { path: '/dashboard', label: '数据看板', permission: 'stats:read', icon: DashboardOutlined, Page: lazy(() => import('./pages/dashboard')) },
   { path: '/users', label: '用户', permission: 'user:read', icon: TeamOutlined, Page: lazy(() => import('./pages/users')) },
   { path: '/orders', label: '订单', permission: 'order:read', icon: ShoppingOutlined, Page: lazy(() => import('./pages/orders')) },
   { path: '/receipts', label: '回执', permission: 'application:read', icon: FileProtectOutlined, Page: lazy(() => import('./pages/receipts')) },
   { path: '/plans', label: '套餐', permission: 'plan:read', icon: ProfileOutlined, Page: lazy(() => import('./pages/plans')) },
   { path: '/specs', label: '规格', permission: 'spec:read', icon: FileImageOutlined, Page: lazy(() => import('./pages/specs')) },
   { path: '/providers', label: '服务商', permission: 'provider:read', icon: PartitionOutlined, Page: lazy(() => import('./pages/providers')) },
+  { path: '/notifications', label: '通知任务', permission: 'notify:read', icon: BellOutlined, Page: lazy(() => import('./pages/notifications')) },
+  { path: '/administrators', label: '管理员账号', permission: 'admin:read', icon: SafetyCertificateOutlined, Page: lazy(() => import('./pages/administrators')) },
   { path: '/audit', label: '审计日志', permission: 'audit:read', icon: AuditOutlined, Page: lazy(() => import('./pages/audit')) },
 ]
 
