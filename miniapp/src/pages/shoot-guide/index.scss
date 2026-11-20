@@ -1,0 +1,192 @@
+.shoot-guide-page {
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 40px 32px 236px;
+  padding-bottom: calc(236px + env(safe-area-inset-bottom));
+
+  &__title {
+    display: block;
+    margin-bottom: 28px;
+    font-size: var(--fs-title);
+    font-weight: 600;
+  }
+
+  &__examples {
+    display: flex;
+    gap: 14px;
+  }
+
+  &__tips {
+    margin: 28px 0;
+  }
+
+  &__tip {
+    display: flex;
+    gap: 12px;
+    padding: 12px 0;
+  }
+
+  &__number {
+    flex: 0 0 32px;
+    color: var(--c-primary);
+    font-weight: 600;
+  }
+
+  &__bottom {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  &__actions {
+    display: flex;
+    gap: 16px;
+
+    .btn-native {
+      flex: 1;
+    }
+  }
+
+  &__skip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    min-height: 64px;
+    color: var(--c-text-2);
+    font-size: var(--fs-small);
+  }
+}
+
+.shoot-example {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+
+  &__portrait {
+    position: relative;
+    height: 156px;
+    overflow: hidden;
+    border: 1px solid var(--c-line);
+    border-radius: 12px;
+    background: #e0e6ee;
+  }
+
+  &__head,
+  &__shoulders {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  &__head {
+    bottom: 49px;
+    width: 47%;
+    height: 70px;
+    border-radius: 48% 48% 44% 44%;
+    background: #71819a;
+  }
+
+  &__shoulders {
+    bottom: 0;
+    width: 84%;
+    height: 54px;
+    border-radius: 52% 52% 0 0;
+    background: var(--c-ink);
+  }
+
+  &__label {
+    display: block;
+    margin-top: 10px;
+    color: var(--c-text-2);
+    font-size: var(--fs-small);
+  }
+
+  &--correct &__portrait {
+    border-color: var(--c-primary);
+    background: #d9eaff;
+  }
+
+  &--correct &__label {
+    color: var(--c-primary);
+    font-weight: 600;
+  }
+
+  &--profile &__head {
+    left: 54%;
+    width: 38%;
+
+    &::after {
+      position: absolute;
+      top: 44%;
+      right: -16%;
+      width: 31%;
+      height: 25%;
+      border-radius: 60% 36% 55% 0;
+      background: inherit;
+      content: '';
+    }
+  }
+
+  &--small &__head {
+    bottom: 31px;
+    width: 28%;
+    height: 40px;
+  }
+
+  &--small &__shoulders {
+    width: 56%;
+    height: 35px;
+  }
+
+  &--backlit &__portrait {
+    background: #fdf6d9;
+  }
+
+  &--backlit &__head {
+    background: var(--c-ink);
+  }
+}
+
+.shoot-guide-faq {
+  border-top: 1px solid var(--c-line);
+  border-bottom: 1px solid var(--c-line);
+
+  &__toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    min-height: 88px;
+    color: var(--c-ink);
+    font-size: var(--fs-body);
+    font-weight: 600;
+  }
+
+  &__arrow {
+    width: 14px;
+    height: 14px;
+    margin-right: 6px;
+    transform: rotate(45deg);
+    border-right: 2px solid var(--c-text-2);
+    border-bottom: 2px solid var(--c-text-2);
+
+    &--open {
+      transform: rotate(225deg);
+    }
+  }
+
+  &__item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 0 0 24px;
+  }
+
+  &__question {
+    font-weight: 600;
+  }
+
+  &__answer {
+    color: var(--c-text-2);
+  }
+}

@@ -8,7 +8,6 @@ import EmptyState from '../../components/EmptyState'
 import Loading from '../../components/Loading'
 import PageContainer from '../../components/PageContainer'
 import PhotoFrame from '../../components/PhotoFrame'
-import ShootGuide from '../../components/ShootGuide'
 import SpecPicker from '../../components/SpecPicker'
 import useCity from '../../hooks/useCity'
 import useCommonSpecs from '../../hooks/useCommonSpecs'
@@ -93,7 +92,6 @@ export default function Photos() {
           void shoot.open(spec.code)
         }}
       />
-      <ShootGuide open={shoot.guideOpen} spec={shoot.spec} onChoose={shoot.choose} onClose={shoot.close} />
     </PageContainer>
   )
 }

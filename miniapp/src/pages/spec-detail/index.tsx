@@ -5,7 +5,6 @@ import type { components } from '../../api/schema'
 import { getSpec } from '../../api/specs'
 import Loading from '../../components/Loading'
 import PageContainer from '../../components/PageContainer'
-import ShootGuide from '../../components/ShootGuide'
 import useShootFlow from '../../hooks/useShootFlow'
 import { handleError } from '../../utils/errors'
 import { bgColorHex, formatMm, formatSizeRange } from '../../utils/format'
@@ -94,11 +93,10 @@ export default function SpecDetailPage() {
       </View>
 
       <View className='bottom-bar'>
-        <Button className='btn-native' disabled={shoot.busy} onClick={() => void shoot.open(spec.code, spec)}>
+        <Button className='btn-native' disabled={shoot.busy} onClick={() => void shoot.open(spec.code)}>
           开始拍
         </Button>
       </View>
-      <ShootGuide open={shoot.guideOpen} spec={shoot.spec} onChoose={shoot.choose} onClose={shoot.close} />
     </PageContainer>
   )
 }

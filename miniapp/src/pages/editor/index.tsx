@@ -15,6 +15,7 @@ import useCommonSpecs from '../../hooks/useCommonSpecs'
 import { describeError, handleError } from '../../utils/errors'
 import { bgColorHex, bgColorName } from '../../utils/format'
 import { PAGES, SPEC_PICKED_EVENT, buildUrl, navigate, redirect, toInt } from '../../utils/nav'
+import { getPhotoQualityFeedback } from '../../utils/photoQuality'
 import { pickAndCreatePhoto } from '../../utils/pickPhoto'
 import { saveRenderToAlbum } from '../../utils/saveImage'
 import './index.scss'
@@ -43,6 +44,7 @@ export default function Editor() {
   const [loadError, setLoadError] = useState('')
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [photo, setPhoto] = useState<PhotoDetail | null>(null)
+  const [qualityDismissed, setQualityDismissed] = useState(false)
   const [render, setRender] = useState<RenderOut | null>(null)
   const [rendering, setRendering] = useState(false)
   const [renderFailed, setRenderFailed] = useState(false)
@@ -255,9 +257,18 @@ export default function Editor() {
   const canSave = !blocked && !rendering && (
     paymentConfirmed || (previewReady && matchesAccess)
   )
+  const feedback = qualityDismissed ? null : getPhotoQualityFeedback(photo)
 
   return (
     <PageContainer withBottomBar>
+      {feedback?.level === 'warn' ? (
+        <View className='editor-quality'>
+          <Text>{feedback.messages[0] ?? '这张照片还有可调整的地方，拍摄时请正对镜头并保持光线均匀。'}</Text>
+          <Button className='editor-quality__close' ariaLabel='关闭拍照提示' onClick={() => setQualityDismissed(true)}>
+            关闭
+          </Button>
+        </View>
+      ) : null}
       <View className='editor-preview'>
         <PhotoFrame
           className='editor-preview__frame'

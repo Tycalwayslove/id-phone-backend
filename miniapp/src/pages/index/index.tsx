@@ -9,7 +9,6 @@ import PageContainer from '../../components/PageContainer'
 import PrivacyPopup from '../../components/PrivacyPopup'
 import PrivateDomainCard from '../../components/PrivateDomainCard'
 import SearchBox from '../../components/SearchBox'
-import ShootGuide from '../../components/ShootGuide'
 import SpecGroups from '../../components/SpecGroups'
 import SpecTile from '../../components/SpecTile'
 import useCity from '../../hooks/useCity'
@@ -126,7 +125,6 @@ export default function Index() {
           if (cityAction && cityAction !== 'change') void navigate(PAGES.specs, { keyword: cityAction.keyword })
         }}
       />
-      <ShootGuide open={shoot.guideOpen} spec={shoot.spec} onChoose={shoot.choose} onClose={shoot.close} />
       <PrivacyPopup page={PAGES.index} />
     </PageContainer>
   )
