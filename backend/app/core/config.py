@@ -64,6 +64,7 @@ class Settings(BaseSettings):
         default_factory=lambda data: "fake" if data["app_env"] == "test" else "local"
     )
     photo_models_dir: Path = Path(__file__).resolve().parents[2] / "models"
+    fine_matting_workers: int = Field(default=1, ge=1)
     matting_timeout_seconds: float = 5
     preview_spec_code: str = ""
 

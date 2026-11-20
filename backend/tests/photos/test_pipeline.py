@@ -1,5 +1,6 @@
 from dataclasses import replace
 from io import BytesIO
+from math import ceil
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -53,23 +54,29 @@ def test_face_crop_compensates_for_bottom_or_side_bounds(height, offset):
     assert top + cropped.height / scale <= original.height + 1e-6
 
 
-def test_face_crop_fades_unavoidable_bottom_padding_from_body_rows():
+def test_face_crop_fades_into_background_without_extending_last_row():
     original = Image.new("RGBA", (400, 350))
     draw = ImageDraw.Draw(original)
     draw.rectangle((80, 300, 319, 349), fill=(80, 120, 160, 204))
     draw.rectangle((125, 65, 275, 310), fill=(185, 135, 113, 255))
+    for x in range(80, 320):
+        draw.point((x, 349), fill=(80 + 18 * (x % 2), 120, 160, 204))
 
     cropped, face = crop_portrait(original, (350, 450), FACE)
     scale = face.height / FACE.height
     source_bottom = face.y + (original.height - FACE.y) * scale
-    seam = round(source_bottom)
-    pixels = np.asarray(cropped)
-    alpha = pixels[seam - 1 :, cropped.width // 2, 3].astype(int)
+    seam = ceil(source_bottom - 0.5)
+    start = seam - round(0.04 * cropped.height)
     assert 245 * scale / cropped.height == pytest.approx(0.70)
-    assert alpha[0] == 204 and alpha[1] >= 200 and alpha[-1] == 0
-    assert (np.diff(alpha) <= 0).all() and max(-np.diff(alpha)) < 10
-    assert pixels[seam + 10, cropped.width // 2, :3] == pytest.approx((80, 120, 160), abs=2)
-    assert not pixels[seam:, 0, 3].any()
+    alpha = np.asarray(cropped.getchannel("A"))
+    assert alpha[start - 1, cropped.width // 2] == 204
+    assert not alpha[seam - 1 :].any()
+    canvas = Image.new("RGB", cropped.size, (240, 240, 240))
+    canvas.paste(cropped, mask=cropped.getchannel("A"))
+    transition = np.asarray(canvas)[start - 1 :, 130:220].astype(int)
+    assert (np.diff(transition, axis=0) >= 0).all()
+    assert np.abs(np.diff(transition, axis=1)).max() <= 2
+    assert (transition[-1] == 240).all()
 
 
 def test_face_crop_keeps_transparent_padding_outside_original():

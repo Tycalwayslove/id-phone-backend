@@ -69,3 +69,4 @@
 | 0033 | [规格目录聚合与同步修复（T021）](0033-aggregated-catalog.md) | 已完成，待用户本机同步 |
 | 0034 | [小程序先选城市再选规格（T022）](0034-city-first.md) | 已完成，待真机验证 |
 | 0035 | [自建照片处理流水线（T024）](0035-in-house-photo-pipeline.md) | 已完成，待 PostgreSQL 和授权照片验证 |
+| 0036 | [精细抠图（T028）](0036-fine-matting.md) | 已完成，待 PostgreSQL 和小程序真机验证 |

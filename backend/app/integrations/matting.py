@@ -17,33 +17,51 @@ if TYPE_CHECKING:
 DEFAULT_TIMEOUT_SECONDS = 5.0
 BACKGROUND_TOLERANCE = 24
 MODNET_MODEL = "modnet_photographic_portrait_matting.onnx"
+BIREFNET_MODEL = "birefnet_general_swin_tiny.onnx"
+BIREFNET_SIZE = (1024, 1024)
+IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 MODEL_SHORT_SIDE = 512
 MODEL_MAX_SIDE = 1536
 MODEL_ALIGNMENT = 32
-_session_lock = Lock()
-_model_path: Path | None = None
-_session: InferenceSession | None = None
+_modnet_lock = Lock()
+_birefnet_lock = Lock()
+_sessions: dict[str, tuple[Path, InferenceSession]] = {}
 
 
-def _get_modnet_session() -> InferenceSession:
-    global _model_path, _session
-    path = settings.photo_models_dir / MODNET_MODEL
-    with _session_lock:
-        if _session is None or _model_path != path:
+def _get_session(model: str, lock: Lock) -> InferenceSession:
+    path = settings.photo_models_dir / model
+    with lock:
+        cached = _sessions.get(model)
+        if cached is None or cached[0] != path:
             if not path.is_file():
-                raise FileNotFoundError(
-                    f"缺少抠图模型 {MODNET_MODEL}，请在 backend 目录运行 uv run python -m scripts.download_models"
-                )
+                hint = "请检查 PHOTO_MODELS_DIR"
+                if model == MODNET_MODEL:
+                    hint = "请在 backend 目录运行 uv run python -m scripts.download_models"
+                raise FileNotFoundError(f"缺少抠图模型 {model}，{hint}")
             import onnxruntime as ort
 
             ort.disable_telemetry_events()
             options = ort.SessionOptions()
             options.intra_op_num_threads = 2
-            _session = ort.InferenceSession(
+            session = ort.InferenceSession(
                 str(path), sess_options=options, providers=["CPUExecutionProvider"]
             )
-            _model_path = path
-        return _session
+            cached = _sessions[model] = (path, session)
+        return cached[1]
+
+
+def _get_modnet_session() -> InferenceSession:
+    return _get_session(MODNET_MODEL, _modnet_lock)
+
+
+def _encode_matting(image: Image.Image, alpha: np.ndarray) -> bytes:
+    mask = Image.fromarray(np.round(np.clip(alpha, 0, 1) * 255).astype(np.uint8))
+    mask = mask.resize(image.size, Image.Resampling.BILINEAR)
+    image.putalpha(ImageChops.multiply(mask, image.getchannel("A")))
+    with io.BytesIO() as buf:
+        image.save(buf, format="PNG")
+        return buf.getvalue()
 
 
 class LocalMatting:
@@ -63,12 +81,26 @@ class LocalMatting:
             image = src.convert("RGBA")
         model_input = np.asarray(resized, dtype=np.float32) / 127.5 - 1
         alpha = session.run(None, {session.get_inputs()[0].name: model_input.transpose(2, 0, 1)[None]})[0]
-        mask = Image.fromarray(np.round(np.clip(alpha[0, 0], 0, 1) * 255).astype(np.uint8))
-        mask = mask.resize(image.size, Image.Resampling.BILINEAR)
-        image.putalpha(ImageChops.multiply(mask, image.getchannel("A")))
-        with io.BytesIO() as buf:
-            image.save(buf, format="PNG")
-            return buf.getvalue()
+        return _encode_matting(image, alpha[0, 0])
+
+
+class FineMatting:
+    """用 BiRefNet 在本机生成精细人像底片。"""
+
+    def matte(self, data: bytes) -> bytes:
+        session = _get_session(BIREFNET_MODEL, _birefnet_lock)
+        with Image.open(io.BytesIO(data)) as src:
+            ImageOps.exif_transpose(src, in_place=True)
+            resized = src.convert("RGB").resize(BIREFNET_SIZE, Image.Resampling.BILINEAR)
+            image = src.convert("RGBA")
+        rgb = np.asarray(resized, dtype=np.float32) / 255
+        normalized = (rgb - IMAGENET_MEAN) / IMAGENET_STD
+        model_input = np.ascontiguousarray(normalized.transpose(2, 0, 1)[None])
+        logits = session.run([session.get_outputs()[-1].name], {session.get_inputs()[0].name: model_input})[
+            0
+        ][0, 0]
+        alpha = 1 / (1 + np.exp(-np.clip(logits, -80, 80)))
+        return _encode_matting(image, alpha)
 
 
 class MattingClient(Protocol):

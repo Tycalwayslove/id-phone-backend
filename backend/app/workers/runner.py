@@ -42,6 +42,7 @@ def run_once(db: Session) -> None:
         orders.poll_pending_refunds,
         entitlements.create_expiration_reminders,
         purge_orphan_uploads,
+        photos.recover_fine_matting,
     ):
         try:
             task(db)

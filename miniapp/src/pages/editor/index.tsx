@@ -25,6 +25,8 @@ type PhotoDetail = components['schemas']['PhotoDetail']
 type RenderOut = components['schemas']['RenderOut']
 
 const WHITE = '#FFFFFF'
+const FINE_MATTING_POLL_INTERVAL = 3000
+const FINE_MATTING_POLL_TIMEOUT = 60000
 
 interface EditorSettings {
   spec: SpecDetail
@@ -47,7 +49,9 @@ export default function Editor() {
   const [qualityDismissed, setQualityDismissed] = useState(false)
   const [render, setRender] = useState<RenderOut | null>(null)
   const [rendering, setRendering] = useState(false)
+  const [quietRendering, setQuietRendering] = useState(false)
   const [renderFailed, setRenderFailed] = useState(false)
+  const [pollingMatting, setPollingMatting] = useState(false)
   const [saving, setSaving] = useState(false)
   const [comparing, setComparing] = useState(false)
   const [unlockOpen, setUnlockOpen] = useState(false)
@@ -68,13 +72,15 @@ export default function Editor() {
   const beauty = settings?.beauty ?? 0
   const active = photo?.access.active ?? false
   const originalUrl = photo?.original_url
+  const mattingLevel = photo?.matting_level
+  const fineMatting = mattingLevel === 'fine'
   // 仅限一种规格的权益会把第一张无水印成品锁定在该规格。
   const needsConfirmedSpec = !confirmed && active && !photo?.access.spec_change
   const request = useMemo(() => {
     if (!photoId || !specCode || needsConfirmedSpec) return null
     return { photoId, body: { spec_code: specCode, bg_color: bgColor, beauty_level: beauty } }
   }, [photoId, specCode, bgColor, beauty, needsConfirmedSpec])
-  const lastRequest = useRef<{ request: typeof request; active: boolean } | null>(null)
+  const lastRequest = useRef<{ request: typeof request; active: boolean; fine: boolean } | null>(null)
 
   const retake = useCallback(async () => {
     const replacement = await pickAndCreatePhoto('camera')
@@ -121,10 +127,34 @@ export default function Editor() {
   })
   useDidHide(() => setComparing(false))
 
-  const doRender = useCallback(async (expectedActive: boolean): Promise<RenderOut | null> => {
+  useEffect(() => {
+    if (!photoId || mattingLevel !== 'fast') return
+    let inFlight = false
+    setPollingMatting(true)
+    const interval = setInterval(() => {
+      if (inFlight) return
+      inFlight = true
+      void refreshPhoto()
+        .catch(() => undefined)
+        .finally(() => { inFlight = false })
+    }, FINE_MATTING_POLL_INTERVAL)
+    const timeout = setTimeout(() => {
+      clearInterval(interval)
+      setPollingMatting(false)
+    }, FINE_MATTING_POLL_TIMEOUT)
+    return () => {
+      clearInterval(interval)
+      clearTimeout(timeout)
+    }
+  }, [mattingLevel, photoId, refreshPhoto])
+
+  const doRender = useCallback(async (
+    expectedActive: boolean, fine: boolean, quiet = false,
+  ): Promise<RenderOut | null> => {
     if (!request) return null
-    lastRequest.current = { request, active: expectedActive }
+    lastRequest.current = { request, active: expectedActive, fine }
     const seq = ++renderSeq.current
+    setQuietRendering(quiet)
     setRendering(true)
     setRenderFailed(false)
     try {
@@ -134,9 +164,11 @@ export default function Editor() {
       return result
     } catch (e) {
       if (seq === renderSeq.current) {
-        setRender(null)
         setRenderFailed(true)
-        await handleError(e, { photoId: request.photoId, onRetake: retake })
+        if (!quiet) {
+          setRender(null)
+          await handleError(e, { photoId: request.photoId, onRetake: retake })
+        }
       }
       return null
     } finally {
@@ -145,10 +177,12 @@ export default function Editor() {
   }, [request, retake])
 
   useEffect(() => {
-    // 支付回调会直接生成可保存的图，权益状态更新时复用这次请求。
-    if (lastRequest.current?.request === request && lastRequest.current.active === active) return
-    void doRender(active)
-  }, [active, doRender, request])
+    if (savingRef.current) return
+    const previous = lastRequest.current
+    const sameSettings = previous !== null && previous.request === request && previous.active === active
+    if (sameSettings && previous.fine === fineMatting) return
+    void doRender(active, fineMatting, sameSettings && fineMatting)
+  }, [active, doRender, fineMatting, request, saving])
 
   useEffect(() => {
     // 审核通过后补取原图；看到无水印图时也同步可能已在别处获得的权益。
@@ -201,7 +235,7 @@ export default function Editor() {
     savingRef.current = true
     setSaving(true)
     try {
-      let result = render
+      let fine = fineMatting
       if (refreshAccess) {
         const updated = await refreshPhoto()
         if (!updated?.access.active) {
@@ -209,8 +243,10 @@ export default function Editor() {
           return
         }
         setPaymentConfirmed(false)
-        result = await doRender(true)
+        fine = updated.matting_level === 'fine'
       }
+      // 保存时请求当前底片，覆盖轮询间隔内刚完成的精细抠图。
+      const result = await doRender(true, fine)
       if (result?.watermarked === false) await saveRenderToAlbum(photoId, result.id)
       else if (result?.watermarked) {
         await Taro.showToast({ title: '高清照片还未生成，请重新生成', icon: 'none' })
@@ -218,8 +254,8 @@ export default function Editor() {
     } catch (e) {
       await handleError(e, { photoId, onRetake: retake })
     } finally {
-      setSaving(false)
       savingRef.current = false
+      setSaving(false)
     }
   }
 
@@ -254,7 +290,7 @@ export default function Editor() {
     render.bg_color === bgColor && render.beauty_level === beauty
   const matchesAccess = render?.watermarked === !active
   const blocked = unlockOpen || saving || pickerOpen || selectingSpec
-  const canSave = !blocked && !rendering && (
+  const canSave = !blocked && (!rendering || quietRendering) && (
     paymentConfirmed || (previewReady && matchesAccess)
   )
   const feedback = qualityDismissed ? null : getPhotoQualityFeedback(photo)
@@ -282,7 +318,7 @@ export default function Editor() {
           {previewUrl ? (
             <Image className='editor-preview__img' src={resolveUrl(previewUrl)} mode='aspectFit' />
           ) : null}
-          {rendering && !needsConfirmedSpec ? (
+          {rendering && (!quietRendering || !previewUrl) && !needsConfirmedSpec ? (
             <View className='editor-preview__mask'><Loading text='生成中…' /></View>
           ) : null}
           {compareReady && originalUrl ? (
@@ -293,6 +329,9 @@ export default function Editor() {
             />
           ) : null}
         </PhotoFrame>
+        {mattingLevel === 'fast' && pollingMatting ? (
+          <Text className='hint editor-preview__compare'>正在精细抠图，边缘会更干净</Text>
+        ) : null}
         {compareReady ? <Text className='hint editor-preview__compare'>按住照片对比原图</Text> : null}
         {confirmed ? (
           <View className='editor-preview__details'>
@@ -309,7 +348,7 @@ export default function Editor() {
         )}
         {settings.adjustments.map((message) => <Text className='hint editor-preview__notice' key={message}>{message}</Text>)}
         {!needsConfirmedSpec && (renderFailed || (render && !matchesAccess)) && !rendering ? (
-          <Button className='btn-native btn-native--plain' disabled={blocked} onClick={() => void doRender(active)}>
+          <Button className='btn-native btn-native--plain' disabled={blocked} onClick={() => void doRender(active, fineMatting)}>
             重新生成
           </Button>
         ) : null}

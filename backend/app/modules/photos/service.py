@@ -10,18 +10,21 @@ import json
 import logging
 import uuid
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+from threading import BoundedSemaphore
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.colors import normalize_bg_color, require_bg_color
 from app.core.config import settings
+from app.core.db import SessionLocal
 from app.core.errors import AppError, ErrorCode
 from app.core.pagination import PageParams
 from app.core.utils import utcnow
 from app.integrations import wechat
-from app.integrations.matting import get_matting
+from app.integrations.matting import BIREFNET_MODEL, FineMatting, get_matting
 from app.integrations.storage import build_key, get_storage
 from app.models import File, Photo, PhotoRender, Spec
 from app.modules.photos import imaging, repo
@@ -45,10 +48,17 @@ from app.modules.specs import service as spec_service
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 DOWNLOAD_URL_SECONDS = 600
 MEDIA_CHECK_URL_SECONDS = 30 * 60
-RENDER_PIPELINE_VERSION = "2"
+RENDER_PIPELINE_VERSION = "3"
+FINE_MATTING_RETRY_AGE = timedelta(minutes=2)
 # 没有绑定照片的上传文件放在这个目录下（文件 ID 还没有照片 ID 可用）
 UPLOAD_OWNER = "uploads"
 log = logging.getLogger(__name__)
+_fine_matting_pool = ThreadPoolExecutor(
+    max_workers=settings.fine_matting_workers, thread_name_prefix="fine-matting"
+)
+# 每个工作线程对应一个额外等待位。满时由 worker 补做。
+_fine_matting_capacity = settings.fine_matting_workers * 2
+_fine_matting_slots = BoundedSemaphore(_fine_matting_capacity)
 
 
 # ---------- 跨模块函数（见 modules/CONTRACTS.md） ----------
@@ -145,8 +155,9 @@ def render(
     _require_passed_check(photo)
     bg_color = require_bg_color(bg_color)
     points = sorted({(x + 0.0, y + 0.0) for x, y in blemishes})
-    # 旧成品仍可下载。新导出使用新流水线，按实际点位去重。
-    variant_key = RENDER_PIPELINE_VERSION
+    # 保留旧成品，按本次读取的底片和实际点位复用导出图。
+    base_id = photo.matting_file_id or photo.original_file_id
+    variant_key = f"{RENDER_PIPELINE_VERSION}:{base_id}"
     if points:
         variant_key += ":" + hashlib.sha256(json.dumps(points, separators=(",", ":")).encode()).hexdigest()
     variant = dict(
@@ -160,8 +171,6 @@ def render(
     if existing is not None:
         return existing
 
-    # 底片：有抠图用抠图，否则用原图
-    base_id = photo.matting_file_id or photo.original_file_id
     files = repo.get_files(db, user_id, {base_id, photo.original_file_id})
     base = files.get(base_id)
     if base is None or base.status != "active":
@@ -251,9 +260,10 @@ def purge_orphan_uploads(db: Session, older_than: datetime) -> int:
 
 def purge_all_for_user(db: Session, user_id: int) -> int:
     """注销账号用：删除该用户全部存储文件，files 和 photos 标记 purged。返回删除的文件数。不 commit。"""
+    photos = repo.lock_live_photos_of_user(db, user_id)
     files = repo.active_files_of_user(db, user_id)
     _purge_files(db, files)
-    for p in repo.live_photos_of_user(db, user_id):
+    for p in photos:
         p.status = "purged"
     db.flush()
     return len(files)
@@ -277,6 +287,7 @@ def _photo_out(photo: Photo, original: File, access: AccessOut) -> PhotoOut:
         created_at=photo.created_at,
         original_url=file_url(original) if _check_status(photo) == "passed" else "",
         access=access,
+        matting_level=photo.matting_level,
         quality=photo.quality,
     )
 
@@ -382,6 +393,84 @@ def _attach_matting(db: Session, photo: Photo, original_data: bytes) -> None:
         log.warning("抠图文件保存失败，使用原图")
 
 
+def _process_fine_matting(db: Session, photo_id: int) -> None:
+    if not repo.try_lock_fine_matting(db, photo_id):
+        return
+    photo = repo.get_pending_fine_matting(db, photo_id)
+    if photo is None:
+        return
+
+    storage = get_storage()
+    original = repo.get_files(db, photo.user_id, [photo.original_file_id]).get(photo.original_file_id)
+    data = None
+    try:
+        if original is None or original.status != "active":
+            raise FileNotFoundError
+        data = FineMatting().matte(storage.get(original.storage_key))
+    except FileNotFoundError:
+        log.warning("精细抠图缺少原图或模型 %s photo_id=%s", BIREFNET_MODEL, photo_id)
+    except Exception as exc:
+        log.warning("精细抠图失败 photo_id=%s err=%s", photo_id, type(exc).__name__)
+
+    # 推理期间照片可能已删除。锁定最新记录后才写入底片。
+    photo = repo.get_pending_fine_matting(db, photo_id, lock=True)
+    if photo is None:
+        return
+    matting = None
+    if data is not None:
+        try:
+            with db.begin_nested():
+                matting = save_file(
+                    db,
+                    user_id=photo.user_id,
+                    kind="matting",
+                    data=data,
+                    mime="image/png",
+                    ext="png",
+                    owner=f"p{photo.id}",
+                )
+        except OSError:
+            log.warning("精细底片保存失败 photo_id=%s", photo_id)
+    if matting is not None:
+        photo.previous_matting_file_id = photo.matting_file_id
+        photo.matting_file_id = matting.id
+    photo.matting_level = "fine" if matting is not None else "failed"
+    photo.fine_matting_requested_at = None
+    db.commit()
+
+
+def _run_fine_matting(photo_id: int) -> None:
+    try:
+        with SessionLocal() as db:
+            _process_fine_matting(db, photo_id)
+    except Exception as exc:
+        log.error("精细抠图任务异常 photo_id=%s err=%s", photo_id, type(exc).__name__)
+
+
+def _queue_fine_matting(photo_id: int) -> bool:
+    if not _fine_matting_slots.acquire(blocking=False):
+        return False
+    try:
+        future = _fine_matting_pool.submit(_run_fine_matting, photo_id)
+    except RuntimeError:
+        _fine_matting_slots.release()
+        log.warning("精细抠图线程池不可用 photo_id=%s", photo_id)
+        return False
+    future.add_done_callback(lambda _: _fine_matting_slots.release())
+    return True
+
+
+def recover_fine_matting(db: Session) -> None:
+    """把超时的待处理照片重新放入当前进程的有界线程池。"""
+    if settings.matting_mode != "local":
+        return
+    photo_ids = repo.pending_fine_matting_ids(db, utcnow() - FINE_MATTING_RETRY_AGE, _fine_matting_capacity)
+    db.commit()
+    for photo_id in photo_ids:
+        if not _queue_fine_matting(photo_id):
+            break
+
+
 def create_photo(db: Session, *, user_id: int, body: PhotoCreate, open_id: str | None = None) -> PhotoOut:
     original = repo.get_unused_upload(db, user_id, body.file_id)
     if original is None:
@@ -415,10 +504,15 @@ def create_photo(db: Session, *, user_id: int, body: PhotoCreate, open_id: str |
     _attach_matting(db, photo, original_data)
     photo.source = body.source
     photo.status = "active"
+    if settings.matting_mode == "local":
+        photo.matting_level = "fast"
+        photo.fine_matting_requested_at = utcnow()
     db.flush()
     db.refresh(photo)
     out = _photo_out(photo, original, _access_out(db, user_id, photo.id))
     db.commit()
+    if out.matting_level == "fast":
+        _queue_fine_matting(out.id)
     return out
 
 
@@ -529,7 +623,9 @@ def render_download(db: Session, *, user_id: int, photo_id: int, render_id: int)
 
 
 def delete_photo(db: Session, *, user_id: int, photo_id: int) -> None:
-    photo = get_photo_for_user(db, user_id, photo_id)
+    photo = repo.get_photo(db, user_id, photo_id, lock=True)
+    if photo is None:
+        raise AppError(ErrorCode.PHOTO_NOT_FOUND)
     _purge_files(db, repo.active_files_of_photo(db, user_id, photo))
     photo.status = "purged"
     db.commit()

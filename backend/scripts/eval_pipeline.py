@@ -1,13 +1,14 @@
 """用授权照片对比不同档位。默认只读取规格并在本机生成报告。
 
 在 backend 目录运行：
-    uv run python -m scripts.eval_pipeline --input eval/input --spec gd_idcard --beauty 0,2,4
+    uv run python -m scripts.eval_pipeline --input eval/input --spec gd_idcard --beauty 0,2,4 --matting both
     uv run python -m scripts.eval_pipeline --spec gd_idcard --check
 只有同时传入 --check 和 --yes 才会把成品发送给鹧应检测。
 """
 
 import argparse
 import base64
+import json
 import shutil
 from collections import Counter
 from dataclasses import dataclass
@@ -22,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.db import engine
-from app.integrations.matting import LocalMatting
+from app.integrations.matting import FineMatting, LocalMatting
 from app.models import Provider, ProviderSpec, Spec
 from app.modules.photos import imaging
 from app.modules.photos.pipeline.face import detect_faces
@@ -30,20 +31,38 @@ from app.modules.photos.pipeline.quality import assess_quality
 
 EVAL_DIR = Path(__file__).resolve().parents[1] / "eval"
 CHECK_PRICE = Decimal("0.012")
+MATTING_LABELS = {"fast": "MODNet 快速抠图", "fine": "BiRefNet 精细抠图"}
+type VariantKey = tuple[str, str, int]
 
 
 @dataclass(frozen=True)
 class CheckResult:
     title: str
     passed: bool | None = None
-    issues: tuple[tuple[str, str], ...] = ()
+    passed_list: tuple[dict, ...] = ()
 
     def to_html(self) -> str:
         title = escape(self.title)
-        if not self.issues:
+        if not self.passed_list:
             return title
-        items = "".join(f"<li><code>{escape(key)}</code> {escape(msg)}</li>" for key, msg in self.issues)
-        return f"{title}<ul>{items}</ul>"
+        items = []
+        for item in self.passed_list:
+            key = escape(str(item.get("key", "")))
+            msg = escape(str(item.get("msg", "") or ""))
+            match item.get("passed"):
+                case 1 | "1":
+                    status = "通过"
+                case 0 | "0":
+                    status = "未通过"
+                case _:
+                    status = "未知"
+            # 保留服务商返回的原始明细结构，包括实测值、单位和附加字段。
+            detail = {k: v for k, v in item.items() if k not in ("key", "passed", "msg")}
+            measurement = escape(json.dumps(detail, ensure_ascii=False)) if detail else "—"
+            items.append(
+                f"<li><code>{key}</code> · {status} {msg}<br>实测明细 <code>{measurement}</code></li>"
+            )
+        return f"{title}<ul>{''.join(items)}</ul>"
 
 
 def _beauty_levels(value: str) -> list[int]:
@@ -118,18 +137,14 @@ def _check(client: httpx.Client, data: bytes, item_id: str) -> CheckResult:
     if payload.get("code") != 0:
         return CheckResult(f"检测接口返回错误（{payload.get('code', '未知')}）")
     result = payload.get("data")
-    if not isinstance(result, dict) or result.get("passed_status") not in (0, 1):
+    if not isinstance(result, dict):
         return CheckResult("检测响应缺少有效结果")
     checks = result.get("passed_list")
-    if not isinstance(checks, list):
-        checks = []
-    issues = tuple(
-        (str(item.get("key", "")), str(item.get("msg", "")))
-        for item in checks
-        if isinstance(item, dict) and item.get("passed") in (0, "0")
-    )
+    passed_list = tuple(item for item in checks if isinstance(item, dict)) if isinstance(checks, list) else ()
+    if result.get("passed_status") not in (0, 1):
+        return CheckResult("检测响应缺少有效结果", passed_list=passed_list)
     passed = result["passed_status"] == 1
-    return CheckResult("通过" if passed else "未通过", passed, issues)
+    return CheckResult("通过" if passed else "未通过", passed, passed_list)
 
 
 def _tile(path: str, label: str, result: CheckResult | None = None) -> str:
@@ -143,16 +158,19 @@ def _tile(path: str, label: str, result: CheckResult | None = None) -> str:
 def _write_report(
     output: Path,
     sections: list[str],
-    totals: Counter[tuple[str, int]],
-    passes: Counter[tuple[str, int]],
+    totals: Counter[VariantKey],
+    passes: Counter[VariantKey],
+    covered_checks: set[str],
     notice: str,
 ) -> None:
     summary = "".join(
-        f"<li>{escape(code)} · 档位 {level} · {passes[code, level]}/{total} "
-        f"（{passes[code, level] / total:.1%}）</li>"
-        for (code, level), total in totals.items()
+        f"<li>{escape(code)} · {MATTING_LABELS[mode]} · 档位 {level} · {passes[mode, code, level]}/{total} "
+        f"（{passes[mode, code, level] / total:.1%}）</li>"
+        for (mode, code, level), total in totals.items()
     )
     summary_section = f"<h2>过检率</h2><ul>{summary}</ul>" if summary else ""
+    checked_items = "、".join(f"<code>{escape(key)}</code>" for key in sorted(covered_checks))
+    coverage = f"<h2>本次检测覆盖的检查项</h2><p>{checked_items or '无检测明细'}</p>"
     (output / "report.html").write_text(
         '<!doctype html><html lang="zh-CN"><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
@@ -164,7 +182,7 @@ def _write_report(
         "background:repeating-conic-gradient(#ddd 0% 25%,white 0% 50%) 0 0/16px 16px}"
         "figcaption ul{padding-inline-start:1.2rem;overflow-wrap:anywhere}"
         "</style><main><h1>照片处理评估</h1>"
-        f"<p>{escape(notice)}</p>{summary_section}{''.join(sections)}</main></html>",
+        f"<p>{escape(notice)}</p>{coverage}{summary_section}{''.join(sections)}</main></html>",
         encoding="utf-8",
     )
 
@@ -175,48 +193,56 @@ def _evaluate(
     items: dict[str, str],
     client: httpx.Client | None,
     notice: str,
+    modes: tuple[str, ...],
 ) -> Path:
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S_%fZ")
     output = EVAL_DIR / "output" / timestamp
     output.mkdir(parents=True, mode=0o700)
-    matting = LocalMatting()
+    models = {"fast": LocalMatting(), "fine": FineMatting()}
     sections = []
-    totals: Counter[tuple[str, int]] = Counter()
-    passes: Counter[tuple[str, int]] = Counter()
+    totals: Counter[VariantKey] = Counter()
+    passes: Counter[VariantKey] = Counter()
+    covered_checks: set[str] = set()
     for index, (path, ext) in enumerate(inputs, start=1):
         folder = output / f"{index:03d}"
         folder.mkdir()
         original_name = f"original.{ext}"
         shutil.copyfile(path, folder / original_name)
         original = (folder / original_name).read_bytes()
-        image = imaging.decode_photo(original)
-        faces = detect_faces(image)
-        quality = assess_quality(image, faces)
+        with imaging.decode_photo(original) as image:
+            faces = detect_faces(image)
+            quality = assess_quality(image, faces)
         face = faces[0] if faces else None
-        matte = matting.matte(original)
-        (folder / "matting.png").write_bytes(matte)
-        tiles = [_tile(f"{folder.name}/{original_name}", "原图"), _tile(f"{folder.name}/matting.png", "抠图")]
-        for variant_index, (spec, level) in enumerate(variants, start=1):
-            data = imaging.make_render(
-                matte,
-                width_px=spec.width_px,
-                height_px=spec.height_px,
-                bg_color=(spec.bg_colors or ["#FFFFFF"])[0],
-                dpi=spec.dpi,
-                max_kb=spec.file_size_max_kb,
-                watermarked=False,
-                beauty_level=level,
-                face=face,
-            )
-            name = f"render-{variant_index:03d}.jpg"
-            (folder / name).write_bytes(data)
-            result = (
-                _check(client, data, items[spec.code]) if client is not None and spec.code in items else None
-            )
-            if result is not None and result.passed is not None:
-                totals[spec.code, level] += 1
-                passes[spec.code, level] += result.passed
-            tiles.append(_tile(f"{folder.name}/{name}", f"{spec.code} · 档位 {level}", result))
+        tiles = [_tile(f"{folder.name}/{original_name}", "原图")]
+        for mode in modes:
+            label = MATTING_LABELS[mode]
+            suffix = "-fine" if mode == "fine" else ""
+            matte = models[mode].matte(original)
+            matting_name = f"matting{suffix}.png"
+            (folder / matting_name).write_bytes(matte)
+            tiles.append(_tile(f"{folder.name}/{matting_name}", label))
+            for variant_index, (spec, level) in enumerate(variants, start=1):
+                data = imaging.make_render(
+                    matte,
+                    width_px=spec.width_px,
+                    height_px=spec.height_px,
+                    bg_color=(spec.bg_colors or ["#FFFFFF"])[0],
+                    dpi=spec.dpi,
+                    max_kb=spec.file_size_max_kb,
+                    watermarked=False,
+                    beauty_level=level,
+                    face=face,
+                )
+                name = f"render{suffix}-{variant_index:03d}.jpg"
+                (folder / name).write_bytes(data)
+                result = None
+                if client is not None and spec.code in items:
+                    result = _check(client, data, items[spec.code])
+                    covered_checks.update(str(item["key"]) for item in result.passed_list if item.get("key"))
+                    if result.passed is not None:
+                        totals[mode, spec.code, level] += 1
+                        passes[mode, spec.code, level] += result.passed
+                tiles.append(_tile(f"{folder.name}/{name}", f"{label} · {spec.code} · 档位 {level}", result))
         hints = "；".join(issue.message for issue in quality.issues)
         level_label = {"ok": "合格", "warn": "有建议", "fail": "建议重拍"}[quality.level]
         sections.append(
@@ -224,7 +250,7 @@ def _evaluate(
             f"<p>拍后检测 · {level_label} {escape(hints)}</p>"
             f'<div class="images">{"".join(tiles)}</div></section>'
         )
-    _write_report(output, sections, totals, passes, notice)
+    _write_report(output, sections, totals, passes, covered_checks, notice)
     return output / "report.html"
 
 
@@ -233,6 +259,7 @@ def main() -> None:
     parser.add_argument("--input", type=Path, default=EVAL_DIR / "input", help="待评估 JPEG / PNG 的目录")
     parser.add_argument("--spec", nargs="+", action="extend", required=True, help="规格编码，可传多个")
     parser.add_argument("--beauty", type=_beauty_levels, default="0,2,4", help="以逗号分隔的美颜档位")
+    parser.add_argument("--matting", choices=("fast", "fine", "both"), default="fast", help="选择抠图模型")
     parser.add_argument("--check", action="store_true", help="预估鹧应检测次数和费用")
     parser.add_argument("--yes", action="store_true", help="与 --check 一起使用，确认发起付费检测")
     args = parser.parse_args()
@@ -247,7 +274,8 @@ def main() -> None:
             f"{spec.code} 档位 {level}" for spec in specs for level in args.beauty if level > spec.beauty_max
         ]
         notice = f"已跳过超过规格上限的档位：{'、'.join(skipped)}。" if skipped else ""
-        count = len(inputs) * sum(spec.code in items for spec, _ in variants)
+        modes = ("fast", "fine") if args.matting == "both" else (args.matting,)
+        count = len(inputs) * len(modes) * sum(spec.code in items for spec, _ in variants)
         if args.check:
             print(f"将调用 {count} 次，预计 {count * CHECK_PRICE:.3f} 元", flush=True)
             unmapped = sorted({spec.code for spec, _ in variants if spec.code not in items})
@@ -257,11 +285,11 @@ def main() -> None:
             if not settings.zheying_app_key:
                 raise ValueError("请配置 ZHEYING_APP_KEY")
             with httpx.Client(timeout=15, follow_redirects=False) as client:
-                report = _evaluate(inputs, variants, items, client, notice or "已启用鹧应检测。")
+                report = _evaluate(inputs, variants, items, client, notice + "已启用鹧应检测。", modes)
         else:
             if args.check and not args.yes:
                 print("本次仅预估费用。增加 --yes 后才会发起检测。")
-            report = _evaluate(inputs, variants, items, None, notice + "本次未发起付费检测。")
+            report = _evaluate(inputs, variants, items, None, notice + "本次未发起付费检测。", modes)
     except (ValueError, FileNotFoundError) as exc:
         parser.exit(1, f"{exc}\n")
     print(f"报告已生成：{report}")

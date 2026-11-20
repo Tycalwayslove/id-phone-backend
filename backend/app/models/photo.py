@@ -30,6 +30,7 @@ FILE_KINDS = ("original", "matting", "preview", "render", "receipt")
 FILE_STATUSES = ("active", "purged")
 PHOTO_SOURCES = ("camera", "upload")
 PHOTO_STATUSES = ("draft", "active", "expired", "purged")
+MATTING_LEVELS = ("fast", "fine", "failed")
 
 
 class File(TimestampMixin, Base):
@@ -63,7 +64,14 @@ class Photo(TimestampMixin, Base):
     __table_args__ = (
         check_in("source", PHOTO_SOURCES, "source_valid"),
         check_in("status", PHOTO_STATUSES, "status_valid"),
+        check_in("matting_level", MATTING_LEVELS, "matting_level_valid"),
         Index("ix_photos_user_created", "user_id", "created_at"),
+        Index(
+            "ix_photos_fine_matting_pending",
+            "fine_matting_requested_at",
+            "id",
+            postgresql_where=text("matting_level = 'fast' AND status IN ('active', 'expired')"),
+        ),
         Index(
             "ix_photos_retain_until_live",
             "retain_until",
@@ -80,6 +88,12 @@ class Photo(TimestampMixin, Base):
     matting_file_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("files.id", ondelete="SET NULL"), unique=True
     )
+    # 更新底片后保留旧底片的归属，供正在导出和删除照片时使用。
+    previous_matting_file_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("files.id", ondelete="SET NULL"), index=True
+    )
+    matting_level: Mapped[str | None] = mapped_column(Text)
+    fine_matting_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     beauty_params: Mapped[dict] = mapped_column(JSONB, server_default="{}")
     check_result: Mapped[dict | None] = mapped_column(JSONB)
     quality: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True))
@@ -116,7 +130,7 @@ class PhotoRender(TimestampMixin, Base):
     bg_color: Mapped[str] = mapped_column(Text)
     beauty_level: Mapped[int] = mapped_column(SmallInteger, server_default="0")
     watermarked: Mapped[bool] = mapped_column(Boolean)
-    # 空串保留给旧导出图。新变体标识记录流水线版本和点位摘要。
+    # 新变体标识记录流水线版本、底片文件 ID 和点位摘要。
     variant_key: Mapped[str] = mapped_column(Text, server_default="")
 
 

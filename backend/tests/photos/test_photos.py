@@ -123,6 +123,7 @@ def test_upload_create_list(client, db, alice, monkeypatch):
     assert r.status_code == 200, r.text
     photo = r.json()
     assert photo["source"] == "camera" and photo["status"] == "active"
+    assert photo["matting_level"] is None
     assert photo["access"]["active"] is False
     assert photo["quality"]["level"] == "fail"
     assert [issue["code"] for issue in photo["quality"]["issues"]] == ["no_face"]
@@ -187,6 +188,73 @@ def test_blemish_points_distinguish_render_variants(client, db, alice):
     assert render([b, a, b]) == edited
     assert render([a]) not in (plain, edited)
     assert render([]) == plain
+
+
+@pytest.mark.parametrize("fine_succeeds", [True, False])
+def test_fine_matting_updates_status_and_export_cache(
+    client, db, alice, monkeypatch, tmp_path, caplog, fine_succeeds
+):
+    spec = make_spec(db, "ph_fine")
+    monkeypatch.setattr(settings, "matting_mode", "local")
+    monkeypatch.setattr(settings, "photo_models_dir", tmp_path)
+    monkeypatch.setattr(photo_service.face_detection, "detect_faces", lambda _image: [])
+    monkeypatch.setattr(
+        photo_service, "get_matting", lambda: SimpleNamespace(matte=lambda _: png_rgba_bytes())
+    )
+    queued = []
+
+    def queue(photo_id):
+        assert not db.in_transaction()
+        queued.append(photo_id)
+        return True
+
+    monkeypatch.setattr(photo_service, "_queue_fine_matting", queue)
+    file_id = upload(client, alice).json()["file_id"]
+    created = client.post("/api/v1/photos", json={"file_id": file_id, "source": "upload"}, headers=alice)
+    assert created.status_code == 200, created.text
+    photo_id = created.json()["id"]
+    assert created.json()["matting_level"] == "fast"
+    assert queued == [photo_id]
+    photo = db.get(Photo, photo_id)
+    fast_id = photo.matting_file_id
+
+    path = f"/api/v1/photos/{photo_id}"
+
+    def render():
+        response = client.post(f"{path}/renders", json={"spec_code": spec.code}, headers=alice)
+        assert response.status_code == 200, response.text
+        return response.json()["id"]
+
+    fast_render = render()
+    assert render() == fast_render
+    photo_service.recover_fine_matting(db)
+    assert queued == [photo_id]
+    photo.fine_matting_requested_at = utcnow() - timedelta(minutes=3)
+    db.commit()
+    photo_service.recover_fine_matting(db)
+    assert queued == [photo_id, photo_id]
+
+    if fine_succeeds:
+        fine = png_rgba_bytes(400, 500)
+        monkeypatch.setattr(photo_service.FineMatting, "matte", lambda self, data: fine)
+    photo_service._process_fine_matting(db, photo_id)
+    detail = client.get(path, headers=alice).json()
+    assert detail["matting_level"] == ("fine" if fine_succeeds else "failed")
+    assert photo.fine_matting_requested_at is None
+    if fine_succeeds:
+        assert photo.matting_file_id != fast_id and photo.previous_matting_file_id == fast_id
+        fine_file = db.get(File, photo.matting_file_id)
+        assert get_storage().get(fine_file.storage_key) == fine
+        fine_render = render()
+        assert fine_render != fast_render
+        assert render() == fine_render
+        photo_service._process_fine_matting(db, photo_id)
+        assert photo.matting_file_id == fine_file.id
+        assert client.delete(path, headers=alice).status_code == 200
+        assert db.get(File, fast_id).status == fine_file.status == "purged"
+    else:
+        assert photo.matting_file_id == fast_id and render() == fast_render
+        assert "birefnet_general_swin_tiny.onnx" in caplog.text
 
 
 @pytest.mark.parametrize("error", [TimeoutError, RuntimeError])

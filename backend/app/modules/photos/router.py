@@ -96,7 +96,8 @@ async def upload(request: Request, me: Me, db: DB):
     description=(
         "用已上传的原图创建一张照片（底片）。需要登录。file_id 必须是本人上传、"
         "还没被其他照片使用的原图，否则返回 UPLOAD_NOT_FOUND。抠图处理失败时使用原图。"
-        "服务器缺少本地模型时返回 PROVIDER_UNAVAILABLE。"
+        "缺少本地快速抠图或人脸检测模型时返回 PROVIDER_UNAVAILABLE。"
+        "本地抠图模式下先返回快速底片状态，精细底片就绪后可通过照片详情查询。"
         "返回拍后快速检测结果，供用户决定是否重拍。图片内容检测通过后可导出，未付费时提供带水印的预览。"
     ),
     response_model=PhotoOut,
@@ -147,7 +148,8 @@ def photo_detail(photo_id: PhotoId, me: Me, db: DB):
         "权益有效时生成无水印的正式图，但如果权益不允许换规格，且这张照片已有其他规格的无水印图，"
         "返回 SPEC_CHANGE_NOT_ALLOWED。bg_color 必须在规格的可选底色里，beauty_level 不能超过规格的 beauty_max，"
         "不符合时返回 VALIDATION_ERROR。始终自动校正人像光影，可用 blemishes 指定最多 10 个祛痘位置。"
-        "位置以成品图左上角为原点，横纵坐标都在 0～1 内。规格、底色、档位、水印和祛痘位置相同时复用已有的图。"
+        "位置以成品图左上角为原点，横纵坐标都在 0～1 内。"
+        "底片、规格、底色、档位、水印和祛痘位置相同时复用已有的图。"
     ),
     response_model=RenderOut,
     response_description="生成（或复用）的导出图",
