@@ -4,11 +4,13 @@ from collections.abc import Iterable
 from datetime import datetime
 
 from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import (
     Entitlement,
     File,
+    IdempotencyKey,
     Provider,
     ProviderCallback,
     ProviderSpec,
@@ -20,6 +22,9 @@ from app.models import (
 
 POLLABLE_STATUSES = ("submitted", "unknown", "processing")
 REFUND_CANCELLABLE_STATUSES = ("pending", "processing", "rejected")
+CALLBACK_NONCE_HASH = "callback_nonce_sha256"
+MANUAL_REVIEW_REQUIRED = "manual_review_required"
+RECEIPT_IMAGE_URL = "receipt_image_url_enc"
 
 
 # ---------- C 端（带用户） ----------
@@ -136,8 +141,51 @@ def get_attempt_by_order(db: Session, provider_id: int, provider_order_no: str) 
     )
 
 
+def find_attempt_by_nonce(db: Session, provider_id: int, digest: str) -> int | None:
+    return db.scalar(
+        select(ReceiptAttempt.id).where(
+            ReceiptAttempt.provider_id == provider_id,
+            ReceiptAttempt.request_payload[CALLBACK_NONCE_HASH].astext == digest,
+        )
+    )
+
+
+def bind_provider_order(db: Session, attempt: ReceiptAttempt, order_no: str) -> bool:
+    """用已有唯一约束处理同一服务商单号的并发绑定。"""
+    try:
+        with db.begin_nested():
+            attempt.provider_order_no = order_no
+            db.flush()
+    except IntegrityError as exc:
+        if (
+            getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
+            != "uq_receipt_attempts_provider_order"
+        ):
+            raise
+        return False
+    return True
+
+
+def save_submit_response(db: Session, user_id: int, scope: str, key: str, response: dict) -> None:
+    db.execute(
+        update(IdempotencyKey)
+        .where(IdempotencyKey.user_id == user_id, IdempotencyKey.scope == scope, IdempotencyKey.key == key)
+        .values(response_body=response)
+    )
+
+
 def get_callback_by_dedupe(db: Session, dedupe_key: str) -> ProviderCallback | None:
     return db.scalar(select(ProviderCallback).where(ProviderCallback.dedupe_key == dedupe_key))
+
+
+def get_receipt_image_event(db: Session, attempt: ReceiptAttempt) -> ProviderCallback | None:
+    return db.scalar(
+        select(ProviderCallback).where(
+            ProviderCallback.attempt_id == attempt.id,
+            ProviderCallback.event_status == "3",
+            ProviderCallback.process_result == "applied",
+        )
+    )
 
 
 def due_attempt_ids(db: Session, now: datetime, limit: int) -> list[int]:
@@ -147,9 +195,18 @@ def due_attempt_ids(db: Session, now: datetime, limit: int) -> list[int]:
             .join(ReceiptApplication, ReceiptApplication.id == ReceiptAttempt.application_id)
             .where(
                 ReceiptAttempt.is_current.is_(True),
-                ReceiptAttempt.status.in_(POLLABLE_STATUSES),
                 ReceiptAttempt.next_poll_at <= now,
-                ReceiptApplication.status.in_(("pending", "processing")),
+                or_(
+                    and_(
+                        ReceiptAttempt.status.in_(POLLABLE_STATUSES),
+                        ReceiptApplication.status.in_(("pending", "processing")),
+                    ),
+                    and_(
+                        ReceiptAttempt.status == "completed",
+                        ReceiptApplication.status == "completed",
+                        ReceiptApplication.receipt_file_id.is_(None),
+                    ),
+                ),
             )
             .order_by(ReceiptAttempt.next_poll_at)
             .limit(limit)
@@ -157,11 +214,21 @@ def due_attempt_ids(db: Session, now: datetime, limit: int) -> list[int]:
     )
 
 
-def get_attempt(db: Session, attempt_id: int, *, for_update: bool = False) -> ReceiptAttempt | None:
-    stmt = select(ReceiptAttempt).where(ReceiptAttempt.id == attempt_id)
-    if for_update:
-        stmt = stmt.with_for_update(skip_locked=True)
-    return db.scalar(stmt)
+def lock_attempt(
+    db: Session, attempt_id: int, *, skip_locked: bool = False
+) -> tuple[ReceiptApplication, ReceiptAttempt] | None:
+    """先锁申请，再读提交，以便与重提、退款、回调和轮询串行。"""
+    app = db.scalar(
+        select(ReceiptApplication)
+        .join(ReceiptAttempt, ReceiptAttempt.application_id == ReceiptApplication.id)
+        .where(ReceiptAttempt.id == attempt_id)
+        .with_for_update(of=ReceiptApplication, skip_locked=skip_locked)
+        .execution_options(populate_existing=True)
+    )
+    if app is None:
+        return None
+    attempt = db.get(ReceiptAttempt, attempt_id, populate_existing=True)
+    return (app, attempt) if attempt is not None else None
 
 
 # ---------- 批量取关联数据（拼装返回用，避免逐条查询） ----------

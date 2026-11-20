@@ -1,6 +1,7 @@
+import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Path, Request
+from fastapi import APIRouter, Body, Path, Query, Request
 from starlette.concurrency import run_in_threadpool
 
 from app.core.deps import DB, IdempotencyKeyHeader, Me, Page
@@ -11,6 +12,7 @@ from app.modules.receipts.schemas import (
     ApplicationOut,
     ApplicationPage,
     ReceiptCreate,
+    ReceiptProviderAck,
     ResubmitRequest,
     SimulateRequest,
 )
@@ -20,6 +22,21 @@ callback_router = APIRouter(tags=["回调"])
 dev_router = APIRouter(tags=["联调"])
 
 _AUTH = (ErrorCode.AUTH_REQUIRED, ErrorCode.AUTH_INVALID, ErrorCode.ACCOUNT_DISABLED)
+
+
+class _ReceiptAccessLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Uvicorn 访问日志第 3 个参数为路径及查询串。
+        args = record.args
+        if isinstance(args, tuple) and len(args) == 5 and isinstance(args[2], str):
+            path = args[2].partition("?")[0]
+            if path.startswith("/api/v1/callbacks/receipt/"):
+                record.args = (*args[:2], path, *args[3:])
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_ReceiptAccessLogFilter())
+
 
 AppNo = Annotated[
     str,
@@ -53,6 +70,7 @@ AppNo = Annotated[
         ErrorCode.PHOTO_ACCESS_EXPIRED,
         ErrorCode.PHOTO_NOT_READY,
         ErrorCode.RECEIPT_NOT_SUPPORTED,
+        ErrorCode.PROVIDER_UNAVAILABLE,
         ErrorCode.ENTITLEMENT_EXPIRED,
         ErrorCode.QUOTA_EXHAUSTED,
         ErrorCode.ONE_PERSON_MISMATCH,
@@ -113,6 +131,7 @@ def receipts_detail(app_no: AppNo, me: Me, db: DB):
         ErrorCode.PHOTO_ACCESS_EXPIRED,
         ErrorCode.PHOTO_NOT_READY,
         ErrorCode.RECEIPT_NOT_SUPPORTED,
+        ErrorCode.PROVIDER_UNAVAILABLE,
     ),
 )
 def receipts_resubmit(
@@ -146,14 +165,17 @@ def receipts_cancel(app_no: AppNo, me: Me, db: DB):
     operation_id="callbacks_receipt_provider",
     summary="回执服务商回调",
     description=(
-        "供回执服务商推送办理结果，不需要登录，靠签名验证来源。"
-        "签名不正确返回 CALLBACK_SIGNATURE_INVALID；同一条回调重复发送只处理一次，仍返回成功。"
-        "请求体格式由各服务商决定，不在这里展开。前端不要调用此接口。"
+        "供回执服务商推送办理结果，无需登录。鹧应和黔微云提交表单，系统验证签名、nonce 和单号归属，"
+        "配置来源白名单时也检查来源 IP。校验失败返回 CALLBACK_SIGNATURE_INVALID。"
+        "同一单号的同一状态只处理一次，重复通知仍返回成功。"
     ),
-    response_model=OkResponse,
-    response_description="已收到回调（含重复回调）",
+    response_model=OkResponse | ReceiptProviderAck,
+    response_description="回调已处理（含重复回调）。真实通道返回同步完成，假通道返回 ok",
     responses=errors_doc(
-        ErrorCode.CALLBACK_SIGNATURE_INVALID, ErrorCode.NOT_FOUND, ErrorCode.VALIDATION_ERROR
+        ErrorCode.CALLBACK_SIGNATURE_INVALID,
+        ErrorCode.NOT_FOUND,
+        ErrorCode.VALIDATION_ERROR,
+        ErrorCode.PROVIDER_UNAVAILABLE,
     ),
 )
 async def callbacks_receipt_provider(
@@ -162,11 +184,21 @@ async def callbacks_receipt_provider(
     provider_code: Annotated[
         str, Path(max_length=64, description="服务商编码，对应后台配置的服务商 code", examples=["zheying"])
     ],
+    nonce: Annotated[
+        str | None,
+        Query(description="提交时生成的回调校验串，真实通道必填", examples=["example-callback-nonce"]),
+    ] = None,
 ):
     body = await request.body()
     headers = {k.lower(): v for k, v in request.headers.items()}
     return await run_in_threadpool(
-        service.handle_callback, db, provider_code=provider_code, headers=headers, body=body
+        service.handle_callback,
+        db,
+        provider_code=provider_code,
+        headers=headers,
+        body=body,
+        nonce=nonce if len(request.query_params.getlist("nonce")) == 1 else None,
+        source_ip=request.client.host if request.client else None,
     )
 
 
