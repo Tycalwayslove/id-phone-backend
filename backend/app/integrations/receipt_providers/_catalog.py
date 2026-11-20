@@ -1,13 +1,10 @@
 """鹧应和黔微云目录的字段规范化。"""
 
 import json
-import logging
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from app.core.errors import AppError, ErrorCode
 from app.integrations.receipt_providers.base import ProviderItem
-
-log = logging.getLogger(__name__)
 
 _COLORS = {
     "white": "#FFFFFF",
@@ -17,6 +14,9 @@ _COLORS = {
     "grey": "#BFBFBF",
     "tint": "#EAF1FB",
     "gradient": "#438EDB",
+    "sky_blue": "#87CEEB",  # 近似值
+    "gray": "#BFBFBF",  # 近似值
+    "dark_red": "#8B0000",  # 近似值
 }
 _CATALOG_FIELDS = (
     "item_id",
@@ -34,24 +34,42 @@ _CATALOG_FIELDS = (
     "sort",
     "category",
     "category_id",
+    "is_receipt",
+    "receipt_param",
 )
 _MAX_INTEGER = 2**31 - 1
 
 
-def _colors(value: object) -> list[str]:
+def _colors(value: object) -> tuple[list[str], int]:
     if isinstance(value, str):
         value = json.loads(value.replace("'", '"'))
     if not isinstance(value, list) or any(not isinstance(name, str) for name in value):
         raise ValueError
     colors = []
+    unknown = 0
     for name in value:
-        color = _COLORS.get(name.strip().lower())
+        name = name.strip().lower()
+        if name.startswith("pose_"):
+            continue
+        color = _COLORS.get(name)
         if color is None:
-            # 原名留在 raw。告警不转存服务商文本。
-            log.warning("回执服务商目录含未知底色，已跳过")
+            unknown += 1
         elif color not in colors:
             colors.append(color)
-    return colors
+    return colors, unknown
+
+
+def _receipt_fields(value: object) -> list[str]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError, RecursionError:
+            return []
+    if not isinstance(value, list) or any(
+        not isinstance(field, str) or not field.strip() or "\x00" in field for field in value
+    ):
+        return []
+    return list(dict.fromkeys(value))
 
 
 def _integer(value: object, *, minimum: int = 0) -> int:
@@ -95,10 +113,13 @@ def parse_item(data: object, *, id_field: str) -> ProviderItem:
             size_max = None if max_value in (None, "") else _integer(max_value) or None
             if size_min is not None and size_max is not None and size_min > size_max:
                 raise ValueError
+            colors, unknown_color_count = _colors(data["color"])
+            is_receipt = data.get("is_receipt")
+            category = data.get("category")
             return ProviderItem(
                 provider_item_id=item_id.strip(),
                 name=name.strip(),
-                bg_colors=_colors(data["color"]),
+                bg_colors=colors,
                 width_px=_integer(data["width_px"], minimum=1),
                 height_px=_integer(data["height_px"], minimum=1),
                 width_mm=_millimeters(data.get("width_mm")),
@@ -108,6 +129,12 @@ def parse_item(data: object, *, id_field: str) -> ProviderItem:
                 file_size_max_kb=size_max,
                 sort=_integer(data.get("sort") or 0, minimum=-(2**31)),
                 raw={key: data[key] for key in _CATALOG_FIELDS if key in data},
+                is_receipt=(
+                    True if is_receipt in (True, "1") else False if is_receipt in (False, "0") else None
+                ),
+                receipt_fields=_receipt_fields(data.get("receipt_param")),
+                provider_category=str(category) if type(category) in (str, int) else None,
+                unknown_color_count=unknown_color_count,
             )
         except KeyError, ValueError, InvalidOperation, RecursionError:
             pass

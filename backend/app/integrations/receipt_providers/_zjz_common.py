@@ -203,7 +203,9 @@ class ZjzReceiptProvider:
         return [parse_item(row, id_field="item_id") for row in rows]
 
     def get_item(self, item_id: str) -> ProviderItem:
-        item = parse_item(self._catalog_post("/item/get", {"item_id": item_id}), id_field="id")
+        data = self._catalog_post("/item/get", {"item_id": item_id})
+        row = data.get("item", data)
+        item = parse_item(row, id_field="item_id" if isinstance(row, dict) and "item_id" in row else "id")
         if item.provider_item_id != item_id:
             raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, "回执服务商详情规格编号不匹配")
         return item

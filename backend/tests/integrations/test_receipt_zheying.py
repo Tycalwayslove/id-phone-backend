@@ -229,7 +229,7 @@ def test_query_returns_processing_without_a_network_call(provider):
 def test_catalog_list_and_detail_parse_form_and_normalize_values(provider_class, caplog):
     row = {
         "name": "小一寸",
-        "color": "['blue','white','red','tint','grey','gradient','dark_blue','unknown']",
+        "color": "['blue','white','red','tint','grey','gradient','dark_blue','unknown','pose_1','sky_blue','gray','dark_red']",
         "width_px": "260",
         "height_px": "378",
         "width_mm": "22.5",
@@ -245,20 +245,29 @@ def test_catalog_list_and_detail_parse_form_and_normalize_values(provider_class,
         form = parse_qs(request.content.decode())
         if request.url.path == "/item/list":
             assert form == {"key": [_KEY]}
-            data = {"list": [{"item_id": "001", **row}]}
+            listing = {"item_id": "001", **row}
+            if provider_class is ZheyingProvider:
+                listing.update(
+                    is_receipt="1",
+                    receipt_param='["text_mobile","text_city","text_name","text_idcard"]',
+                    category="3",
+                )
+            else:
+                listing.update(file_size_min="20", file_size_max="80")
+            data = {"list": [listing]}
         else:
             assert request.url.path == "/item/get"
             assert form == {"key": [_KEY], "item_id": ["001"]}
             data = {
-                "id": "001",
+                "item_id": "001",
                 **row,
-                "file_size_min": "20",
-                "file_size_max": "80",
                 "sort": "2",
                 "category": "证件照",
                 "category_id": "4",
                 "key": _KEY,
             }
+            if provider_class is QianweiyunProvider:
+                data = {"item": {**data, "file_size_msg": None}}
         return httpx.Response(200, json={"code": 0, "data": data})
 
     with httpx.Client(transport=httpx.MockTransport(handle)) as client:
@@ -285,14 +294,42 @@ def test_catalog_list_and_detail_parse_form_and_normalize_values(provider_class,
             "#EAF1FB",
             "#BFBFBF",
             "#1A3B8C",
+            "#87CEEB",
+            "#8B0000",
         ]
     )
     assert item.raw["color"] == detail.raw["color"] == row["color"]
-    assert item.file_size_min_kb is None and item.file_size_max_kb is None
-    assert (detail.file_size_min_kb, detail.file_size_max_kb, detail.sort) == (20, 80, 2)
+    assert item.unknown_color_count == detail.unknown_color_count == 1
+    if provider_class is ZheyingProvider:
+        assert item.is_receipt is True and item.provider_category == "3"
+        assert item.receipt_fields == ["text_mobile", "text_city", "text_name", "text_idcard"]
+        assert (item.file_size_min_kb, item.file_size_max_kb) == (None, None)
+    else:
+        assert item.is_receipt is None and item.provider_category is None and item.receipt_fields == []
+        assert (item.file_size_min_kb, item.file_size_max_kb) == (20, 80)
+    assert (detail.file_size_min_kb, detail.file_size_max_kb, detail.sort) == (None, None, 2)
     assert detail.raw["category_id"] == "4"
     assert "key" not in detail.raw and _KEY not in caplog.text
-    assert "未知底色" in caplog.text
+    assert "未知底色" not in caplog.text
+
+
+@pytest.mark.parametrize("receipt_param", ["非法 JSON", '["text_name",1]', '{"field":"text_idcard"}'])
+def test_catalog_legacy_id_and_invalid_receipt_fields(receipt_param):
+    data = {
+        "id": "713",
+        "name": "广东身份证",
+        "color": ["white"],
+        "width_px": "200",
+        "height_px": "300",
+        "dpi": "300",
+        "is_receipt": "0",
+        "receipt_param": receipt_param,
+    }
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={"code": 0, "data": data}))
+    with httpx.Client(transport=transport) as client:
+        item = _provider(client).get_item("713")
+    assert item.provider_item_id == "713"
+    assert item.is_receipt is False and item.receipt_fields == []
 
 
 @pytest.mark.parametrize("method", ["list_items", "get_item"])
