@@ -577,6 +577,7 @@ def test_specs_create_update_list(client: TestClient, db: Session):
 def test_spec_list_filters_and_pages(client: TestClient, db: Session):
     for code in ("flt_a", "flt_b", "flt_c"):
         make_spec(db, code)
+    make_spec(db, "flt_city").region_code = "440100"
     make_spec(db, "flt_exam", category="exam").status = "inactive"
     db.flush()
     admin_login(client, db, "op", "operator")
@@ -584,17 +585,23 @@ def test_spec_list_filters_and_pages(client: TestClient, db: Session):
     def codes(**params) -> list[str]:
         return [s["code"] for s in client.get(f"{API}/specs", params=params).json()["items"]]
 
-    assert codes(keyword="FLT_") == ["flt_exam", "flt_c", "flt_b", "flt_a"]  # 编码模糊匹配，不区分大小写
+    assert codes(keyword="FLT_") == ["flt_exam", "flt_city", "flt_c", "flt_b", "flt_a"]
     assert codes(keyword="flt", status="inactive") == ["flt_exam"]
-    assert codes(keyword="flt", category="receipt", status="active") == ["flt_c", "flt_b", "flt_a"]
+    assert codes(keyword="flt", status="active", region_code="440100") == ["flt_city"]
+    assert codes(keyword="flt", category="receipt", status="active") == [
+        "flt_city",
+        "flt_c",
+        "flt_b",
+        "flt_a",
+    ]
     assert codes(keyword="%") == []  # 通配符被转义
 
     first = client.get(f"{API}/specs", params={"keyword": "flt", "limit": 3}).json()
-    assert [s["code"] for s in first["items"]] == ["flt_exam", "flt_c", "flt_b"] and first["next_cursor"]
+    assert [s["code"] for s in first["items"]] == ["flt_exam", "flt_city", "flt_c"] and first["next_cursor"]
     second = client.get(
         f"{API}/specs", params={"keyword": "flt", "limit": 3, "cursor": first["next_cursor"]}
     ).json()
-    assert [s["code"] for s in second["items"]] == ["flt_a"] and second["next_cursor"] is None
+    assert [s["code"] for s in second["items"]] == ["flt_b", "flt_a"] and second["next_cursor"] is None
     assert client.get(f"{API}/specs", params={"status": "bogus"}).status_code == 422
 
 
@@ -682,14 +689,18 @@ def test_provider_sync_writes_audit_and_returns_details(client: TestClient, db: 
     assert response.status_code == 200, response.text
     result = response.json()
     assert result["created"] >= 9 and result["updated"] == 1
-    assert any(item["spec_code"] == "zy_1001" and item["change"] == "created" for item in result["items"])
+    assert any(
+        item["spec_code"] == "cat_zheying_1001" and item["change"] == "created" for item in result["items"]
+    )
     (log,) = _audit(client, action="provider.sync_specs")
     assert log["target_type"] == "provider" and log["target_id"] == provider.id
     assert log["after"]["created"] == result["created"]
     assert {item["spec_code"] for item in log["after"]["items"]} == {
         item["spec_code"] for item in result["items"]
     }
-    assert client.get(f"{API}/specs").json()["items"][0]["status"] == "inactive"
+    assert log["after"]["auto_publish"] is True
+    specs = {row["code"]: row for row in client.get(f"{API}/specs").json()["items"]}
+    assert specs["cat_zheying_1001"]["status"] == "active"
 
 
 def test_audit_logs_filters(client: TestClient, db: Session):
@@ -711,7 +722,7 @@ def test_admin_api_docs_complete():
         if path.startswith("/api/v1/admin")
         for op in ops.values()
     ]
-    assert len(ids) == 38 and len(ids) == len(set(ids)) and all(i.startswith("admin_") for i in ids)
+    assert len(ids) == 39 and len(ids) == len(set(ids)) and all(i.startswith("admin_") for i in ids)
     assert (
         spec["paths"][f"{API}/providers/{{code}}/sync-specs"]["post"]["operationId"]
         == "admin_providers_sync_specs"

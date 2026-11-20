@@ -20,6 +20,7 @@ from app.core.config import settings
 from app.core.deps import ALL_PERMISSIONS, ROLE_PERMISSIONS, CurrentAdmin, csrf_for
 from app.core.errors import AppError, ErrorCode
 from app.core.pagination import PageParams
+from app.core.regions import region_name
 from app.core.schemas import OkResponse
 from app.core.utils import utcnow
 from app.models import (
@@ -80,6 +81,7 @@ from app.modules.admin.schemas import (
     AdminSpecCreateIn,
     AdminSpecOut,
     AdminSpecPage,
+    AdminSpecRegionOut,
     AdminSpecUpdateIn,
     AdminStatsOverviewOut,
     AdminUserDetail,
@@ -881,6 +883,7 @@ def list_specs(
     keyword: str | None = None,
     status: str | None = None,
     category: str | None = None,
+    region_code: str | None = None,
     page: PageParams,
 ) -> AdminSpecPage:
     rows = repo.list_specs(
@@ -888,6 +891,7 @@ def list_specs(
         keyword=keyword.strip() if keyword else None,
         status=status,
         category=category,
+        region_code=region_code,
         before_id=page.before_id(),
         limit=page.fetch_limit,
     )
@@ -897,6 +901,10 @@ def list_specs(
         items=[_spec_out(s, codes.get(s.parent_id) if s.parent_id else None) for s in rows],
         next_cursor=next_cursor,
     )
+
+
+def get_spec_region(code: str) -> AdminSpecRegionOut:
+    return AdminSpecRegionOut(region_name=region_name(code))
 
 
 def create_spec(db: Session, admin: CurrentAdmin, body: AdminSpecCreateIn) -> AdminSpecOut:
@@ -1037,9 +1045,11 @@ def update_provider(
     return next(p for p in list_providers(db) if p.code == code)
 
 
-def sync_provider_specs(db: Session, admin: CurrentAdmin, code: str) -> ProviderSyncResult:
+def sync_provider_specs(
+    db: Session, admin: CurrentAdmin, code: str, *, auto_publish: bool = True
+) -> ProviderSyncResult:
     try:
-        result = spec_service.sync_provider_specs(db, code)
+        result = spec_service.sync_provider_specs(db, code, auto_publish=auto_publish)
         provider = repo.get_provider_by_code(db, code)
         _audit(
             db,
@@ -1049,6 +1059,7 @@ def sync_provider_specs(db: Session, admin: CurrentAdmin, code: str) -> Provider
             provider.id if provider else None,
             after={
                 "provider_code": code,
+                "auto_publish": auto_publish,
                 **result.model_dump(exclude={"items": {"__all__": {"spec_name"}}}),
             },
         )

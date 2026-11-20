@@ -565,6 +565,12 @@ class AdminSpecOut(Schema):
 AdminSpecPage = page_model(AdminSpecOut, "AdminSpecPage", "按创建时间从新到旧（新同步进来的规格排在最前）")
 
 
+class AdminSpecRegionOut(Schema):
+    """规格编辑时的区划码查询结果。"""
+
+    region_name: str | None = Field(description="区划全称。区划码未收录时为空。", examples=["广州市"])
+
+
 class AdminSpecCreateIn(Schema):
     """创建规格的请求。"""
 

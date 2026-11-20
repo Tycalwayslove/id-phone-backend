@@ -44,6 +44,7 @@ from app.modules.admin.schemas import (
     AdminSpecCreateIn,
     AdminSpecOut,
     AdminSpecPage,
+    AdminSpecRegionOut,
     AdminSpecUpdateIn,
     AdminStatsOverviewOut,
     AdminUserDetail,
@@ -481,7 +482,7 @@ def update_plan(code: PlanCodePath, body: AdminPlanUpdateIn, admin: PlanWrite, d
     summary="规格列表",
     description=(
         f"列出全部规格（含已下架），按创建时间从新到旧，游标分页，条件之间是“并且”。权限点 spec:read。{_LOGIN_NOTE}"
-        "从服务商同步进来的新规格默认下架，可用 status=inactive 筛出来逐个审核后上架。"
+        "可按名称、状态、分类和精确的地区码筛选。"
     ),
     response_model=AdminSpecPage,
     response_description="规格分页列表",
@@ -513,8 +514,33 @@ def list_specs(
             examples=["receipt"],
         ),
     ] = None,
+    region_code: Annotated[
+        str | None,
+        Query(min_length=1, max_length=12, description="按规格保存的地区码精确匹配", examples=["440100"]),
+    ] = None,
 ):
-    return service.list_specs(db, keyword=keyword, status=status, category=category, page=page)
+    return service.list_specs(
+        db, keyword=keyword, status=status, category=category, page=page, region_code=region_code
+    )
+
+
+@admin_router.get(
+    "/spec-regions/{region_code}",
+    operation_id="admin_spec_regions_detail",
+    summary="查询规格地区名",
+    description=f"查询省或市行政区划全称，供规格编辑时预览。权限点 spec:read。{_LOGIN_NOTE}",
+    response_model=AdminSpecRegionOut,
+    response_description="区划全称查询结果",
+    responses=errors_doc(*_AUTH),
+)
+def get_spec_region(
+    _: SpecRead,
+    region_code: Annotated[
+        str,
+        Path(pattern=r"^[0-9]{6}$", description="6 位省或市行政区划码", examples=["440100"]),
+    ],
+):
+    return service.get_spec_region(region_code)
 
 
 @admin_router.post(
@@ -589,15 +615,29 @@ def update_provider(code: ProviderCodePath, body: AdminProviderUpdateIn, admin: 
     summary="同步服务商规格目录",
     description=(
         f"读取服务商的全量规格目录。权限点 provider:write（仅 owner）。{_LOGIN_NOTE}{_WRITE_NOTE}"
-        "已有规格仅更新制照参数。新规格默认下架，且服务商映射默认停用。目录移除的条目会停用映射。"
-        "读取目录或详情失败时，同步不会写入规格变更。"
+        "按上游编号或名称和像素尺寸合并目录。默认上架新规格、启用新映射并创建默认路由规则。"
+        "已有规格仅更新制照参数，目录移除的条目会停用映射。目录读取失败时不写入规格变更。"
     ),
     response_model=ProviderSyncResult,
     response_description="新增、更新、未变、停用数量及逐条明细",
     responses=errors_doc(*_AUTH, ErrorCode.NOT_FOUND, ErrorCode.PROVIDER_UNAVAILABLE),
 )
-def sync_provider_specs(code: ProviderCodePath, admin: ProviderWrite, db: DB):
-    return service.sync_provider_specs(db, admin, code)
+def sync_provider_specs(
+    code: ProviderCodePath,
+    admin: ProviderWrite,
+    db: DB,
+    auto_publish: Annotated[
+        bool,
+        Query(
+            description=(
+                "是否上架新规格、启用新映射并创建默认路由规则。回执类规格且服务商未标记为不可办理时启用规则。"
+                "false 时新规格下架、新映射停用且不创建规则。"
+            ),
+            examples=[True],
+        ),
+    ] = True,
+):
+    return service.sync_provider_specs(db, admin, code, auto_publish=auto_publish)
 
 
 # ---------- 服务商规格与路由规则 ----------

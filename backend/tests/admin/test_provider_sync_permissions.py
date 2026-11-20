@@ -48,3 +48,12 @@ def test_sync_requires_login_write_permission_and_csrf(monkeypatch):
         assert response.status_code == 200, response.text
         sync.assert_called_once()
         assert sync.call_args.args[-1] == "zheying"
+        assert sync.call_args.kwargs == {"auto_publish": True}
+        response = client.post(path, params={"auto_publish": "false"}, headers=headers)
+        assert response.status_code == 200, response.text
+        assert sync.call_args.kwargs == {"auto_publish": False}
+
+        preview = "/api/v1/admin/spec-regions"
+        assert client.get(f"{preview}/440100").json() == {"region_name": "广州市"}
+        assert client.get(f"{preview}/999999").json() == {"region_name": None}
+        assert client.get(f"{preview}/invalid").status_code == 422

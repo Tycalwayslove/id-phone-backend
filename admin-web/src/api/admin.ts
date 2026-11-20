@@ -53,6 +53,8 @@ export const adminApi = {
 
   specs: async (query: SpecFilters, signal: AbortSignal) =>
     result(await client.GET('/api/v1/admin/specs', { params: { query }, signal })),
+  specRegion: async (region_code: string, signal: AbortSignal) =>
+    result(await client.GET('/api/v1/admin/spec-regions/{region_code}', { params: { path: { region_code } }, signal })),
   createSpec: async (body: Schema['AdminSpecCreateIn']) =>
     result(await client.POST('/api/v1/admin/specs', { body })),
   updateSpec: async (code: string, body: Schema['AdminSpecUpdateIn']) =>
@@ -62,8 +64,8 @@ export const adminApi = {
     result(await client.GET('/api/v1/admin/providers', { signal })),
   updateProvider: async (code: string, body: Schema['AdminProviderUpdateIn']) =>
     result(await client.PATCH('/api/v1/admin/providers/{code}', { params: { path: { code } }, body })),
-  syncProviderSpecs: async (code: string) =>
-    result(await client.POST('/api/v1/admin/providers/{code}/sync-specs', { params: { path: { code } } })),
+  syncProviderSpecs: async (code: string, auto_publish: boolean) =>
+    result(await client.POST('/api/v1/admin/providers/{code}/sync-specs', { params: { path: { code }, query: { auto_publish } } })),
   providerSpecs: async (query: ProviderSpecFilters, signal: AbortSignal) =>
     result(await client.GET('/api/v1/admin/provider-specs', { params: { query }, signal })),
   routeRules: async (query: RouteRuleFilters, signal: AbortSignal) =>
