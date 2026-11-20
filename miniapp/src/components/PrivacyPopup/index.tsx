@@ -7,7 +7,12 @@ import './index.scss'
 
 type PrivacyListener = Parameters<typeof Taro.onNeedPrivacyAuthorization>[0]
 type Resolve = Parameters<PrivacyListener>[0]
-type PrivacyPage = typeof PAGES.index | typeof PAGES.me | typeof LEGAL_PAGES.privacy
+type PrivacyPage =
+  | typeof PAGES.index
+  | typeof PAGES.me
+  | typeof PAGES.camera
+  | typeof PAGES.shootGuide
+  | typeof LEGAL_PAGES.privacy
 
 declare const wx: { onNeedPrivacyAuthorization?: (listener: PrivacyListener) => void }
 
@@ -63,7 +68,14 @@ function listenForPrivacyAuthorization(): void {
 
     const pages = Taro.getCurrentPages()
     const current = `/${pages[pages.length - 1]?.route ?? ''}`
-    if (current === PAGES.index || current === PAGES.me || current === LEGAL_PAGES.privacy) {
+    // 这些页面挂了弹窗组件，就地询问，不打断当前操作
+    if (
+      current === PAGES.index ||
+      current === PAGES.me ||
+      current === PAGES.camera ||
+      current === PAGES.shootGuide ||
+      current === LEGAL_PAGES.privacy
+    ) {
       setPending({ page: current, resolvers: [resolve], returnToCaller: false })
       return
     }

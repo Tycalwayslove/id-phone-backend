@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { Button, Checkbox, CheckboxGroup, Label, Text, View } from '@tarojs/components'
 import Taro, { useRouter } from '@tarojs/taro'
+import PrivacyPopup from '../../components/PrivacyPopup'
 import { SKIP_GUIDE_KEY } from '../../hooks/useShootFlow'
 import { handleError } from '../../utils/errors'
 import { PAGES, navigate } from '../../utils/nav'
@@ -47,6 +48,7 @@ export default function ShootGuidePage() {
 
   return (
     <View className='shoot-guide-page'>
+      <PrivacyPopup page={PAGES.shootGuide} />
       <Text className='shoot-guide-page__title'>这样拍，一次过</Text>
       <View className='shoot-guide-page__examples'>
         {EXAMPLES.map(({ kind, label }) => (

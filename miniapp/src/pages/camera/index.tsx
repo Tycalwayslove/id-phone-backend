@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Camera, Image, Text, View } from '@tarojs/components'
 import Taro, { useDidHide, useDidShow, useReady, useRouter, useUnload } from '@tarojs/taro'
 import type { components } from '../../api/schema'
+import PrivacyPopup from '../../components/PrivacyPopup'
 import { handleError } from '../../utils/errors'
 import { GUIDE_HINT, GUIDE_LIMITS, stabilizeGuide, type GuideHint, type GuideStability } from '../../utils/faceGuide'
 import { PAGES, goBack, redirect } from '../../utils/nav'
@@ -12,7 +13,17 @@ import useLiveFaceGuide from './useLiveFaceGuide'
 import './index.scss'
 
 type PhotoOut = components['schemas']['PhotoOut']
-type CameraState = 'loading' | 'allowed' | 'denied' | 'unavailable'
+/** denied = 用户明确拒绝过（去设置打开）；undeclared = 小程序隐私指引未声明摄像头；privacy = 用户没同意隐私指引 */
+type CameraState = 'loading' | 'allowed' | 'denied' | 'undeclared' | 'privacy' | 'unavailable'
+
+/** 按授权失败原因分类。errno 112：隐私指引未声明该接口；104：用户未同意隐私指引 */
+function authorizeFailure(e: unknown): CameraState {
+  const err = (e ?? {}) as { errno?: number; errMsg?: string }
+  const msg = err.errMsg ?? ''
+  if (err.errno === 112 || /not declared|scope is not declared/i.test(msg)) return 'undeclared'
+  if (err.errno === 104 || /privacy/i.test(msg)) return 'privacy'
+  return 'denied'
+}
 type CountdownMode = 'manual' | 'auto'
 const AUTO_CAPTURE_KEY = 'camera_auto_capture'
 
@@ -131,11 +142,24 @@ export default function CameraPage() {
 
   const requestPermission = useCallback(async () => {
     setCameraState('loading')
+    // 已授权直接打开；明确拒绝过才去设置；从没问过就弹系统授权，同意后立刻显示相机
+    const setting = await Taro.getSetting().catch(() => undefined)
+    const granted = setting?.authSetting['scope.camera']
+    if (granted === true) {
+      if (alive.current) setCameraState('allowed')
+      return
+    }
+    if (granted === false) {
+      if (alive.current) setCameraState('denied')
+      return
+    }
     try {
       await Taro.authorize({ scope: 'scope.camera' })
       if (alive.current) setCameraState('allowed')
-    } catch {
-      if (alive.current) setCameraState('denied')
+    } catch (e) {
+      const state = authorizeFailure(e)
+      if (state === 'undeclared') console.warn('[相机] 小程序隐私保护指引未声明摄像头，请在公众平台补充', e)
+      if (alive.current) setCameraState(state)
     }
   }, [])
 
@@ -334,22 +358,30 @@ export default function CameraPage() {
   if (!live) {
     const loading = weapp && !albumOnly && cameraState === 'loading'
     const denied = weapp && !albumOnly && cameraState === 'denied'
+    const COPY: Partial<Record<CameraState, [string, string]>> = {
+      denied: ['需要相机权限', '在设置里允许使用摄像头，就能直接拍证件照。'],
+      undeclared: ['暂时不能使用相机', '小程序的相机功能还在开通中，先从相册选一张照片吧。'],
+      privacy: ['需要你同意隐私保护指引', '同意后才能打开相机，照片只用于制作你的证件照。'],
+      unavailable: ['暂时无法打开相机', '可以重试，或从相册选一张照片。'],
+    }
+    const [title, desc] = loading ? ['正在打开相机', ''] : COPY[cameraState] ?? ['暂时无法打开相机', '']
     return (
       <View className='camera-page camera-unavailable'>
+        <PrivacyPopup page={PAGES.camera} />
         <View className='camera-unavailable__panel'>
           {albumOnly ? null : (
             <>
-              <Text className='camera-unavailable__title'>
-                {loading ? '正在打开相机' : denied ? '需要相机权限' : '暂时无法打开相机'}
-              </Text>
-              {denied ? <Text className='hint'>在微信小程序设置中允许使用相机，就可以拍证件照。</Text> : null}
+              <Text className='camera-unavailable__title'>{title}</Text>
+              {desc ? <Text className='hint'>{desc}</Text> : null}
             </>
           )}
           {denied ? (
             <Button className='btn-native' disabled={busy} onClick={() => void openCameraSettings()}>去设置打开</Button>
           ) : null}
-          {weapp && !albumOnly && cameraState === 'unavailable' ? (
-            <Button className='btn-native' onClick={() => void requestPermission()}>重试</Button>
+          {weapp && !albumOnly && (cameraState === 'unavailable' || cameraState === 'privacy') ? (
+            <Button className='btn-native' onClick={() => void requestPermission()}>
+              {cameraState === 'privacy' ? '同意并打开相机' : '重试'}
+            </Button>
           ) : null}
           <Button
             className={`btn-native${albumOnly ? '' : ' btn-native--plain'}`}
@@ -366,6 +398,7 @@ export default function CameraPage() {
   const controlsDisabled = busy || countdown > 0
   return (
     <View className='camera-page camera-live'>
+      <PrivacyPopup page={PAGES.camera} />
       {showFeed ? (
         <Camera
           key={devicePosition}
