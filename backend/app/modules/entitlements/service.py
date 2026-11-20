@@ -5,7 +5,7 @@
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from sqlalchemy import update
@@ -20,6 +20,7 @@ from app.modules.entitlements.schemas import EntitlementOut
 from app.modules.notify import service as notify_service
 
 DEFAULT_STORAGE_DAYS = 30
+RENEWAL_GRACE_PERIOD = timedelta(days=30)
 LIST_LIMIT = 100
 
 
@@ -48,7 +49,9 @@ def _benefits_of(db: Session, item: OrderItem, plan: Plan) -> dict[str, int]:
 def grant_for_order_item(
     db: Session, *, user_id: int, item: OrderItem, plan: Plan, paid_at: datetime
 ) -> Entitlement:
-    """按订单项生成权益和额度。同一订单项重复调用返回已有权益。"""
+    """发放权益或延长续费目标。同一订单项重复调用返回已有权益。"""
+    if item.item_type == "renew":
+        return _renew_for_order_item(db, user_id, item, paid_at)
     existing = repo.get_by_order_item(db, item.id)
     if existing is not None:
         return existing
@@ -61,7 +64,6 @@ def grant_for_order_item(
         if parent is None:
             raise AppError(ErrorCode.ENTITLEMENT_NOT_FOUND)
         if parent.status != "active" or parent.ends_at <= paid_at:
-            # TODO: 付款时主权益已到期，需要人工或自动退款
             raise AppError(ErrorCode.ENTITLEMENT_EXPIRED)
         ends_at, photo_id = parent.ends_at, parent.photo_id
     else:
@@ -93,6 +95,59 @@ def grant_for_order_item(
 
     if photo_id is not None:
         repo.bump_photo_access_until(db, photo_id, ends_at)
+    return ent
+
+
+def _can_renew(ent: Entitlement, at: datetime) -> bool:
+    return (
+        ent.status != "revoked"
+        and ent.benefits_snapshot.get("attach_to_parent") != 1
+        and ent.ends_at >= at - RENEWAL_GRACE_PERIOD
+    )
+
+
+def require_renewable_entitlement(
+    db: Session, user_id: int, entitlement_id: int, *, at: datetime
+) -> Entitlement:
+    """查找本人仍可续费的独立权益，供下单使用。"""
+    ent = repo.get_for_user(db, user_id, entitlement_id)
+    if ent is None:
+        raise AppError(ErrorCode.ENTITLEMENT_NOT_FOUND)
+    if not _can_renew(ent, at):
+        raise AppError(ErrorCode.ENTITLEMENT_EXPIRED, "该权益已超过续费期限、已撤销或属于加购项")
+    return ent
+
+
+def _renew_for_order_item(db: Session, user_id: int, item: OrderItem, paid_at: datetime) -> Entitlement:
+    target_id = item.snapshot.get("renew_entitlement_id")
+    ent = repo.get_for_user(db, user_id, target_id, for_update=True) if target_id else None
+    if ent is None:
+        raise AppError(ErrorCode.ENTITLEMENT_NOT_FOUND)
+    # 锁内重读流水，确保同一订单项重放时不会重复延期。
+    db.refresh(item, attribute_names=["snapshot"])
+    if "renewal_ledger" in item.snapshot:
+        return ent
+    if not _can_renew(ent, paid_at):
+        raise AppError(ErrorCode.ENTITLEMENT_EXPIRED)
+
+    days = item.snapshot.get("benefits", {}).get("storage_days", 0)
+    if days <= 0:
+        raise AppError(ErrorCode.PLAN_NOT_AVAILABLE, "续费套餐必须配置正数保管天数")
+    previous_end = ent.ends_at.astimezone(UTC)
+    ent.ends_at = max(previous_end, paid_at) + timedelta(days=days)
+    ent.status = "active"
+    item.snapshot = {
+        **item.snapshot,
+        "renewal_ledger": {
+            "storage_days": days,
+            "previous_ends_at": previous_end.isoformat(),
+            "ends_at": ent.ends_at.isoformat(),
+            "applied_at": paid_at.isoformat(),
+        },
+    }
+    if ent.photo_id is not None:
+        repo.bump_photo_access_until(db, ent.photo_id, ent.ends_at)
+    db.flush()
     return ent
 
 
@@ -286,6 +341,7 @@ def _to_out(
         starts_at=ent.starts_at,
         ends_at=ent.ends_at,
         is_active=ent.status == "active" and ent.ends_at > now,
+        can_renew=_can_renew(ent, now),
         spec_change=snap.get("spec_change") == 1,
         one_person=snap.get("one_person") == 1,
         receipt_quota_total=total,

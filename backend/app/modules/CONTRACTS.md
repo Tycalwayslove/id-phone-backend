@@ -40,7 +40,9 @@ tests/<m>/test_*.py
 ## entitlements（权益）
 
 - `grant_for_order_item(db, *, user_id, item: OrderItem, plan: Plan, paid_at) -> Entitlement`
-  按套餐权益生成 entitlement 和 entitlement_quotas。`attach_to_parent=1` 的加购项：`item.snapshot["parent_entitlement_id"]` 指向主权益，到期时间、photo_id 跟主权益一致。照片范围 `photo_scope=1` 时 photo_id 取 `item.photo_id`。
+  普通套餐生成权益和额度。加购项按 `item.snapshot["parent_entitlement_id"]` 锁主权益，付款时主权益有效才发放，加购到期时间与照片取自主权益。续费项按 `item.snapshot["renew_entitlement_id"]` 锁原权益，以原到期时间和付款时间的较晚值为起点，增加下单时快照中的 `storage_days`，并在订单项快照 `renewal_ledger` 中记账。同一续费订单项只延期一次。
+- `require_active_entitlement(db, user_id, entitlement_id) -> Entitlement`：校验本人当前有效的主权益，供加购下单使用。
+- `require_renewable_entitlement(db, user_id, entitlement_id, *, at) -> Entitlement`：校验本人未撤销、未超过到期后 30 天的独立权益。以上校验及发放在权益不存在或不属于本人时抛 `ENTITLEMENT_NOT_FOUND`，状态或期限不符时抛 `ENTITLEMENT_EXPIRED`。
 - `photo_access(db, user_id, photo_id) -> PhotoAccess`：`PhotoAccess(active: bool, access_until: datetime | None, spec_change: bool)`。有效权益 = status active、未过期、且（photo_id 等于这张照片，或 photo_scope=0 覆盖全部照片）。
 - `pick_for_receipt(db, user_id, photo_id) -> Entitlement`：选一个覆盖该照片、未过期、回执额度还有剩余的权益（到期早的优先）。没有有效权益 → `ENTITLEMENT_EXPIRED`；有但额度用完 → `QUOTA_EXHAUSTED`。
 - `resubmit_limit(ent) -> int`：从 benefits_snapshot 读重提次数，默认 0。
@@ -50,7 +52,8 @@ tests/<m>/test_*.py
 ## orders（套餐与订单）
 
 - `get_plan_by_code(db, code) -> Plan`：不在售 → `PLAN_NOT_AVAILABLE`。
-- `mark_paid(db, *, out_trade_no, transaction_id, amount_fen, raw) -> Order`：幂等；订单变 paid，为每个订单项调用 entitlements.grant_for_order_item。
+- `get_plan_benefits(db, plan_id) -> dict[str, int]`：读取套餐当前权益配置，供没有下单快照的普通套餐和加购项发放时使用。
+- `mark_paid(db, *, out_trade_no, transaction_id, amount_fen, raw, refund_closed=True, paid_at=None) -> Order`：幂等。优先使用微信支付成功时间，缺省使用入账时间。入账后为每个订单项发放权益或续费。加购主权益或续费目标不可用时，整单跳过权益发放，以从支付单号派生的固定请求 ID 发起系统全额退款。同一笔支付的重复通知只返回订单。
 
 ## specs（规格）
 
@@ -70,7 +73,7 @@ tests/<m>/test_*.py
 
 ## orders（补充）
 
-- `refund_order(db, *, order_no, request_id, amount_fen, reason, operator) -> RefundSubmission`：后台退款（refund、order、审计快照 before）。out_refund_no = "RA" + request_id.hex，相同请求重试返回原记录，参数不同抛 IDEMPOTENCY_CONFLICT。可退余额 = 已付 − 已退 − 处理中退款；微信退款异步，处理中占用余额，确认成功后只入账一次；全额退完撤销该订单的权益。不 commit。
+- `refund_order(db, *, order_no, request_id, amount_fen, reason, operator, defer_submission=False) -> RefundSubmission`：后台和系统退款共用（refund、order、审计快照 before）。out_refund_no = "RA" + request_id.hex，相同请求重试返回原记录，订单或金额不同抛 IDEMPOTENCY_CONFLICT。可退余额 = 已付 − 已退 − 处理中退款。微信退款异步，处理中占用余额，确认成功后只入账一次。自动失效退款设置 `defer_submission=True`，由 worker 提交已入库的 pending 退款。全额退完撤销由该订单发放的权益。不 commit。
 - `poll_pending_refunds(db, limit=10) -> int`：worker 调用，查单补偿丢失的退款通知（仅 PAY_MODE=wechat）。
 
 ## admin（后台）例外

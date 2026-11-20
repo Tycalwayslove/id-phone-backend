@@ -8,7 +8,7 @@ from app.core.schemas import Schema
 
 
 class EntitlementOut(Schema):
-    """用户买到的一份权益：保管期、回执次数等，每次购买生成一条。"""
+    """用户买到的一份权益，包含保管期、回执次数等。续费更新原权益的到期时间。"""
 
     id: int = Field(description="权益 ID", examples=[12])
     plan_code: str = Field(description="购买的套餐编码", examples=["photo_year_39_9"])
@@ -22,6 +22,10 @@ class EntitlementOut(Schema):
     )
     is_active: bool = Field(
         description="当前是否有效：状态正常且还没到期为 true；已到期或被撤销为 false", examples=[True]
+    )
+    can_renew: bool = Field(
+        description="权益是否符合续费条件。未撤销的独立权益在到期前或到期后 30 天内为 true，其他情况为 false",
+        examples=[True],
     )
     spec_change: bool = Field(description="保管期内是否可以无限更换规格", examples=[True])
     one_person: bool = Field(

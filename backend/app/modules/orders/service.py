@@ -8,8 +8,8 @@ import logging
 import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import timedelta
-from uuid import UUID
+from datetime import UTC, datetime, timedelta
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy.orm import Session
 
@@ -71,12 +71,12 @@ def list_plans(db: Session) -> list[PlanOut]:
 
 
 def _orders_out(db: Session, orders: list[Order]) -> list[OrderOut]:
-    items = repo.items_by_order(db, [o.id for o in orders])
-    return [_order_out(o, items[o.id]) for o in orders]
-
-
-def _order_out(order: Order, items: list[OrderItem]) -> OrderOut:
-    return OrderOut(**_order_fields(order, items))
+    order_ids = [o.id for o in orders]
+    items = repo.items_by_order(db, order_ids)
+    return [
+        OrderOut(**_order_fields(order, items[order.id]), refund_pending=pending)
+        for order, pending in repo.orders_with_refund_pending(db, order_ids)
+    ]
 
 
 def _order_fields(order: Order, items: list[OrderItem]) -> dict:
@@ -128,12 +128,16 @@ def close_expired(db: Session, limit: int = 100) -> int:
 
 
 def create_order(db: Session, user_id: int, idem_key: str | None, payload: OrderCreateIn) -> OrderCreatedOut:
+    request = payload.model_dump(mode="json")
+    if payload.renew_entitlement_id is None:
+        # 保持存量下单请求的幂等哈希。
+        del request["renew_entitlement_id"]
     return run_idempotent(
         db,
         user_id=user_id,
         scope="orders.create",
         key=idem_key,
-        request=payload.model_dump(mode="json"),
+        request=request,
         produce=lambda: _do_create_order(db, user_id, payload),
         out_model=OrderCreatedOut,
     )
@@ -147,22 +151,34 @@ def _do_create_order(db: Session, user_id: int, payload: OrderCreateIn) -> Order
         raise AppError(ErrorCode.PLAN_NOT_AVAILABLE)
     benefits = get_plan_benefits(db, plan.id)
     is_addon = benefits.get("attach_to_parent") == 1
+    now = utcnow()
 
+    item_type = "plan"
     photo_id: int | None = None
     parent_id: int | None = None
-    if is_addon:
+    if payload.renew_entitlement_id is not None:
+        if payload.parent_entitlement_id is not None or payload.photo_id is not None:
+            raise AppError(ErrorCode.VALIDATION_ERROR, "续费下单只需指定套餐和续费权益")
+        if is_addon or benefits.get("storage_days", 0) <= 0:
+            raise AppError(ErrorCode.PLAN_NOT_AVAILABLE, "请选择包含保管天数的独立套餐续费")
+        target = entitlement_service.require_renewable_entitlement(
+            db, user_id, payload.renew_entitlement_id, at=now
+        )
+        if (benefits.get("photo_scope") == 1) != (target.photo_id is not None):
+            raise AppError(ErrorCode.PLAN_NOT_AVAILABLE, "续费套餐与原权益的照片范围不一致")
+        item_type, photo_id = "renew", target.photo_id
+    elif is_addon:
         if payload.parent_entitlement_id is None:
             raise AppError(
                 ErrorCode.VALIDATION_ERROR, "加购项必须选择要附加的主权益（parent_entitlement_id）"
             )
         parent = entitlement_service.require_active_entitlement(db, user_id, payload.parent_entitlement_id)
-        parent_id, photo_id = parent.id, parent.photo_id
+        item_type, parent_id, photo_id = "addon", parent.id, parent.photo_id
     elif benefits.get("photo_scope") == 1:
         if payload.photo_id is None:
             raise AppError(ErrorCode.VALIDATION_ERROR, "该套餐需要选择一张照片（photo_id）")
         photo_id = photo_service.get_photo_for_user(db, user_id, payload.photo_id).id
 
-    now = utcnow()
     order = Order(
         order_no=new_no("O"),
         user_id=user_id,
@@ -174,7 +190,7 @@ def _do_create_order(db: Session, user_id: int, payload: OrderCreateIn) -> Order
     db.flush()
     item = OrderItem(
         order_id=order.id,
-        item_type="addon" if is_addon else "plan",
+        item_type=item_type,
         plan_id=plan.id,
         photo_id=photo_id,
         quantity=1,
@@ -186,6 +202,7 @@ def _do_create_order(db: Session, user_id: int, payload: OrderCreateIn) -> Order
             "price_fen": plan.price_fen,
             "benefits": benefits,
             "parent_entitlement_id": parent_id,
+            "renew_entitlement_id": payload.renew_entitlement_id,
         },
     )
     payment = Payment(
@@ -276,8 +293,9 @@ def mark_paid(
     amount_fen: int,
     raw: dict,
     refund_closed: bool = True,
+    paid_at: datetime | None = None,
 ) -> Order:
-    """支付成功入账。待支付订单发放权益，已关闭订单自动退款。幂等，不 commit。"""
+    """支付成功入账，发放权益、续费或发起自动退款。幂等，不 commit。"""
     payment = repo.payment_by_out_trade_no(db, out_trade_no)
     if payment is None:
         raise AppError(ErrorCode.ORDER_NOT_FOUND)
@@ -293,13 +311,13 @@ def mark_paid(
     if order.status != "pending" and not (order.status == "closed" and refund_closed):
         raise AppError(ErrorCode.ORDER_NOT_PAYABLE)
 
-    now = utcnow()
+    paid_at = paid_at or utcnow()
     payment.status = "success"
     payment.transaction_id = transaction_id
-    payment.paid_at = now
+    payment.paid_at = paid_at
     payment.raw = raw
     order.paid_fen = payment.amount_fen
-    order.paid_at = now
+    order.paid_at = paid_at
     if order.status == "closed":
         db.flush()
         _refund_closed_payment(db, order, payment)
@@ -308,12 +326,32 @@ def mark_paid(
     order.status = "paid"
     db.flush()
 
-    for item in repo.items_by_order(db, [order.id])[order.id]:
-        plan = repo.get_plan(db, item.plan_id) if item.plan_id else None
-        if plan is None:
-            continue
-        entitlement_service.grant_for_order_item(db, user_id=order.user_id, item=item, plan=plan, paid_at=now)
+    unavailable_item = _fulfill_order(db, order, paid_at)
+    if unavailable_item is not None:
+        _refund_unavailable_entitlement(db, order, payment, unavailable_item)
     return order
+
+
+def _fulfill_order(db: Session, order: Order, paid_at: datetime) -> OrderItem | None:
+    """发放整单权益。加购或续费目标失效时回滚发放，保留支付入账。"""
+    with db.begin_nested() as fulfillment:
+        for item in repo.items_by_order(db, [order.id])[order.id]:
+            plan = repo.get_plan(db, item.plan_id) if item.plan_id else None
+            if plan is None:
+                continue
+            try:
+                entitlement_service.grant_for_order_item(
+                    db, user_id=order.user_id, item=item, plan=plan, paid_at=paid_at
+                )
+            except AppError as exc:
+                if item.item_type not in ("addon", "renew") or exc.code not in (
+                    ErrorCode.ENTITLEMENT_NOT_FOUND,
+                    ErrorCode.ENTITLEMENT_EXPIRED,
+                ):
+                    raise
+                fulfillment.rollback()
+                return item
+    return None
 
 
 # ---------- 退款 ----------
@@ -321,7 +359,7 @@ def mark_paid(
 
 @dataclass(frozen=True)
 class RefundSubmission:
-    """后台退款结果；重试已有退款时没有新的审计快照。"""
+    """退款结果。重试已有退款时没有新的审计快照。"""
 
     refund: Refund
     order: Order
@@ -429,6 +467,33 @@ def _refund_closed_payment(db: Session, order: Order, payment: Payment) -> None:
     )
 
 
+def _refund_unavailable_entitlement(db: Session, order: Order, payment: Payment, item: OrderItem) -> None:
+    reason = "加购付款时主权益已失效" if item.item_type == "addon" else "续费付款时目标权益已失效"
+    result = refund_order(
+        db,
+        order_no=order.order_no,
+        request_id=uuid5(NAMESPACE_URL, f"idphone:payment:{payment.out_trade_no}:entitlement-unavailable"),
+        amount_fen=payment.amount_fen,
+        reason=reason,
+        operator="system",
+        defer_submission=settings.pay_mode == "wechat",
+    )
+    if result.before is not None:
+        target_key = "parent_entitlement_id" if item.item_type == "addon" else "renew_entitlement_id"
+        log.warning(
+            "refund.auto_entitlement_unavailable order_no=%s item_id=%s item_type=%s entitlement_id=%s "
+            "out_refund_no=%s amount_fen=%s status=%s operator=%s",
+            order.order_no,
+            item.id,
+            item.item_type,
+            item.snapshot.get(target_key),
+            result.refund.out_refund_no,
+            result.refund.amount_fen,
+            result.refund.status,
+            result.refund.operator,
+        )
+
+
 def _replay_refund(db: Session, refund: Refund, order: Order, amount_fen: int) -> RefundSubmission:
     if refund.order_id != order.id or refund.amount_fen != amount_fen:
         raise AppError(ErrorCode.IDEMPOTENCY_CONFLICT)
@@ -438,9 +503,16 @@ def _replay_refund(db: Session, refund: Refund, order: Order, amount_fen: int) -
 
 
 def refund_order(
-    db: Session, *, order_no: str, request_id: UUID, amount_fen: int, reason: str, operator: str
+    db: Session,
+    *,
+    order_no: str,
+    request_id: UUID,
+    amount_fen: int,
+    reason: str,
+    operator: str,
+    defer_submission: bool = False,
 ) -> RefundSubmission:
-    """发起退款或返回已有记录。由后台调用方提交事务。"""
+    """登记退款或返回已有记录。延迟提交时由退款 worker 发起微信退款。"""
     out_refund_no = f"RA{request_id.hex}"
     order_id = repo.order_id_by_no(db, order_no)
     if order_id is None:
@@ -473,7 +545,8 @@ def refund_order(
         assert existing is not None
         return _replay_refund(db, existing, order, amount_fen)
     before = {"status": order.status, "refunded_fen": order.refunded_fen}
-    _submit_refund(db, order, payment, refund, get_payment())
+    if not defer_submission:
+        _submit_refund(db, order, payment, refund, get_payment())
     return RefundSubmission(refund, order, before)
 
 
@@ -481,12 +554,23 @@ def refund_order(
 
 
 def _record_payment(db: Session, notify: PayNotify) -> Order:
+    paid_at = None
+    if settings.pay_mode == "wechat" and (success_time := notify.raw.get("success_time")) is not None:
+        # 已验签的微信回调和查单以商户支付成功时间为准。
+        try:
+            paid_at = datetime.fromisoformat(success_time)
+        except TypeError, ValueError:
+            raise AppError(ErrorCode.VALIDATION_ERROR, "微信支付成功时间格式不正确") from None
+        if paid_at.tzinfo is None:
+            raise AppError(ErrorCode.VALIDATION_ERROR, "微信支付成功时间缺少时区")
+        paid_at = paid_at.astimezone(UTC)
     return mark_paid(
         db,
         out_trade_no=notify.out_trade_no,
         transaction_id=notify.transaction_id,
         amount_fen=notify.amount_fen,
         raw=notify.raw,
+        paid_at=paid_at,
     )
 
 
