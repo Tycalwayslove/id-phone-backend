@@ -711,7 +711,7 @@ class AdminProviderSpecOut(Schema):
     cost_fen: int = Field(description="办理一次的成本，单位：分", examples=[300])
     is_enabled: bool = Field(description="该服务商是否启用此规格", examples=[True])
     last_synced_at: datetime | None = Field(
-        description="最近一次同步覆盖范围的时间；从未同步为空", examples=[None]
+        description="该规格最近在同步目录中出现的时间；从未同步为空", examples=[None]
     )
 
 
@@ -731,7 +731,10 @@ class AdminProviderOut(Schema):
 
     code: str = Field(description="服务商编码，唯一", examples=["zheying"])
     name: str = Field(description="服务商名称", examples=["鹧应"])
-    adapter: str = Field(description="代码里使用的适配器名", examples=["zheying"])
+    adapter: str = Field(
+        description="适配器标识。zheying = 鹧应；qianweiyun = 黔微云；clipimg = 可立图（真实通道暂不可用）",
+        examples=["zheying", "qianweiyun", "clipimg"],
+    )
     upstream_group: str | None = Field(
         description="上游分组；相同取值的服务商是同一个上游，不会互为备份。无分组为空", examples=["zheying"]
     )

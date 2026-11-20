@@ -48,6 +48,7 @@ from app.modules.admin.schemas import (
     AdminUserSearchIn,
     NotifyStatus,
 )
+from app.modules.specs.schemas import ProviderSyncResult
 
 admin_router = APIRouter(tags=["后台"])
 
@@ -543,6 +544,23 @@ def list_providers(_: ProviderRead, db: DB):
 )
 def update_provider(code: ProviderCodePath, body: AdminProviderUpdateIn, admin: ProviderWrite, db: DB):
     return service.update_provider(db, admin, code, body)
+
+
+@admin_router.post(
+    "/providers/{code}/sync-specs",
+    operation_id="admin_providers_sync_specs",
+    summary="同步服务商规格目录",
+    description=(
+        f"读取服务商的全量规格目录。权限点 provider:write（仅 owner）。{_LOGIN_NOTE}{_WRITE_NOTE}"
+        "已有规格仅更新制照参数。新规格默认下架，且服务商映射默认停用。目录移除的条目会停用映射。"
+        "读取目录或详情失败时，同步不会写入规格变更。"
+    ),
+    response_model=ProviderSyncResult,
+    response_description="新增、更新、未变、停用数量及逐条明细",
+    responses=errors_doc(*_AUTH, ErrorCode.NOT_FOUND, ErrorCode.PROVIDER_UNAVAILABLE),
+)
+def sync_provider_specs(code: ProviderCodePath, admin: ProviderWrite, db: DB):
+    return service.sync_provider_specs(db, admin, code)
 
 
 # ---------- 服务商规格与路由规则 ----------

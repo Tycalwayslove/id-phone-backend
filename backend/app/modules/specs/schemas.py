@@ -75,3 +75,34 @@ class SpecDetail(SpecOut):
     official_valid_days: int | None = Field(
         default=None, description="官方回执的有效天数；无明确期限时为空", examples=[90]
     )
+
+
+ProviderSyncChange = Literal["created", "updated", "unchanged", "disabled"]
+
+
+class ProviderSyncItem(Schema):
+    """一条服务商规格映射的同步结果。"""
+
+    provider_item_id: str = Field(description="服务商侧的规格 ID", examples=["713"])
+    spec_code: str = Field(description="本地规格编码", examples=["zy_713"])
+    spec_name: str = Field(description="本地规格名称", examples=["广东身份证（回执）"])
+    change: ProviderSyncChange = Field(
+        description="同步结果。created = 新增；updated = 更新；unchanged = 参数未变；disabled = 映射已停用",
+        examples=["created"],
+    )
+    changed_fields: list[str] = Field(
+        description="本次更新的制照参数字段。新增、未变或停用时为空",
+        examples=[["width_px", "file_size_max_kb"], []],
+    )
+
+
+class ProviderSyncResult(Schema):
+    """同步服务商目录后的统计与逐条结果。"""
+
+    created: int = Field(description="新建的规格和映射数量", examples=[1])
+    updated: int = Field(description="制照参数有变化的映射数量", examples=[2])
+    unchanged: int = Field(description="制照参数未变化、仅刷新同步时间的映射数量", examples=[8])
+    disabled: int = Field(description="本次由启用改为停用的映射数量", examples=[1])
+    items: list[ProviderSyncItem] = Field(
+        description="本次同步的逐条明细，包含新增、更新、未变和本次停用的映射", examples=[[]]
+    )

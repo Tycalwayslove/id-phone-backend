@@ -13,7 +13,13 @@ from urllib.parse import parse_qs
 import httpx
 
 from app.core.errors import AppError, ErrorCode
-from app.integrations.receipt_providers.base import ProviderResult, ProviderStatus, SubmitRequest
+from app.integrations.receipt_providers._catalog import parse_item
+from app.integrations.receipt_providers.base import (
+    ProviderItem,
+    ProviderResult,
+    ProviderStatus,
+    SubmitRequest,
+)
 
 log = logging.getLogger(__name__)
 
@@ -112,10 +118,14 @@ class ZjzReceiptProvider:
         self._callback_nonce = callback_nonce
         self._client = client
 
-    def submit(self, req: SubmitRequest) -> str:
+    def _api_base(self) -> str:
         base = _url(self._base_url, "回执服务商 API 地址无效")
         if not self._app_key or base.scheme != "https" or base.query:
             raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, "回执服务商 API 配置无效")
+        return str(base).rstrip("/")
+
+    def submit(self, req: SubmitRequest) -> str:
+        base_url = self._api_base()
         if req.photo_mime not in ("image/jpeg", "image/png") or not 0 < len(req.photo) <= _MAX_PHOTO_BYTES:
             raise AppError(ErrorCode.UPLOAD_INVALID)
         if not req.provider_item_id.isascii() or not req.provider_item_id.isdecimal():
@@ -128,8 +138,7 @@ class ZjzReceiptProvider:
             form["param"] = json.dumps(req.form, ensure_ascii=False)
         # 沙箱、限流、驳回重提计费和 pic_id 复用规则均未说明。每次仅执行一组请求，由 make 校验分辨率。
         with nullcontext(self._client) if self._client is not None else httpx.Client() as client:
-            base_url = str(base).rstrip("/")
-            pic_id = self._post(
+            pic_id = self._post_id(
                 client,
                 base_url,
                 _MAKE,
@@ -139,11 +148,19 @@ class ZjzReceiptProvider:
             if not pic_id.isascii() or not pic_id.isdecimal():
                 raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, "回执服务商制作编号无效")
             form["pic_id"] = pic_id
-            return self._post(client, base_url, _SUBMIT, form, "order_no")
+            return self._post_id(client, base_url, _SUBMIT, form, "order_no")
 
-    def _post(
+    def _post_id(
         self, client: httpx.Client, base_url: str, path: str, form: dict[str, str], id_field: str
     ) -> str:
+        data = self._post(client, base_url, path, form)
+        if identifier := _id_as_text(data.get(id_field)):
+            return identifier
+        if path == _SUBMIT:
+            raise TimeoutError(f"回执服务商 {path} 结果未知")
+        raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, "回执服务商制作请求失败")
+
+    def _post(self, client: httpx.Client, base_url: str, path: str, form: dict[str, str]) -> dict:
         try:
             # 请求侧未给出 timestamp、nonce 或 HMAC 规则，服务商凭据按文档放在表单 key 字段。
             response = client.post(
@@ -164,16 +181,32 @@ class ZjzReceiptProvider:
                     # 完整错误码表和余额不足行为未公开。msg 可能回显密钥或表单，只保留固定说明。
                     raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, f"回执服务商拒绝 {path} 请求")
                 data = body.get("data")
-                identifier = _id_as_text(data.get(id_field)) if isinstance(data, dict) else ""
-                if identifier:
-                    return identifier
+                if isinstance(data, dict):
+                    return data
             raise_timeout = False
 
         # 离开 except 后再抛出，避免异常链携带原请求。submit 缺少可确认结果时也走人工核对。
         # 文档未说明幂等键和外部单号，不自动重试任一阶段。
         if raise_timeout or path == _SUBMIT:
             raise TimeoutError(f"回执服务商 {path} 结果未知")
-        raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, "回执服务商制作请求失败")
+        raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, f"回执服务商 {path} 请求失败")
+
+    def _catalog_post(self, path: str, form: dict[str, str]) -> dict:
+        base_url = self._api_base()
+        with nullcontext(self._client) if self._client is not None else httpx.Client() as client:
+            return self._post(client, base_url, path, form)
+
+    def list_items(self) -> list[ProviderItem]:
+        rows = self._catalog_post("/item/list", {}).get("list")
+        if not isinstance(rows, list):
+            raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, "回执服务商目录无效")
+        return [parse_item(row, id_field="item_id") for row in rows]
+
+    def get_item(self, item_id: str) -> ProviderItem:
+        item = parse_item(self._catalog_post("/item/get", {"item_id": item_id}), id_field="id")
+        if item.provider_item_id != item_id:
+            raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, "回执服务商详情规格编号不匹配")
+        return item
 
     def query(self, provider_order_no: str) -> ProviderStatus:
         # 服务商未公开订单查询接口。保持 processing，交由业务层等回调或超时转人工。

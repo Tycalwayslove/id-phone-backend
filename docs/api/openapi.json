@@ -5437,6 +5437,117 @@
         }
       }
     },
+    "/api/v1/admin/providers/{code}/sync-specs": {
+      "post": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "同步服务商规格目录",
+        "description": "读取服务商的全量规格目录。权限点 provider:write（仅 owner）。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。已有规格仅更新制照参数。新规格默认下架，且服务商映射默认停用。目录移除的条目会停用映射。读取目录或详情失败时，同步不会写入规格变更。",
+        "operationId": "admin_providers_sync_specs",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "服务商编码",
+              "examples": [
+                "zheying"
+              ],
+              "title": "Code"
+            },
+            "description": "服务商编码"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "新增、更新、未变、停用数量及逐条明细",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderSyncResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：NOT_FOUND（资源不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "错误码：PROVIDER_UNAVAILABLE（回执通道暂时不可用，请稍后再试）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/provider-specs": {
       "post": {
         "tags": [
@@ -9137,9 +9248,11 @@
           "adapter": {
             "type": "string",
             "title": "Adapter",
-            "description": "代码里使用的适配器名",
+            "description": "适配器标识。zheying = 鹧应；qianweiyun = 黔微云；clipimg = 可立图（真实通道暂不可用）",
             "examples": [
-              "zheying"
+              "zheying",
+              "qianweiyun",
+              "clipimg"
             ]
           },
           "upstream_group": {
@@ -9365,7 +9478,7 @@
               }
             ],
             "title": "Last Synced At",
-            "description": "最近一次同步覆盖范围的时间；从未同步为空",
+            "description": "该规格最近在同步目录中出现的时间；从未同步为空",
             "examples": [
               null
             ]
@@ -12942,6 +13055,130 @@
         ],
         "title": "PlanOut",
         "description": "在售套餐。"
+      },
+      "ProviderSyncItem": {
+        "properties": {
+          "provider_item_id": {
+            "type": "string",
+            "title": "Provider Item Id",
+            "description": "服务商侧的规格 ID",
+            "examples": [
+              "713"
+            ]
+          },
+          "spec_code": {
+            "type": "string",
+            "title": "Spec Code",
+            "description": "本地规格编码",
+            "examples": [
+              "zy_713"
+            ]
+          },
+          "spec_name": {
+            "type": "string",
+            "title": "Spec Name",
+            "description": "本地规格名称",
+            "examples": [
+              "广东身份证（回执）"
+            ]
+          },
+          "change": {
+            "type": "string",
+            "enum": [
+              "created",
+              "updated",
+              "unchanged",
+              "disabled"
+            ],
+            "title": "Change",
+            "description": "同步结果。created = 新增；updated = 更新；unchanged = 参数未变；disabled = 映射已停用",
+            "examples": [
+              "created"
+            ]
+          },
+          "changed_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Changed Fields",
+            "description": "本次更新的制照参数字段。新增、未变或停用时为空",
+            "examples": [
+              [
+                "width_px",
+                "file_size_max_kb"
+              ],
+              []
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_item_id",
+          "spec_code",
+          "spec_name",
+          "change",
+          "changed_fields"
+        ],
+        "title": "ProviderSyncItem",
+        "description": "一条服务商规格映射的同步结果。"
+      },
+      "ProviderSyncResult": {
+        "properties": {
+          "created": {
+            "type": "integer",
+            "title": "Created",
+            "description": "新建的规格和映射数量",
+            "examples": [
+              1
+            ]
+          },
+          "updated": {
+            "type": "integer",
+            "title": "Updated",
+            "description": "制照参数有变化的映射数量",
+            "examples": [
+              2
+            ]
+          },
+          "unchanged": {
+            "type": "integer",
+            "title": "Unchanged",
+            "description": "制照参数未变化、仅刷新同步时间的映射数量",
+            "examples": [
+              8
+            ]
+          },
+          "disabled": {
+            "type": "integer",
+            "title": "Disabled",
+            "description": "本次由启用改为停用的映射数量",
+            "examples": [
+              1
+            ]
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderSyncItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本次同步的逐条明细，包含新增、更新、未变和本次停用的映射",
+            "examples": [
+              []
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "created",
+          "updated",
+          "unchanged",
+          "disabled",
+          "items"
+        ],
+        "title": "ProviderSyncResult",
+        "description": "同步服务商目录后的统计与逐条结果。"
       },
       "ReceiptCreate": {
         "properties": {

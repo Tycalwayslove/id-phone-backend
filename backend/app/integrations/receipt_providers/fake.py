@@ -11,7 +11,48 @@ import secrets
 
 from app.core.errors import AppError, ErrorCode
 from app.core.security import sign
-from app.integrations.receipt_providers.base import ProviderStatus, SubmitRequest
+from app.integrations.receipt_providers._catalog import parse_item
+from app.integrations.receipt_providers.base import ProviderItem, ProviderStatus, SubmitRequest
+
+# 同时覆盖 seed_dev 已配置的回执规格，方便演示更新和新建。
+_ITEMS = (
+    ("1001", "一寸", 295, 413, 25, 35, "['blue','white','red']", 20, 200),
+    ("1002", "二寸", 413, 579, 35, 49, "['blue','white','red']", 30, 200),
+    ("1003", "小一寸", 260, 378, 22, 32, "['blue','white']", 20, 100),
+    ("713", "广东身份证（回执）", 358, 441, 26, 32, "['white']", 20, 100),
+    ("625", "贵州身份证（回执）", 358, 441, 26, 32, "['white']", 20, 100),
+    ("755", "安徽身份证（回执）", 358, 441, 26, 32, "['white']", 20, 100),
+    ("712", "广东社保卡", 358, 441, 26, 32, "['white']", 15, 50),
+    ("622", "广东驾驶证", 413, 579, 35, 49, "['white']", 20, 100),
+    ("736", "贵州驾驶证", 413, 579, 35, 49, "['white']", 20, 100),
+    ("714", "广东居住证", 358, 441, 26, 32, "['white']", 20, 100),
+    ("1004", "护照", 390, 567, 33, 48, "['white']", 30, 80),
+    ("624", "港澳通行证", 390, 567, 33, 48, "['white']", 30, 80),
+    ("1005", "教师资格证", 295, 413, 25, 35, "['white']", 20, 200),
+    ("1006", "普通话考试", 390, 567, 33, 48, "['blue','white']", 20, 200),
+)
+
+
+def _catalog() -> list[ProviderItem]:
+    return [
+        parse_item(
+            dict(
+                item_id=item_id,
+                name=name,
+                width_px=wpx,
+                height_px=hpx,
+                width_mm=wmm,
+                height_mm=hmm,
+                color=color,
+                dpi=300,
+                sort=sort,
+                file_size_min=size_min,
+                file_size_max=size_max,
+            ),
+            id_field="item_id",
+        )
+        for sort, (item_id, name, wpx, hpx, wmm, hmm, color, size_min, size_max) in enumerate(_ITEMS)
+    ]
 
 
 def sign_fake_callback(body: bytes) -> str:
@@ -53,6 +94,15 @@ class FakeProvider:
         return self._state.get(
             provider_order_no, ProviderStatus(provider_order_no=provider_order_no, result="processing")
         )
+
+    def list_items(self) -> list[ProviderItem]:
+        return _catalog()
+
+    def get_item(self, item_id: str) -> ProviderItem:
+        for item in self.list_items():
+            if item.provider_item_id == item_id:
+                return item
+        raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, "回执服务商规格不存在")
 
     def parse_callback(self, headers: dict[str, str], body: bytes) -> tuple[ProviderStatus, str]:
         if headers.get("x-fake-signature") != sign_fake_callback(body):

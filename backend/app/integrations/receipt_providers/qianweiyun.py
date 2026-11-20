@@ -3,5 +3,5 @@
 from app.integrations.receipt_providers._zjz_common import ZjzReceiptProvider
 
 
-class ClipimgProvider(ZjzReceiptProvider):
+class QianweiyunProvider(ZjzReceiptProvider):
     """黔微云通道，提交时同样携带回调地址。"""

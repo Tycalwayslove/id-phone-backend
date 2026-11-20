@@ -1,5 +1,7 @@
 """回执服务商适配器。业务代码通过 get_provider 拿到统一接口。"""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from urllib.parse import quote
 
 import httpx
@@ -8,8 +10,8 @@ from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.integrations.receipt_providers._zjz_common import build_callback_url
 from app.integrations.receipt_providers.base import ReceiptProvider
-from app.integrations.receipt_providers.clipimg import ClipimgProvider
 from app.integrations.receipt_providers.fake import FakeProvider
+from app.integrations.receipt_providers.qianweiyun import QianweiyunProvider
 from app.integrations.receipt_providers.zheying import ZheyingProvider
 
 _fake_instances: dict[str, FakeProvider] = {}
@@ -29,9 +31,9 @@ def get_provider(
     if adapter == "zheying":
         provider_class = ZheyingProvider
         base_url, app_key = settings.zheying_api_base, settings.zheying_app_key
-    elif adapter == "clipimg":
-        provider_class = ClipimgProvider
-        base_url, app_key = settings.clipimg_api_base, settings.clipimg_app_key
+    elif adapter == "qianweiyun":
+        provider_class = QianweiyunProvider
+        base_url, app_key = settings.qianweiyun_api_base, settings.qianweiyun_app_key
     else:
         raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, "回执服务商适配器未配置")
 
@@ -46,4 +48,14 @@ def get_provider(
     )
 
 
-__all__ = ["ReceiptProvider", "build_callback_url", "get_provider"]
+@contextmanager
+def open_catalog_provider(adapter: str, code: str) -> Iterator[ReceiptProvider]:
+    """在一次目录同步内复用连接。"""
+    if settings.receipt_mode == "fake":
+        yield get_provider(adapter, code)
+    else:
+        with httpx.Client() as client:
+            yield get_provider(adapter, code, client=client)
+
+
+__all__ = ["ReceiptProvider", "build_callback_url", "get_provider", "open_catalog_provider"]

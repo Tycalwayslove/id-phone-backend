@@ -29,6 +29,22 @@ class ProviderStatus:
     raw: dict = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ProviderItem:
+    provider_item_id: str
+    name: str
+    bg_colors: list[str]
+    width_px: int
+    height_px: int
+    width_mm: int | None
+    height_mm: int | None
+    dpi: int
+    file_size_min_kb: int | None
+    file_size_max_kb: int | None
+    sort: int
+    raw: dict = field(default_factory=dict)
+
+
 class ReceiptProvider(Protocol):
     code: str
 
@@ -37,6 +53,14 @@ class ReceiptProvider(Protocol):
         ...
 
     def query(self, provider_order_no: str) -> ProviderStatus: ...
+
+    def list_items(self) -> list[ProviderItem]:
+        """读取完整目录。网络超时抛 TimeoutError。"""
+        ...
+
+    def get_item(self, item_id: str) -> ProviderItem:
+        """读取单条规格详情。网络超时抛 TimeoutError。"""
+        ...
 
     def parse_callback(self, headers: dict[str, str], body: bytes) -> tuple[ProviderStatus, str]:
         """解析回调，返回 (状态, 去重键)。签名不对抛 AppError(CALLBACK_SIGNATURE_INVALID)。"""
