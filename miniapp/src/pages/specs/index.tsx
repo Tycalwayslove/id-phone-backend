@@ -3,11 +3,14 @@ import { Text, View } from '@tarojs/components'
 import Taro, { useReachBottom, usePullDownRefresh, useRouter } from '@tarojs/taro'
 import { listSpecs } from '../../api/specs'
 import type { SpecCategory } from '../../api/specs'
+import CityChip from '../../components/CityChip'
+import CityPicker from '../../components/CityPicker'
 import EmptyState from '../../components/EmptyState'
 import Loading from '../../components/Loading'
 import PageContainer from '../../components/PageContainer'
 import SearchBox from '../../components/SearchBox'
 import SpecCard from '../../components/SpecCard'
+import useCity from '../../hooks/useCity'
 import { usePagedList } from '../../hooks/usePagedList'
 import { describeError } from '../../utils/errors'
 import { PAGES, navigate, safeDecode, toInt } from '../../utils/nav'
@@ -37,28 +40,25 @@ function parseCategory(v: string | undefined): SpecCategory | undefined {
 export default function Specs() {
   const { params } = useRouter()
   const photoId = toInt(params.photo_id)
+  const { city, setCity, regionCode } = useCity()
+  const [pickingCity, setPickingCity] = useState(!city)
   const [category, setCategory] = useState<SpecCategory | undefined>(parseCategory(params.category))
   const [keyword, setKeyword] = useState(params.keyword ? safeDecode(params.keyword) : '')
 
-  const { items, loading, loaded, hasMore, error, reload, loadMore } = usePagedList(
-    (cursor) => listSpecs({ category, keyword: keyword || undefined, cursor }),
-    [category, keyword]
-  )
-
-  usePullDownRefresh(() => {
-    void reload().finally(() => Taro.stopPullDownRefresh())
-  })
-  useReachBottom(() => {
-    void loadMore()
-  })
-
   const pick = (code: string) => {
-    if (photoId) return navigate(PAGES.editor, { photo_id: photoId, spec_code: code })
-    return navigate(PAGES.specDetail, { code })
+    if (!city) {
+      setPickingCity(true)
+      return
+    }
+    if (photoId) void navigate(PAGES.editor, { photo_id: photoId, spec_code: code })
+    else void navigate(PAGES.specDetail, { code })
   }
 
   return (
     <PageContainer>
+      <View className='specs-city'>
+        <CityChip city={city} onClick={() => setPickingCity(true)} />
+      </View>
       <SearchBox value={keyword} onSearch={setKeyword} />
       <View className='specs-tabs'>
         {TABS.map((t) => (
@@ -72,19 +72,54 @@ export default function Specs() {
         ))}
       </View>
       {photoId ? <View className='hint specs-tip'>请选择要换成的规格</View> : null}
+      <SpecResults key={regionCode} category={category} keyword={keyword} regionCode={regionCode} onPick={pick} />
+      <CityPicker
+        open={pickingCity}
+        city={city}
+        onClose={() => setPickingCity(false)}
+        onPick={(nextCity) => {
+          setCity(nextCity)
+          setPickingCity(false)
+        }}
+      />
+    </PageContainer>
+  )
+}
 
+interface SpecResultsProps {
+  category?: SpecCategory
+  keyword: string
+  regionCode: string
+  onPick: (code: string) => void
+}
+
+function SpecResults({ category, keyword, regionCode, onPick }: SpecResultsProps) {
+  const { items, loading, loaded, hasMore, error, reload, loadMore } = usePagedList(
+    (cursor) => listSpecs({ category, keyword: keyword || undefined, cursor, region_code: regionCode }),
+    [category, keyword]
+  )
+
+  usePullDownRefresh(() => {
+    void reload().finally(() => Taro.stopPullDownRefresh())
+  })
+  useReachBottom(() => {
+    void loadMore()
+  })
+
+  return (
+    <>
       <View className='list-gap'>
         {items.map((s) => (
-          <SpecCard key={s.code} spec={s} onClick={() => pick(s.code)} />
+          <SpecCard key={s.code} spec={s} onClick={() => onPick(s.code)} />
         ))}
       </View>
 
       {loading ? <Loading /> : null}
       {loaded && !loading && items.length === 0 ? (
-        <EmptyState emoji='🔍' title='没有找到相关规格' desc='换个关键字或分类试试' />
+        <EmptyState emoji='🔍' title='没有找到相关规格' desc='换个关键字、分类或城市试试' />
       ) : null}
       {error ? <View className='list-footer'>{describeError(error).message}，下拉重试</View> : null}
       {loaded && !hasMore && items.length > 0 ? <View className='list-footer'>没有更多了</View> : null}
-    </PageContainer>
+    </>
   )
 }

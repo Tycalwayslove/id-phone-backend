@@ -9,6 +9,7 @@ import { createReceipt } from '../../api/receipts'
 import { getSpec } from '../../api/specs'
 import Loading from '../../components/Loading'
 import PageContainer from '../../components/PageContainer'
+import useCity from '../../hooks/useCity'
 import { handleError } from '../../utils/errors'
 import { createKeyKeeper } from '../../utils/idempotency'
 import { PAGES, redirect, toInt } from '../../utils/nav'
@@ -44,6 +45,7 @@ async function askSubscribe(templates: TemplateOut[]): Promise<string[]> {
 export default function ReceiptApply() {
   const { params } = useRouter()
   const specCode = params.spec_code ?? ''
+  const { city } = useCity()
 
   const [replacementId, setReplacementId] = useState<number>()
   const [spec, setSpec] = useState<SpecDetail | null>(null)
@@ -66,9 +68,13 @@ export default function ReceiptApply() {
     }
   }, [specCode])
 
+  function fieldValue(key: string): string {
+    return form[key] ?? (key === 'city' && city?.code ? city.name : '')
+  }
+
   function validate(s: SpecDetail): string | null {
     for (const f of s.form_schema) {
-      const v = (form[f.key] ?? '').trim()
+      const v = fieldValue(f.key).trim()
       if (f.required && !v) return `请填写${f.label}`
       if (f.key === 'idcard' && v && !isIdCard18(v)) return '请输入 18 位身份证号'
     }
@@ -89,7 +95,7 @@ export default function ReceiptApply() {
       if (accepted.length) await reportSubscriptions(accepted).catch(() => undefined)
       const clean: Record<string, string> = {}
       spec.form_schema.forEach((f) => {
-        const v = (form[f.key] ?? '').trim()
+        const v = fieldValue(f.key).trim()
         if (v) clean[f.key] = v
       })
       // 同一份表单重复点击用同一个幂等键
@@ -151,7 +157,7 @@ export default function ReceiptApply() {
               type={f.key === 'idcard' ? 'idcard' : 'text'}
               maxlength={f.key === 'idcard' ? 18 : 50}
               placeholder={`请输入${f.label}`}
-              value={form[f.key] ?? ''}
+              value={fieldValue(f.key)}
               onInput={(e) => {
                 const v = e.detail.value
                 setForm((prev) => ({ ...prev, [f.key]: v }))
