@@ -41,22 +41,39 @@ export function formatSizeRange(min: number | null | undefined, max: number | nu
   return ''
 }
 
-/** 把规格的十六进制底色归为白、蓝、红，其余颜色保留为“其他”。 */
-export function bgColorName(hex: string): '白' | '蓝' | '红' | '其他' {
-  const color = hex.trim().toLowerCase()
-  // 早期规格使用英文色名，后端目录同步后的规格使用十六进制。
-  if (color === 'white') return '白'
-  if (color === 'blue') return '蓝'
-  if (color === 'red') return '红'
-  const digits = color.replace(/^#/, '')
-  const rgb = /^[0-9a-f]{3}$/.test(digits) ? digits.replace(/./g, (digit) => digit + digit) : digits
-  if (!/^[0-9a-f]{6}$/.test(rgb)) return '其他'
-  const value = Number.parseInt(rgb, 16)
+// 与后端服务商目录的英文底色映射一致。
+const LEGACY_BG_COLORS = new Map([
+  ['white', '#FFFFFF'],
+  ['blue', '#438EDB'],
+  ['red', '#FF0000'],
+  ['dark_blue', '#1A3B8C'],
+  ['grey', '#BFBFBF'],
+  ['tint', '#EAF1FB'],
+  ['gradient', '#438EDB'],
+  ['sky_blue', '#87CEEB'],
+  ['gray', '#BFBFBF'],
+  ['dark_red', '#8B0000'],
+])
+
+/** 将英文色名和十六进制简写转为供色块使用的色值。 */
+export function bgColorHex(color: string): string {
+  const trimmed = color.trim()
+  const mapped = LEGACY_BG_COLORS.get(trimmed.toLowerCase())
+  if (mapped) return mapped
+  const digits = trimmed.replace(/^#/, '').toUpperCase()
+  if (/^[0-9A-F]{3}$/.test(digits)) return `#${digits.replace(/./g, (digit) => digit + digit)}`
+  return /^[0-9A-F]{6}$/.test(digits) ? `#${digits}` : trimmed
+}
+
+export function bgColorName(color: string): '白' | '蓝' | '红' | '其他' {
+  const hex = bgColorHex(color)
+  if (!/^#[0-9A-F]{6}$/.test(hex)) return '其他'
+  const value = Number.parseInt(hex.slice(1), 16)
   const red = value >> 16
   const green = (value >> 8) & 255
   const blue = value & 255
   if (red === 255 && green === 255 && blue === 255) return '白'
-  if (blue - red >= 24 && blue > green && green >= red) return '蓝'
+  if (blue - red >= 24 && blue > green) return '蓝'
   if (red - Math.max(green, blue) >= 24 && Math.abs(green - blue) <= (red - Math.min(green, blue)) / 2) return '红'
   return '其他'
 }

@@ -19,6 +19,8 @@ export const PAGES = {
   entitlementDetail: '/pages/entitlement-detail/index'
 } as const
 
+export const SPEC_PICKED_EVENT = 'specPicked'
+
 type QueryValue = string | number | null | undefined
 
 export function buildUrl(path: string, query?: Record<string, QueryValue>): string {

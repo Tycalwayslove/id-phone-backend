@@ -12,8 +12,8 @@ import SearchBox from '../../components/SearchBox'
 import SpecCard from '../../components/SpecCard'
 import useCity from '../../hooks/useCity'
 import { usePagedList } from '../../hooks/usePagedList'
-import { describeError } from '../../utils/errors'
-import { PAGES, navigate, safeDecode, toInt } from '../../utils/nav'
+import { describeError, handleError } from '../../utils/errors'
+import { PAGES, SPEC_PICKED_EVENT, navigate, safeDecode, toInt } from '../../utils/nav'
 import './index.scss'
 
 interface Tab {
@@ -35,11 +35,13 @@ function parseCategory(v: string | undefined): SpecCategory | undefined {
 /**
  * 规格列表。路由参数：
  * keyword 初始关键字；category 初始分类；
+ * select=1 时通过页面通信通道将规格返回给制作页；
  * photo_id 有值表示“给这张照片换规格”，选中后直接回制作页。
  */
 export default function Specs() {
   const { params } = useRouter()
   const photoId = toInt(params.photo_id)
+  const selecting = params.select === '1'
   const { city, setCity, regionCode } = useCity()
   const [pickingCity, setPickingCity] = useState(!city)
   const [category, setCategory] = useState<SpecCategory | undefined>(parseCategory(params.category))
@@ -50,7 +52,15 @@ export default function Specs() {
       setPickingCity(true)
       return
     }
-    if (photoId) void navigate(PAGES.editor, { photo_id: photoId, spec_code: code })
+    if (selecting) {
+      const channel = Taro.getCurrentInstance().page?.getOpenerEventChannel?.()
+      if (!channel?.emit) {
+        void Taro.showToast({ title: '请返回制作页重新选择证件类型', icon: 'none' })
+        return
+      }
+      channel.emit(SPEC_PICKED_EVENT, code)
+      void Taro.navigateBack().catch(handleError)
+    } else if (photoId) void navigate(PAGES.editor, { photo_id: photoId, spec_code: code })
     else void navigate(PAGES.specDetail, { code })
   }
 

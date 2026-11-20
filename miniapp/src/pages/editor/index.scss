@@ -41,8 +41,8 @@
   &__details {
     display: flex;
     flex-wrap: wrap;
-    align-items: baseline;
-    justify-content: center;
+    align-items: center;
+    width: 100%;
     gap: 8px 16px;
     margin: 20px 0 4px;
   }
@@ -51,9 +51,22 @@
     font-weight: 600;
   }
 
-  &__size {
-    color: var(--c-ok);
+  &__change {
+    margin: 0 0 0 auto;
+    padding: 12px 0 12px 16px;
+    background: transparent;
+    color: var(--c-primary);
     font-size: var(--fs-small);
+    line-height: 1.4;
+
+    &::after {
+      border: none;
+    }
+  }
+
+  &__notice {
+    align-self: flex-start;
+    margin-top: 6px;
   }
 
   .btn-native {

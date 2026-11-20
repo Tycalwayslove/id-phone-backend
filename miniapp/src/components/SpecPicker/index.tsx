@@ -16,11 +16,16 @@ interface Props {
   open: boolean
   specs: SpecOut[]
   loading: boolean
+  title?: string
+  citySkipLabel?: string
   onClose: () => void
   onPick: (spec: SpecOut) => void
+  onSearch?: () => void
 }
 
-export default function SpecPicker({ open, specs, loading, onClose, onPick }: Props) {
+export default function SpecPicker({
+  open, specs, loading, title = '拍哪种证件照？', citySkipLabel, onClose, onPick, onSearch,
+}: Props) {
   const { city, setCity } = useCity()
   const [changingCity, setChangingCity] = useState(false)
   const needsCity = city === null || changingCity
@@ -29,7 +34,7 @@ export default function SpecPicker({ open, specs, loading, onClose, onPick }: Pr
     <>
       <BottomSheet
         open={open && !needsCity}
-        title='拍哪种证件照？'
+        title={title}
         titleAction={<CityChip city={city} onClick={() => setChangingCity(true)} />}
         onClose={onClose}
       >
@@ -45,7 +50,8 @@ export default function SpecPicker({ open, specs, loading, onClose, onPick }: Pr
           {!loading && specs.length === 0 ? <Text className='hint'>可以搜索更多规格，或换个城市试试</Text> : null}
           <Button className='btn-native btn-native--plain' onClick={() => {
             onClose()
-            void navigate(PAGES.specs)
+            if (onSearch) onSearch()
+            else void navigate(PAGES.specs)
           }}>
             搜索更多规格
           </Button>
@@ -54,6 +60,7 @@ export default function SpecPicker({ open, specs, loading, onClose, onPick }: Pr
       <CityPicker
         open={open && needsCity}
         city={city}
+        skipLabel={citySkipLabel}
         onClose={() => {
           setChangingCity(false)
           if (!city) onClose()

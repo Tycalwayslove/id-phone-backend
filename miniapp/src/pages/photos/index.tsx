@@ -93,7 +93,7 @@ export default function Photos() {
           void shoot.open(spec.code)
         }}
       />
-      <ShootGuide spec={shoot.spec} onChoose={shoot.choose} onClose={shoot.close} />
+      <ShootGuide open={shoot.guideOpen} spec={shoot.spec} onChoose={shoot.choose} onClose={shoot.close} />
     </PageContainer>
   )
 }
