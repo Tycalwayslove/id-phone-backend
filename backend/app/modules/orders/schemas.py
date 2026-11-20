@@ -12,7 +12,9 @@ class PlanBenefitsOut(Schema):
     """套餐包含的权益。套餐没有某项权益时，该项为 0。"""
 
     storage_days: int = Field(
-        default=0, description="照片保管天数，从付款成功起算；0 表示套餐不含保管期", examples=[365]
+        default=0,
+        description="套餐配置的保管天数。续费时为增加的天数，0 表示未配置保管天数，不能用于续费",
+        examples=[365],
     )
     photo_scope: int = Field(
         default=0,
@@ -59,13 +61,22 @@ class OrderCreateIn(Schema):
     photo_id: int | None = Field(
         default=None,
         gt=0,
-        description="要保管/办理的照片 ID，必须是本人的照片。照片范围为“单张”的套餐必填；其他套餐可不传",
+        description="要保管或办理的本人照片 ID。新购独立的单张照片套餐时必填。续费和加购时从原权益取得照片",
         examples=[101],
     )
     parent_entitlement_id: int | None = Field(
         default=None,
         gt=0,
-        description="主权益 ID，必须是本人当前有效的权益。只有加购项套餐（如加办回执）必填，其他套餐不用传",
+        description="仅加购项套餐必填。主权益 ID，必须是本人当前有效的权益",
+        examples=[12],
+    )
+    renew_entitlement_id: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "续费目标权益 ID，来自本人权益列表或详情。未撤销的独立权益可在到期前或到期后 30 天内续费。"
+            "续费时省略 photo_id 和 parent_entitlement_id"
+        ),
         examples=[12],
     )
 
@@ -98,6 +109,11 @@ class OrderOut(Schema):
     total_fen: int = Field(description="订单应付金额，单位：分", examples=[3990])
     paid_fen: int = Field(description="已支付金额，单位：分；未支付为 0", examples=[0])
     refunded_fen: int = Field(description="已退款金额，单位：分；没有退款为 0", examples=[0])
+    refund_pending: bool = Field(
+        default=False,
+        description="是否有一笔或多笔退款在处理中。为 true 时可展示退款中，已退款金额在退款确认成功后更新",
+        examples=[False],
+    )
     created_at: datetime = Field(description="下单时间（带时区）", examples=["2026-11-19T08:30:12Z"])
     paid_at: datetime | None = Field(
         description="支付成功时间（带时区）；未支付时为空", examples=["2026-11-19T08:31:00Z"]

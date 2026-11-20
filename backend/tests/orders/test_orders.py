@@ -2,19 +2,29 @@ import json
 from dataclasses import replace
 from datetime import timedelta
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 from sqlalchemy import func, select
 
 from app.core.errors import AppError, ErrorCode
+from app.core.idempotency import _hash
 from app.core.utils import utcnow
 from app.integrations.payment import FakePay, OrderQuery, PayNotify, RefundResult, sign_fake_notify
-from app.models import Entitlement, Order, Payment, Refund
+from app.models import (
+    Entitlement,
+    EntitlementQuota,
+    IdempotencyKey,
+    Order,
+    OrderItem,
+    Payment,
+    PlanBenefit,
+    Refund,
+)
 from app.modules.orders import service
 from tests.conftest import login
 from tests.factories import make_plan, make_standard_plans
-from tests.orders.helpers import latest_user_id, make_photo
+from tests.orders.helpers import grant_plan, latest_user_id, make_photo
 
 API = "/api/v1"
 
@@ -132,6 +142,28 @@ def test_idempotency_key_different_body_conflict(client, db):
     )
     assert b.status_code == 409
     assert b.json()["code"] == "IDEMPOTENCY_CONFLICT"
+
+
+def test_order_replays_idempotency_record_created_before_renewal(client, db):
+    headers, user_id = _setup(client, db)
+    order = _buy(client, headers, "unlimited_99")
+    db.add(
+        IdempotencyKey(
+            user_id=user_id,
+            scope="orders.create",
+            key="legacy-key",
+            request_hash=_hash(
+                {"plan_code": "unlimited_99", "photo_id": None, "parent_entitlement_id": None}
+            ),
+            response_status=200,
+            response_body={k: v for k, v in order.items() if k != "refund_pending"},
+        )
+    )
+    db.flush()
+
+    retry = _buy(client, {**headers, "Idempotency-Key": "legacy-key"}, "unlimited_99")
+    assert retry == order
+    assert db.scalar(select(func.count()).select_from(Order)) == 1
 
 
 def test_simulate_paid_twice_is_idempotent(client, db):
@@ -330,6 +362,191 @@ def test_addon_needs_valid_parent(client, db):
     )
     assert r.status_code == 404
     assert r.json()["code"] == "ENTITLEMENT_NOT_FOUND"
+
+
+@pytest.mark.parametrize("already_expired", [False, True])
+def test_renewal_extends_original_entitlement_once_using_checkout_snapshot(
+    client, db, monkeypatch, already_expired
+):
+    plans = make_standard_plans(db)
+    headers = login(client)
+    user_id = latest_user_id(db)
+    photo = make_photo(db, user_id)
+    now = utcnow()
+    original_paid_at = now - timedelta(days=370) if already_expired else now
+    ent = grant_plan(db, user_id, plans["photo_year_39_9"], photo_id=photo.id, paid_at=original_paid_at)
+    original_end = ent.ends_at
+    if already_expired:
+        ent.status = "expired"
+    quota = db.scalar(select(EntitlementQuota).where(EntitlementQuota.entitlement_id == ent.id))
+    quota.used = 1
+    db.flush()
+    monkeypatch.setattr(service, "utcnow", lambda: now)
+    url = f"{API}/entitlements/{ent.id}"
+    before = client.get(url, headers=headers).json()
+    assert before["can_renew"] and before["is_active"] is not already_expired
+
+    renewal_plan = make_plan(
+        db, "renew_photo", 700, {"storage_days": 30, "photo_scope": 1, "receipt_quota": 5}
+    )
+    request_headers = {**headers, "Idempotency-Key": "renew-photo"}
+    created = _buy(client, request_headers, renewal_plan.code, renew_entitlement_id=ent.id)
+    assert created["items"][0]["item_type"] == "renew"
+    assert created["items"][0]["photo_id"] == photo.id
+    assert _buy(client, request_headers, renewal_plan.code, renew_entitlement_id=ent.id) == created
+
+    storage = db.scalar(
+        select(PlanBenefit).where(
+            PlanBenefit.plan_id == renewal_plan.id, PlanBenefit.benefit_type == "storage_days"
+        )
+    )
+    storage.int_value = 90
+    db.flush()
+    order_no = created["order_no"]
+    body = _notify_body(db, order_no, amount_fen=700)
+    for _ in range(2):
+        response = client.post(
+            f"{API}/callbacks/wxpay", content=body, headers={"X-Fake-Signature": sign_fake_notify(body)}
+        )
+        assert response.status_code == 204, response.text
+
+    db.refresh(ent)
+    db.refresh(photo)
+    db.refresh(quota)
+    expected_end = max(now, original_end) + timedelta(days=30)
+    assert ent.status == "active" and ent.starts_at == original_paid_at and ent.ends_at == expected_end
+    assert ent.plan_id == plans["photo_year_39_9"].id
+    assert photo.access_until == expected_end
+    assert (quota.total, quota.used) == (1, 1)
+    assert db.scalar(select(func.count()).select_from(Entitlement)) == 1
+    assert client.get(url, headers=headers).json()["is_active"]
+    order = client.get(f"{API}/orders/{order_no}", headers=headers).json()
+    assert (order["status"], order["refund_pending"]) == ("paid", False)
+    item = db.scalar(select(OrderItem).where(OrderItem.item_type == "renew"))
+    assert item.snapshot["renew_entitlement_id"] == ent.id
+    assert item.snapshot["renewal_ledger"] == {
+        "storage_days": 30,
+        "applied_at": now.isoformat(),
+        "previous_ends_at": original_end.isoformat(),
+        "ends_at": expected_end.isoformat(),
+    }
+
+
+def test_renewal_rejects_other_users_and_incompatible_plans(client, db):
+    plans = make_standard_plans(db)
+    headers = login(client)
+    user_id = latest_user_id(db)
+    target = grant_plan(db, user_id, plans["unlimited_99"])
+    old = grant_plan(db, user_id, plans["unlimited_99"], paid_at=utcnow() - timedelta(days=396))
+    revoked = grant_plan(db, user_id, plans["unlimited_99"])
+    revoked.status = "revoked"
+    addon = grant_plan(db, user_id, plans["addon_receipt_10"], parent_entitlement_id=target.id)
+    other_headers = login(client, "dev:bob")
+    no_storage = make_plan(db, "no_storage", 100, {"receipt_quota": 1})
+
+    def renew(ent, plan, headers=headers, **kwargs):
+        response = client.post(
+            f"{API}/orders",
+            headers=headers,
+            json={"plan_code": plan, "renew_entitlement_id": ent.id, **kwargs},
+        )
+        return response.json()["code"]
+
+    assert renew(target, "unlimited_99", headers=other_headers) == "ENTITLEMENT_NOT_FOUND"
+    assert renew(target, "unlimited_99", parent_entitlement_id=target.id) == "VALIDATION_ERROR"
+    assert renew(target, "unlimited_99", photo_id=1) == "VALIDATION_ERROR"
+    for plan_code in ("addon_receipt_10", "photo_year_39_9", no_storage.code):
+        assert renew(target, plan_code) == "PLAN_NOT_AVAILABLE"
+    for ineligible in (old, revoked, addon):
+        assert not client.get(f"{API}/entitlements/{ineligible.id}", headers=headers).json()["can_renew"]
+        assert renew(ineligible, "unlimited_99") == "ENTITLEMENT_EXPIRED"
+
+
+@pytest.mark.parametrize("parent_status", ["expired", "revoked"])
+def test_invalid_addon_payment_starts_one_full_refund_and_audits(
+    client, db, monkeypatch, caplog, parent_status
+):
+    plans = make_standard_plans(db)
+    headers = login(client)
+    user_id = latest_user_id(db)
+    parent = grant_plan(db, user_id, plans["unlimited_99"], paid_at=utcnow() - timedelta(days=364))
+    order_no = _buy(client, headers, "addon_receipt_10", parent_entitlement_id=parent.id)["order_no"]
+    if parent_status == "expired":
+        parent.ends_at = utcnow() - timedelta(seconds=1)
+    else:
+        parent.status = "revoked"
+    db.flush()
+    submissions = []
+
+    def refund(**kwargs):
+        submissions.append(kwargs)
+        return "pending"
+
+    gateway = SimpleNamespace(
+        parse_notify=FakePay().parse_notify, refund=refund, query_refund=lambda out_refund_no: None
+    )
+    monkeypatch.setattr(service.settings, "pay_mode", "wechat")
+    monkeypatch.setattr(service, "get_payment", lambda: gateway)
+    body = _notify_body(db, order_no, amount_fen=1000)
+    for _ in range(2):
+        response = client.post(
+            f"{API}/callbacks/wxpay", content=body, headers={"X-Fake-Signature": sign_fake_notify(body)}
+        )
+        assert response.status_code == 204, response.text
+
+    order = db.scalar(select(Order).where(Order.order_no == order_no))
+    payment = db.scalar(select(Payment).where(Payment.order_id == order.id))
+    record = db.scalars(select(Refund)).one()
+    request_id = uuid5(NAMESPACE_URL, f"idphone:payment:{payment.out_trade_no}:entitlement-unavailable")
+    assert record.out_refund_no == f"RA{request_id.hex}"
+    assert (record.operator, record.status, record.amount_fen) == ("system", "pending", 1000)
+    assert submissions == []
+    record.updated_at = utcnow() - timedelta(minutes=5)
+    db.commit()
+    assert service.poll_pending_refunds(db) == 0  # 已提交微信，仍等退款结果
+    assert len(submissions) == 1 and submissions[0]["out_refund_no"] == record.out_refund_no
+    assert submissions[0]["refund_fen"] == submissions[0]["total_fen"] == 1000
+    events = [
+        r
+        for r in caplog.records
+        if r.name == "app.orders" and "refund.auto_entitlement_unavailable" in r.message
+    ]
+    assert len(events) == 1 and record.out_refund_no in events[0].message
+    assert db.scalars(select(Entitlement.id)).all() == [parent.id]
+    assert payment.status == "success"
+
+    detail_url = f"{API}/orders/{order_no}"
+    detail = client.get(detail_url, headers=headers).json()
+    assert (detail["status"], detail["refund_pending"], detail["refunded_fen"]) == ("paid", True, 0)
+    result = RefundResult(
+        payment.out_trade_no, record.out_refund_no, payment.transaction_id, 1000, 1000, "success"
+    )
+    gateway.parse_refund_notify = lambda headers, body: result
+    for _ in range(2):
+        assert client.post(f"{API}/callbacks/wxpay/refund").status_code == 204
+    detail = client.get(detail_url, headers=headers).json()
+    assert (detail["status"], detail["refund_pending"], detail["refunded_fen"]) == ("refunded", False, 1000)
+    assert parent.status == ("active" if parent_status == "expired" else "revoked")
+
+
+def test_renewal_payment_after_grace_period_is_refunded(client, db, monkeypatch):
+    plans = make_standard_plans(db)
+    headers = login(client)
+    now = utcnow()
+    parent = grant_plan(db, latest_user_id(db), plans["unlimited_99"], paid_at=now - timedelta(days=395))
+    end = parent.ends_at
+    monkeypatch.setattr(service, "utcnow", lambda: now)
+    order_no = _buy(client, headers, "unlimited_99", renew_entitlement_id=parent.id)["order_no"]
+    monkeypatch.setattr(service, "utcnow", lambda: now + timedelta(seconds=1))
+
+    response = client.post(f"{API}/dev/orders/{order_no}/simulate-paid", headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "refunded"
+    assert response.json()["refunded_fen"] == 9900
+    db.refresh(parent)
+    assert parent.ends_at == end
+    item = db.scalar(select(OrderItem).where(OrderItem.item_type == "renew"))
+    assert "renewal_ledger" not in item.snapshot
 
 
 def test_pending_order_expires_on_read(client, db):

@@ -16,7 +16,8 @@ router = APIRouter(tags=["权益"])
     summary="我的权益列表",
     description=(
         "返回当前用户买到的权益（保管期、回执次数等），按到期时间从晚到早排序，最多 100 条，不分页。"
-        "需要登录。默认只返回当前有效的权益；传 status=expired 查已到期的（用于展示“续费”），status=all 查全部。"
+        "需要登录。默认只返回当前有效的权益。传 status=expired 查已到期或已撤销的权益，status=all 查全部。"
+        "根据 can_renew 判断是否展示续费入口。"
     ),
     response_model=list[EntitlementOut],
     response_description="权益列表，没有则为空数组",
@@ -41,7 +42,10 @@ def list_entitlements(
     "/entitlements/{entitlement_id}",
     operation_id="entitlements_detail",
     summary="权益详情",
-    description="按 ID 查看当前用户的一份权益。需要登录。别人的权益或不存在的 ID 都返回 ENTITLEMENT_NOT_FOUND。",
+    description=(
+        "按 ID 查看当前用户的一份权益。需要登录。续费成功后，可查询同一权益的新到期时间。"
+        "别人的权益或不存在的 ID 都返回 ENTITLEMENT_NOT_FOUND。"
+    ),
     response_model=EntitlementOut,
     response_description="权益详情",
     responses=errors_doc(ErrorCode.AUTH_REQUIRED, ErrorCode.AUTH_INVALID, ErrorCode.ENTITLEMENT_NOT_FOUND),

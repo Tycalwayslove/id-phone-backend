@@ -178,6 +178,16 @@ def pending_refund_fen(db: Session, order_id: int) -> int:
     )
 
 
+def orders_with_refund_pending(db: Session, order_ids: list[int]) -> list[tuple[Order, bool]]:
+    """在同一查询中读取订单与退款状态，沿用传入的订单顺序。"""
+    if not order_ids:
+        return []
+    has_pending = select(Refund.id).where(Refund.order_id == Order.id, Refund.status == "pending").exists()
+    stmt = select(Order, has_pending).where(Order.id.in_(order_ids)).execution_options(populate_existing=True)
+    states = {order.id: (order, pending) for order, pending in db.execute(stmt)}
+    return [states[order_id] for order_id in order_ids]
+
+
 def refund_by_no(db: Session, out_refund_no: str) -> Refund | None:
     return db.scalar(select(Refund).where(Refund.out_refund_no == out_refund_no))
 

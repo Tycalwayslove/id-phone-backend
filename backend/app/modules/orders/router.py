@@ -51,7 +51,10 @@ def list_plans(db: DB):
     summary="下单",
     description=(
         "为当前用户创建一个待支付订单并返回拉起支付的参数。需要登录。"
-        "照片范围为“单张”的套餐必须传 photo_id（本人的照片）；加购项必须传 parent_entitlement_id（本人有效的权益）。"
+        "新购独立的单张照片套餐时传 photo_id。加购时传 parent_entitlement_id，付款时主权益失效会自动全额退款。"
+        "续费时传 renew_entitlement_id 和 plan_code，选择照片范围一致且保管天数大于 0 的在售独立套餐。"
+        "目标为本人未撤销的独立权益，到期前及到期后 30 天内可续费。续费从原到期时间与付款时间的较晚值起算，"
+        "只延长目标权益的保管期。付款时目标失效会自动全额退款。"
         "订单 30 分钟内有效。支持 Idempotency-Key：网络重试时带同一个 key，只会创建一个订单。"
     ),
     response_model=OrderCreatedOut,
@@ -79,6 +82,7 @@ def create_order(payload: OrderCreateIn, me: Me, db: DB, idem: IdempotencyKeyHea
     description=(
         "返回当前用户的订单，按下单时间从新到旧，游标分页。需要登录。"
         "待支付但已超过支付截止时间的订单，读取时会被自动改为已关闭。"
+        "refund_pending 为 true 表示退款正在处理。"
     ),
     response_model=OrderPage,
     response_description="订单分页列表",
@@ -93,14 +97,21 @@ def list_orders(me: Me, db: DB, page: Page):
     operation_id="orders_detail",
     summary="订单详情",
     description=(
-        "按订单号查询当前用户的订单，支付后前端用它确认订单是否已变为 paid。需要登录。"
+        "按订单号查询当前用户的订单。需要登录。支付后可查询 status 和 refund_pending 确认支付与退款进度。"
         "真实支付模式下，查询待支付订单时会向微信确认支付结果。"
         "别人的订单或不存在的订单号都返回 ORDER_NOT_FOUND。待支付但已超时的订单会被自动改为已关闭。"
     ),
     response_model=OrderOut,
     response_description="订单详情",
     responses=errors_doc(
-        *_AUTH, ErrorCode.ORDER_NOT_FOUND, ErrorCode.ORDER_NOT_PAYABLE, ErrorCode.INTERNAL_ERROR
+        *_AUTH,
+        ErrorCode.ORDER_NOT_FOUND,
+        ErrorCode.ORDER_NOT_PAYABLE,
+        ErrorCode.PLAN_NOT_AVAILABLE,
+        ErrorCode.REFUND_NOT_ALLOWED,
+        ErrorCode.IDEMPOTENCY_CONFLICT,
+        ErrorCode.VALIDATION_ERROR,
+        ErrorCode.INTERNAL_ERROR,
     ),
 )
 def get_order(order_no: OrderNoPath, me: Me, db: DB):
@@ -166,8 +177,10 @@ def _wxpay_ack(
     operation_id="callbacks_wxpay",
     summary="微信支付结果通知",
     description=(
-        "由微信支付服务器调用，无需登录。服务端验证签名并解密原始报文。重复通知不会重复发放权益。"
-        "订单已关闭时自动发起全额退款，保留系统退款记录，不发放权益。"
+        "由微信支付服务器调用，无需登录。服务端验证签名并解密原始报文。"
+        "根据微信支付成功时间判断权益是否到期。"
+        "重复通知只入账一次，续费只延期一次。订单已关闭、加购主权益或续费目标已失效时自动发起全额退款。"
+        "退款由系统发起并记录审计，微信退款确认后更新已退款金额。"
         "联调（fake）模式下，签名放在 X-Fake-Signature 请求头，请求体是 JSON。" + _WX_ACK
     ),
     status_code=204,
@@ -177,6 +190,9 @@ def _wxpay_ack(
         ErrorCode.PAYMENT_SIGNATURE_INVALID,
         ErrorCode.ORDER_NOT_FOUND,
         ErrorCode.ORDER_NOT_PAYABLE,
+        ErrorCode.PLAN_NOT_AVAILABLE,
+        ErrorCode.REFUND_NOT_ALLOWED,
+        ErrorCode.IDEMPOTENCY_CONFLICT,
         ErrorCode.VALIDATION_ERROR,
     ),
 )
@@ -215,12 +231,21 @@ def wxpay_refund_notify(request: Request, db: DB, body: Annotated[bytes, Depends
     summary="模拟支付成功（仅开发测试）",
     description=(
         "联调用，生产环境不存在此接口。需要登录，且只能操作自己的订单。"
-        "效果等同于收到一笔支付成功的通知：订单变为已支付并发放权益。重复调用不会重复发放。"
+        "效果等同于收到支付成功通知，可发放权益、续费或在主权益或续费目标失效时自动全额退款。"
+        "重复调用不会重复发放、续费或退款。"
         "下单返回 pay_params.mode=fake 时，前端改调这个接口代替微信支付。"
     ),
     response_model=OrderOut,
     response_description="支付后的订单",
-    responses=errors_doc(*_AUTH, ErrorCode.ORDER_NOT_FOUND, ErrorCode.ORDER_NOT_PAYABLE),
+    responses=errors_doc(
+        *_AUTH,
+        ErrorCode.ORDER_NOT_FOUND,
+        ErrorCode.ORDER_NOT_PAYABLE,
+        ErrorCode.PLAN_NOT_AVAILABLE,
+        ErrorCode.REFUND_NOT_ALLOWED,
+        ErrorCode.IDEMPOTENCY_CONFLICT,
+        ErrorCode.INTERNAL_ERROR,
+    ),
 )
 def simulate_paid(order_no: OrderNoPath, me: Me, db: DB):
     return service.simulate_paid(db, me.id, order_no)
