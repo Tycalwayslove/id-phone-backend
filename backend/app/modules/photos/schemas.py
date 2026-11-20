@@ -52,14 +52,14 @@ class PhotoOut(Schema):
     )
     status: Literal["draft", "active", "expired", "purged"] = Field(
         description=(
-            "照片状态。draft = 草稿；active = 正常；expired = 保管期已过；"
-            "purged = 已删除（接口不会返回此状态的照片）"
+            "照片状态。active = 已创建；expired = 保管期已过；"
+            "draft = 上传待创建的草稿，purged = 已删除，这两种状态不会返回。"
         ),
         examples=["active"],
     )
     created_at: datetime = Field(description="创建时间", examples=["2026-11-19T08:30:00Z"])
     original_url: str = Field(
-        description="原图的临时访问链接，约 10 分钟内有效，过期后重新请求接口获取",
+        description="原图的临时访问链接，约 10 分钟内有效；内容检测通过后才返回链接，否则为空字符串",
         examples=["https://api.example.com/files/..."],
     )
     access: AccessOut = Field(description="权益状态，决定能否下载、能否换规格")
@@ -92,7 +92,7 @@ class PhotoDetail(PhotoOut):
     """照片详情：在照片基础上带上全部导出图。"""
 
     renders: list[RenderOut] = Field(
-        description="已生成的导出图，按生成时间从早到晚；保管期过后只保留带水印的预览图"
+        description="已生成的导出图，按生成时间从早到晚；保管期过后只保留带水印的预览图，内容检测未通过时为空"
     )
 
 
@@ -122,3 +122,33 @@ class DownloadOut(Schema):
         description="无水印图片的临时下载链接，10 分钟内有效", examples=["https://api.example.com/files/..."]
     )
     expires_at: datetime = Field(description="链接过期时间", examples=["2026-11-19T08:40:00Z"])
+
+
+class WechatMediaResult(Schema):
+    """微信图片内容检测的综合结果。"""
+
+    suggest: str = Field(
+        description="处理建议，pass 为通过、risky 为有风险、review 为需要复核", examples=["pass"]
+    )
+
+
+class WechatMediaEvent(Schema):
+    """小程序消息推送，使用明文 JSON 格式。"""
+
+    message_type: str = Field(alias="MsgType", description="消息类型，event 为事件", examples=["event"])
+    event: str | None = Field(
+        default=None,
+        alias="Event",
+        description="事件名，wxa_media_check 为图片内容检测",
+        examples=["wxa_media_check"],
+    )
+    app_id: str | None = Field(
+        default=None, alias="appid", description="发送检测请求的小程序 AppID", examples=["wx-dev-app"]
+    )
+    trace_id: str | None = Field(
+        default=None, description="提交检测时返回的任务 ID", examples=["6281cfed-3a6f-b1d3"]
+    )
+    errcode: int | None = Field(
+        default=None, strict=True, description="检测错误码，0 表示结果有效", examples=[0]
+    )
+    result: WechatMediaResult | None = Field(default=None, description="检测成功时的综合结果")

@@ -5,6 +5,8 @@
 """
 
 import hashlib
+import hmac
+import logging
 import uuid
 from datetime import datetime, timedelta
 
@@ -15,6 +17,8 @@ from app.core.config import settings
 from app.core.deps import PageParams
 from app.core.errors import AppError, ErrorCode
 from app.core.utils import decode_cursor, encode_cursor, utcnow
+from app.integrations import wechat
+from app.integrations.matting import get_matting
 from app.integrations.storage import build_key, get_storage
 from app.models import File, Photo, PhotoRender, Spec
 from app.modules.photos import imaging, repo
@@ -28,13 +32,16 @@ from app.modules.photos.schemas import (
     RenderCreate,
     RenderOut,
     UploadOut,
+    WechatMediaEvent,
 )
 from app.modules.specs import service as spec_service
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 DOWNLOAD_URL_SECONDS = 600
+MEDIA_CHECK_URL_SECONDS = 30 * 60
 # 没有绑定照片的上传文件放在这个目录下（文件 ID 还没有照片 ID 可用）
 UPLOAD_OWNER = "uploads"
+log = logging.getLogger(__name__)
 
 
 # ---------- 跨模块函数（见 modules/CONTRACTS.md） ----------
@@ -89,11 +96,30 @@ def file_url(file: File, expires_in: int = DOWNLOAD_URL_SECONDS) -> str:
 
 
 def get_photo_for_user(db: Session, user_id: int, photo_id: int) -> Photo:
-    """本人的、未删除的照片；否则 PHOTO_NOT_FOUND。"""
+    """本人的、已创建且未删除的照片；否则 PHOTO_NOT_FOUND。"""
     photo = repo.get_photo(db, user_id, photo_id)
     if photo is None:
         raise AppError(ErrorCode.PHOTO_NOT_FOUND)
     return photo
+
+
+def _check_status(photo: Photo) -> str:
+    if photo.check_result is None:
+        # 兼容启用审核前创建的照片。真实模式要求取得审核结果。
+        return "passed" if settings.wechat_mode == "fake" else "failed"
+    return photo.check_result.get("status", "failed")
+
+
+def _require_passed_check(photo: Photo) -> None:
+    match _check_status(photo):
+        case "passed":
+            return
+        case "rejected":
+            raise AppError(ErrorCode.PHOTO_REJECTED)
+        case "pending":
+            raise AppError(ErrorCode.PHOTO_NOT_READY)
+        case _:
+            raise AppError(ErrorCode.PHOTO_NOT_READY, "照片内容检测结果不可用，请重新上传")
 
 
 def render(
@@ -108,6 +134,7 @@ def render(
 ) -> PhotoRender:
     """生成导出图；同参数已有就直接复用。不 commit。"""
     photo = get_photo_for_user(db, user_id, photo_id)
+    _require_passed_check(photo)
     existing = repo.find_render(
         db,
         user_id,
@@ -191,6 +218,7 @@ def purge_orphan_uploads(db: Session, older_than: datetime) -> int:
     files = repo.lock_orphan_uploads(db, older_than)
     if files:
         _purge_files(db, files)
+        repo.purge_upload_drafts(db, [f.id for f in files])
     return len(files)
 
 
@@ -220,7 +248,7 @@ def _photo_out(photo: Photo, original: File, access: AccessOut) -> PhotoOut:
         source=photo.source,
         status=photo.status,
         created_at=photo.created_at,
-        original_url=file_url(original),
+        original_url=file_url(original) if _check_status(photo) == "passed" else "",
         access=access,
     )
 
@@ -240,8 +268,27 @@ def _render_out(render_row: PhotoRender, spec: Spec, file: File) -> RenderOut:
     )
 
 
-def upload_original(db: Session, *, user_id: int, data: bytes, content_type: str | None) -> UploadOut:
-    """校验并保存上传的原图。"""
+def _submit_media_check(original: File, open_id: str | None) -> dict[str, str]:
+    if settings.wechat_mode == "real":
+        if not settings.wx_msg_token:
+            raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, "照片内容检测暂时不可用，请稍后重试")
+        if not open_id:
+            raise AppError(ErrorCode.AUTH_INVALID, "请重新登录微信小程序后再上传照片")
+    try:
+        trace_id = wechat.media_check_async(
+            media_url=file_url(original, MEDIA_CHECK_URL_SECONDS), open_id=open_id
+        )
+    except wechat.DeliveryError:
+        raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, "照片内容检测暂时不可用，请稍后重试") from None
+    if trace_id is None:
+        return {"status": "passed"}
+    return {"status": "pending", "trace_id": trace_id}
+
+
+def upload_original(
+    db: Session, *, user_id: int, data: bytes, content_type: str | None, open_id: str | None = None
+) -> UploadOut:
+    """校验并保存原图，用草稿承接异步内容检测。"""
     if not data or len(data) > MAX_UPLOAD_BYTES:
         raise AppError(ErrorCode.UPLOAD_INVALID, "图片不能为空，且不能超过 10MB")
     try:
@@ -251,35 +298,108 @@ def upload_original(db: Session, *, user_id: int, data: bytes, content_type: str
     mime, ext = imaging.ALLOWED_FORMATS[fmt]
     if content_type != mime:
         raise AppError(ErrorCode.UPLOAD_INVALID, "文件类型与内容不一致，只支持 JPEG 或 PNG")
-    f = save_file(db, user_id=user_id, kind="original", data=data, mime=mime, ext=ext, owner=UPLOAD_OWNER)
+    storage_key = None
+    try:
+        with db.begin_nested():
+            f = save_file(
+                db, user_id=user_id, kind="original", data=data, mime=mime, ext=ext, owner=UPLOAD_OWNER
+            )
+            storage_key = f.storage_key
+            check_result = _submit_media_check(f, open_id)
+            db.add(
+                Photo(
+                    user_id=user_id,
+                    source="upload",
+                    original_file_id=f.id,
+                    status="draft",
+                    check_result=check_result,
+                )
+            )
+    except Exception:
+        if storage_key is not None:
+            try:
+                get_storage().delete(storage_key)
+            except OSError:
+                log.warning("清理未完成上传的原图失败")
+        raise
     db.commit()
     return UploadOut(file_id=f.id, width=width, height=height)
 
 
-def create_photo(db: Session, *, user_id: int, body: PhotoCreate) -> PhotoOut:
+def _attach_matting(db: Session, photo: Photo, original: File) -> None:
+    try:
+        data = get_matting().matte(get_storage().get(original.storage_key))
+    except TimeoutError:
+        log.warning("抠图超时，使用原图")
+        return
+    except Exception:
+        log.warning("抠图失败，使用原图")
+        return
+    try:
+        with db.begin_nested():
+            matting = save_file(
+                db,
+                user_id=photo.user_id,
+                kind="matting",
+                data=data,
+                mime="image/png",
+                ext="png",
+                owner=f"p{photo.id}",
+            )
+            photo.matting_file_id = matting.id
+    except OSError:
+        log.warning("抠图文件保存失败，使用原图")
+
+
+def create_photo(db: Session, *, user_id: int, body: PhotoCreate, open_id: str | None = None) -> PhotoOut:
     original = repo.get_unused_upload(db, user_id, body.file_id)
     if original is None:
         raise AppError(ErrorCode.UPLOAD_NOT_FOUND)
-    if settings.matting_mode != "fake":
-        # TODO: 接入抠图服务后在这里生成 matting 文件
-        raise NotImplementedError(f"抠图模式 {settings.matting_mode} 尚未接入")
-    photo = Photo(
-        user_id=user_id,
-        source=body.source,
-        original_file_id=original.id,
-        matting_file_id=None,
-        status="active",
-    )
-    try:
-        with db.begin_nested():
-            db.add(photo)
-    except IntegrityError as e:
-        # 并发创建：同一个文件已被另一张照片占用
-        raise AppError(ErrorCode.UPLOAD_NOT_FOUND) from e
-    db.refresh(photo)  # 取回数据库默认值（created_at）
+    photo = repo.get_upload_draft(db, user_id, original.id)
+    if photo is None:
+        # 发布前上传但尚未绑定照片的原图，仍可以创建并补交审核。
+        photo = Photo(
+            user_id=user_id,
+            source=body.source,
+            original_file_id=original.id,
+            check_result=_submit_media_check(original, open_id),
+        )
+        db.add(photo)
+        db.flush()
+    _attach_matting(db, photo, original)
+    photo.source = body.source
+    photo.status = "active"
+    db.flush()
+    db.refresh(photo)
     out = _photo_out(photo, original, _access_out(db, user_id, photo.id))
     db.commit()
     return out
+
+
+def verify_wechat_message(*, signature: str, timestamp: str, nonce: str) -> None:
+    token = settings.wx_msg_token
+    if not token:
+        raise AppError(ErrorCode.CALLBACK_SIGNATURE_INVALID)
+    signed = "".join(sorted((token, timestamp, nonce))).encode()
+    expected = hashlib.sha1(signed).hexdigest()
+    if not hmac.compare_digest(expected.encode(), signature.encode()):
+        raise AppError(ErrorCode.CALLBACK_SIGNATURE_INVALID)
+
+
+def apply_wechat_media_check(db: Session, event: WechatMediaEvent) -> None:
+    if event.message_type.lower() != "event" or event.event != "wxa_media_check":
+        return
+    if event.app_id != settings.wx_mini_app_id or not event.trace_id:
+        raise AppError(ErrorCode.VALIDATION_ERROR, "微信内容检测事件缺少有效的小程序 AppID 或任务 ID")
+    photo = repo.lock_photo_for_media_check(db, event.trace_id)
+    if photo is None:
+        # 微信可能在上传事务提交前推送结果，返回失败让微信重试。
+        raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, "照片内容检测任务暂不可用")
+    if photo.status != "purged" and _check_status(photo) == "pending":
+        suggestion = event.result.suggest if event.errcode == 0 and event.result else None
+        status = {"pass": "passed", "risky": "rejected", "review": "rejected"}.get(suggestion, "failed")
+        photo.check_result = {"status": status, "trace_id": event.trace_id}
+    db.commit()
 
 
 def list_photos(db: Session, *, user_id: int, page: PageParams) -> PhotoPage:
@@ -300,6 +420,8 @@ def get_photo_detail(db: Session, *, user_id: int, photo_id: int) -> PhotoDetail
     photo = get_photo_for_user(db, user_id, photo_id)
     original = repo.get_files(db, user_id, [photo.original_file_id])[photo.original_file_id]
     base = _photo_out(photo, original, _access_out(db, user_id, photo.id))
+    if _check_status(photo) != "passed":
+        return PhotoDetail(**base.model_dump(), renders=[])
     renders = repo.list_renders(db, user_id, photo.id)
     # 保管期外不再展示无水印的正式图，避免泄露可直接使用的链接
     if not base.access.active:
@@ -309,6 +431,7 @@ def get_photo_detail(db: Session, *, user_id: int, photo_id: int) -> PhotoDetail
 
 def render_for_user(db: Session, *, user_id: int, photo_id: int, body: RenderCreate) -> RenderOut:
     photo = get_photo_for_user(db, user_id, photo_id)
+    _require_passed_check(photo)
     spec = spec_service.get_active_spec(db, body.spec_code)
 
     colors = spec.bg_colors or ["#FFFFFF"]
@@ -348,6 +471,7 @@ def render_for_user(db: Session, *, user_id: int, photo_id: int, body: RenderCre
 
 def render_download(db: Session, *, user_id: int, photo_id: int, render_id: int) -> DownloadOut:
     photo = get_photo_for_user(db, user_id, photo_id)
+    _require_passed_check(photo)
     found = repo.get_render(db, user_id, photo.id, render_id)
     if found is None:
         raise AppError(ErrorCode.PHOTO_NOT_FOUND)

@@ -261,3 +261,31 @@ def get_real_wechat() -> RealWechat:
 
 def get_wechat() -> WechatMiniClient:
     return _fake if settings.wechat_mode == "fake" else get_real_wechat()
+
+
+def media_check_async(*, media_url: str, open_id: str | None) -> str | None:
+    """提交小程序图片内容检测，返回回调任务 ID。fake 模式返回 None，表示直接通过。"""
+    if settings.wechat_mode == "fake":
+        return None
+    if not open_id:
+        raise DeliveryError("no_mini_identity", "failed")
+
+    client = get_real_wechat()
+    token = client._access_token()
+    data = notification_json(
+        request_notification(
+            "POST",
+            f"{_WECHAT_BASE}/wxa/media_check_async",
+            params={"access_token": token},
+            json={"media_url": media_url, "media_type": 2, "version": 2, "scene": 1, "openid": open_id},
+        )
+    )
+    code = data.get("errcode")
+    if code in (40001, 40014, 42001):
+        client._token_cache.invalidate(token)
+    if type(code) is not int or code != 0:
+        raise DeliveryError("media_check_rejected")
+    trace_id = data.get("trace_id")
+    if not isinstance(trace_id, str) or not trace_id:
+        raise DeliveryError("invalid_response")
+    return trace_id

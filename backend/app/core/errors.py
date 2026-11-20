@@ -38,6 +38,7 @@ class ErrorCode(StrEnum):
     PHOTO_NOT_FOUND = "PHOTO_NOT_FOUND"
     PHOTO_ACCESS_EXPIRED = "PHOTO_ACCESS_EXPIRED"
     PHOTO_NOT_READY = "PHOTO_NOT_READY"
+    PHOTO_REJECTED = "PHOTO_REJECTED"
     UPLOAD_NOT_FOUND = "UPLOAD_NOT_FOUND"
     UPLOAD_INVALID = "UPLOAD_INVALID"
     SPEC_CHANGE_NOT_ALLOWED = "SPEC_CHANGE_NOT_ALLOWED"
@@ -84,6 +85,7 @@ _META: dict[ErrorCode, tuple[int, str]] = {
     ErrorCode.PHOTO_NOT_FOUND: (404, "照片不存在"),
     ErrorCode.PHOTO_ACCESS_EXPIRED: (403, "照片保管期已过，续费后可继续下载和换规格"),
     ErrorCode.PHOTO_NOT_READY: (409, "照片还在处理中"),
+    ErrorCode.PHOTO_REJECTED: (403, "照片未通过内容检测，请更换照片"),
     ErrorCode.UPLOAD_NOT_FOUND: (404, "上传的文件不存在或已过期"),
     ErrorCode.UPLOAD_INVALID: (422, "上传的文件格式或大小不符合要求"),
     ErrorCode.SPEC_CHANGE_NOT_ALLOWED: (403, "当前权益不支持更换规格"),
