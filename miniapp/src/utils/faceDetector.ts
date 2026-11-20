@@ -54,10 +54,13 @@ function readBox(x: unknown, y: unknown, width: unknown, height: unknown, frame:
   return box
 }
 
+/** 角度单位以真机为准：数值落在 limit 内按 degreesPerUnit 换算，超出则视为已经是“度”；超过 180 视为无效 */
 function readPose(pitch: unknown, yaw: unknown, roll: unknown, limit: number, degreesPerUnit: number) {
   if (!finite(pitch) || !finite(yaw) || !finite(roll)) return
-  if (Math.max(Math.abs(pitch), Math.abs(yaw), Math.abs(roll)) > limit) return
-  return { pitch: pitch * degreesPerUnit, yaw: yaw * degreesPerUnit, roll: roll * degreesPerUnit }
+  const max = Math.max(Math.abs(pitch), Math.abs(yaw), Math.abs(roll))
+  if (max > 180) return
+  const scale = max <= limit ? degreesPerUnit : 1
+  return { pitch: pitch * scale, yaw: yaw * scale, roll: roll * scale }
 }
 
 function readEyes(raw: unknown, box: Rect, frame: Frame): Point[][] | undefined {
@@ -93,7 +96,26 @@ function readEyes(raw: unknown, box: Rect, frame: Frame): Point[][] | undefined 
   return eyes
 }
 
+/** 第一次拿到结果时打印原始数据的结构，便于真机核对字段和单位 */
+const loggedSamples = new Set<string>()
+
+function logFirstSample(name: string, raw: unknown): void {
+  if (loggedSamples.has(name)) return
+  loggedSamples.add(name)
+  try {
+    const sample = Array.isArray(raw) ? raw[0] : raw
+    const r = record(sample)
+    const summary = Object.fromEntries(Object.entries(r).map(([k, v]) => [
+      k, Array.isArray(v) ? `数组(${v.length})${v.length <= 4 ? ' ' + JSON.stringify(v) : ''}` : typeof v === 'object' ? JSON.stringify(v) : v
+    ]))
+    console.info(`[实时检测] ${name} 首帧原始数据`, summary)
+  } catch {
+    // 只用于诊断
+  }
+}
+
 function visionResult(value: unknown, frame: Frame): Detection {
+  logFirstSample('VisionKit', Array.isArray(value) ? value.find(a => record(a).type === 3) ?? value : value)
   if (!Array.isArray(value)) throw new Error('VisionKit anchors unavailable')
   const faces = value.map(record).filter(anchor => anchor.type === 3)
   if (value.length && !faces.length) throw new Error('VisionKit face anchors unavailable')
@@ -107,11 +129,12 @@ function visionResult(value: unknown, frame: Frame): Detection {
   const pose = Array.isArray(angle) && angle.length === 3
     ? readPose(angle[0], angle[1], angle[2], Math.PI, VISION_DEGREES_PER_RADIAN)
     : undefined
-  if (!box || !pose) throw new Error('VisionKit face geometry unavailable')
+  if (!box) throw new Error('VisionKit face box unavailable')
   return { count: 1, face: { box, pose, eyes: readEyes(points, box, frame) } }
 }
 
 function legacyResult(value: unknown, frame: Frame): Detection {
+  logFirstSample('faceDetect', value)
   const result = record(value)
   const { faceInfo } = result
   if (Array.isArray(faceInfo) && faceInfo.length > 1) return { count: 'multiple' }
@@ -126,7 +149,7 @@ function legacyResult(value: unknown, frame: Frame): Detection {
   const { pitch, yaw, roll } = record(angle)
   const pose = readPose(pitch, yaw, roll, LEGACY_ANGLE_LIMIT, LEGACY_DEGREES_PER_UNIT)
   if (Array.isArray(faceInfo) && !faceInfo.length && !box) return { count: 0 }
-  if (!box || !pose) throw new Error('FaceDetect face geometry unavailable')
+  if (!box) throw new Error('FaceDetect face box unavailable')
   return { count: 1, face: { box, pose, eyes: readEyes(face.pointArray, box, frame) } }
 }
 
@@ -215,29 +238,58 @@ function createLegacyDetector(api: WechatFaceApi): Detector | undefined {
   }
 }
 
+/** 实时检测状态：给页面显示用 */
+export type GuideStatus = 'starting' | 'running' | 'unavailable'
+
+const NAMES = ['VisionKit', 'faceDetect'] as const
+/** 连续这么多帧出错才换下一种检测方式（偶发错误不放弃） */
+const MAX_CONSECUTIVE_ERRORS = 5
+/** 两种方式都失败后，隔一段时间从头重试 */
+const RETRY_AFTER_MS = 5000
+
 /** 输出 null 时暂时没有可靠的实时结果，调用方仍可手动拍摄。 */
 export function startFaceGuide(
   context: Taro.CameraContext,
   area: GuideArea,
   mirrored: boolean,
-  onSample: (hint: GuideHint | null, at: number) => void
+  onSample: (hint: GuideHint | null, at: number) => void,
+  onStatus: (status: GuideStatus) => void = () => {}
 ): () => void {
   const api = typeof wx === 'undefined' ? undefined : wx
-  if (!api || typeof context.onCameraFrame !== 'function') return () => {}
+  if (!api || typeof context.onCameraFrame !== 'function') {
+    console.warn('[实时检测] 当前环境不支持相机帧或人脸接口，只能手动拍摄')
+    onStatus('unavailable')
+    return () => {}
+  }
 
   const factories = [createVisionDetector, createLegacyDetector]
   let stopAttempt: (() => void) | undefined
+  let retryTimer: ReturnType<typeof setTimeout> | undefined
+  let disposed = false
   let next = 0
 
   function attempt(api: WechatFaceApi): void {
-    const factory = factories[next++]
-    if (!factory) return
+    if (disposed) return
+    const index = next++
+    const factory = factories[index]
+    if (!factory) {
+      console.warn(`[实时检测] 两种检测方式都不可用，${RETRY_AFTER_MS / 1000} 秒后重试`)
+      onStatus('unavailable')
+      retryTimer = setTimeout(() => {
+        next = 0
+        attempt(api)
+      }, RETRY_AFTER_MS)
+      return
+    }
+    const name = NAMES[index]
+    onStatus('starting')
     let active = true
     let processing = false
     let lastFrame = -Infinity
+    let errors = 0
     let detector: Detector | undefined
     let listener: Taro.CameraFrameListener | undefined
-    let watchdog = setTimeout(fallback, GUIDE_LIMITS.frameTimeout)
+    let watchdog = setTimeout(() => fallback('超时没有拿到检测结果'), GUIDE_LIMITS.frameTimeout)
 
     function stop(): void {
       active = false
@@ -246,8 +298,9 @@ export function startFaceGuide(
       ignoreStopError(() => detector?.stop())
     }
 
-    function fallback(): void {
+    function fallback(reason: string, error?: unknown): void {
       if (!active) return
+      console.warn(`[实时检测] ${name} 停用：${reason}`, error ?? '')
       stop()
       onSample(null, Date.now())
       attempt(api)
@@ -263,14 +316,18 @@ export function startFaceGuide(
       try {
         const detection = await detector.detect(frame)
         if (!active) return
+        errors = 0
         const hint = evaluateFaceGuide(detection, frame, area, mirrored)
         if (hint !== null) {
           clearTimeout(watchdog)
-          watchdog = setTimeout(fallback, GUIDE_LIMITS.frameTimeout)
+          watchdog = setTimeout(() => fallback('超时没有拿到检测结果'), GUIDE_LIMITS.frameTimeout)
+          onStatus('running')
         }
         onSample(hint, at)
-      } catch {
-        fallback()
+      } catch (e) {
+        errors += 1
+        if (errors === 1) console.warn(`[实时检测] ${name} 单帧出错（连续 ${MAX_CONSECUTIVE_ERRORS} 次才停用）`, e)
+        if (errors >= MAX_CONSECUTIVE_ERRORS) fallback('连续出错', e)
       } finally {
         processing = false
       }
@@ -279,13 +336,14 @@ export function startFaceGuide(
     async function start(): Promise<void> {
       try {
         detector = factory(api)
-        if (!detector) return fallback()
+        if (!detector) return fallback('接口不可用')
         await detector.start()
         if (!active) return
+        console.info(`[实时检测] 使用 ${name}`)
         listener = context.onCameraFrame(frame => void onFrame(frame))
-        listener.start({ fail: fallback })
-      } catch {
-        fallback()
+        listener.start({ fail: (e: unknown) => fallback('相机帧监听启动失败', e) })
+      } catch (e) {
+        fallback('启动失败', e)
       }
     }
 
@@ -295,6 +353,8 @@ export function startFaceGuide(
 
   attempt(api)
   return () => {
+    disposed = true
+    clearTimeout(retryTimer)
     const stop = stopAttempt
     stopAttempt = undefined
     stop?.()

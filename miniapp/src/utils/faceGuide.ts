@@ -18,7 +18,8 @@ export interface Frame {
 
 export interface Face {
   box: Rect
-  pose: { pitch: number; yaw: number; roll: number }
+  /** 拿不到可靠角度时为空，跳过正脸判断，其余照常 */
+  pose?: { pitch: number; yaw: number; roll: number }
   eyes?: readonly (readonly Point[])[]
 }
 
@@ -148,10 +149,12 @@ export function evaluateFaceGuide(detection: Detection, frame: Frame, area: Guid
   if (Math.abs(offsetY) > 1) return offsetY > 0 ? 'moveUp' : 'moveDown'
 
   // 正偏航表示脸朝原始画面右边，正俯仰表示下巴抬起。
-  const yaw = mirrored ? -pose.yaw : pose.yaw
-  if (Math.abs(yaw) > GUIDE_LIMITS.poseDegrees) return yaw > 0 ? 'turnLeft' : 'turnRight'
-  if (Math.abs(pose.pitch) > GUIDE_LIMITS.poseDegrees) return pose.pitch > 0 ? 'chinDown' : 'chinUp'
-  if (Math.abs(pose.roll) > GUIDE_LIMITS.poseDegrees) return 'levelHead'
+  if (pose) {
+    const yaw = mirrored ? -pose.yaw : pose.yaw
+    if (Math.abs(yaw) > GUIDE_LIMITS.poseDegrees) return yaw > 0 ? 'turnLeft' : 'turnRight'
+    if (Math.abs(pose.pitch) > GUIDE_LIMITS.poseDegrees) return pose.pitch > 0 ? 'chinDown' : 'chinUp'
+    if (Math.abs(pose.roll) > GUIDE_LIMITS.poseDegrees) return 'levelHead'
+  }
 
   if (eyes?.some(eye => (eyeAspectRatio(eye) ?? Infinity) < GUIDE_LIMITS.eyeRatio)) return 'openEyes'
 
