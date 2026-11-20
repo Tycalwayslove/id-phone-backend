@@ -19,11 +19,10 @@ interface MenuItem {
 }
 
 const MENUS: MenuItem[] = [
+  { label: '我的回执', path: PAGES.receipts },
   { label: '我的订单', path: PAGES.orders },
   { label: '我的权益', path: PAGES.entitlements },
-  { label: '我的回执', path: PAGES.receipts },
-  { label: '用户协议', path: LEGAL_PAGES.agreement },
-  { label: '隐私政策', path: LEGAL_PAGES.privacy }
+  { label: '价格说明', path: PAGES.plans }
 ]
 
 export default function Me() {
@@ -76,7 +75,7 @@ export default function Me() {
   function about(): void {
     void Taro.showModal({
       title: '关于智拍证件照',
-      content: '无广告 · 官方回执 · 云端保管\n版本 0.1.0',
+      content: '无广告，可办理官方回执，照片可在云端保管。\n版本 0.1.0',
       showCancel: false
     })
   }
@@ -108,18 +107,26 @@ export default function Me() {
             <Text className='cell__arrow'>&gt;</Text>
           </View>
         ))}
-        <ReminderSettings />
         <Button className='cell cell-btn' openType='contact'>
-          <Text>联系客服</Text>
+          <Text>联系我们</Text>
           <Text className='cell__arrow'>&gt;</Text>
         </Button>
+        <PrivateDomainCard />
+        <View className='cell' onClick={() => navigate(LEGAL_PAGES.agreement)}>
+          <Text>用户协议</Text>
+          <Text className='cell__arrow'>&gt;</Text>
+        </View>
+        <View className='cell' onClick={() => navigate(LEGAL_PAGES.privacy)}>
+          <Text>隐私政策</Text>
+          <Text className='cell__arrow'>&gt;</Text>
+        </View>
+        <ReminderSettings />
         <View className='cell' onClick={about}>
           <Text>关于</Text>
           <Text className='cell__arrow'>&gt;</Text>
         </View>
       </View>
 
-      <PrivateDomainCard />
       <View className='me-cancel' onClick={onCancelAccount}>
         注销账号
       </View>

@@ -1,0 +1,60 @@
+.hero-frame {
+  width: 216px;
+  height: 288px;
+  margin: 32px auto;
+  border: 1px solid var(--c-line);
+
+  &__backdrop {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+
+    &--blue {
+      background: var(--c-backdrop-blue);
+      animation: hero-blue 7.2s linear infinite;
+    }
+
+    &--red {
+      background: var(--c-backdrop-red);
+      animation: hero-red 7.2s linear infinite;
+    }
+  }
+
+  &__head,
+  &__shoulders {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--c-ink);
+  }
+
+  &__head {
+    top: 48px;
+    width: 96px;
+    height: 96px;
+    border-radius: 50%;
+  }
+
+  &__shoulders {
+    bottom: 0;
+    width: 176px;
+    height: 116px;
+    border-radius: 76px 76px 0 0;
+  }
+}
+
+@keyframes hero-blue {
+  0%, 29%, 67%, 100% { opacity: 0; }
+  33.333%, 66.666% { opacity: 1; }
+}
+
+@keyframes hero-red {
+  0%, 62%, 100% { opacity: 0; }
+  66.666%, 95% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-frame__backdrop {
+    animation: none;
+  }
+}

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Image, Text, View } from '@tarojs/components'
 import Taro, { useDidShow, usePullDownRefresh, useReachBottom } from '@tarojs/taro'
 import type { components } from '../../api/schema'
@@ -6,8 +7,13 @@ import { listPhotos } from '../../api/photos'
 import EmptyState from '../../components/EmptyState'
 import Loading from '../../components/Loading'
 import PageContainer from '../../components/PageContainer'
+import PhotoFrame from '../../components/PhotoFrame'
+import ShootGuide from '../../components/ShootGuide'
+import SpecPicker from '../../components/SpecPicker'
+import useCommonSpecs from '../../hooks/useCommonSpecs'
 import { usePagedList } from '../../hooks/usePagedList'
-import { describeError } from '../../utils/errors'
+import useShootFlow from '../../hooks/useShootFlow'
+import { describeError, handleError } from '../../utils/errors'
 import { formatDate } from '../../utils/format'
 import { PAGES, navigate } from '../../utils/nav'
 import './index.scss'
@@ -16,12 +22,16 @@ type PhotoOut = components['schemas']['PhotoOut']
 
 /** 保管状态文案与颜色 */
 function accessLabel(p: PhotoOut): { text: string; ok: boolean } {
-  if (p.access.active && p.access.access_until) return { text: `保管至 ${formatDate(p.access.access_until)}`, ok: true }
-  if (p.access.access_until) return { text: '已过期', ok: false }
-  return { text: '未购买', ok: false }
+  const until = formatDate(p.access.access_until)
+  if (p.access.active) return { text: until ? `保管至 ${until}` : '已保管', ok: true }
+  if (p.access.access_until || p.status === 'expired') return { text: '已过期，续费后可下载', ok: false }
+  return { text: '预览，未保存', ok: false }
 }
 
 export default function Photos() {
+  const [picking, setPicking] = useState(false)
+  const common = useCommonSpecs()
+  const shoot = useShootFlow()
   const { items, loading, loaded, hasMore, error, reload, loadMore } = usePagedList(
     (cursor) => listPhotos(cursor),
     [],
@@ -45,28 +55,45 @@ export default function Photos() {
           const label = accessLabel(p)
           return (
             <View key={p.id} className='photo-grid__cell' onClick={() => navigate(PAGES.photoDetail, { id: p.id })}>
-              {p.original_url ? (
-                <Image className='photo-grid__img' src={resolveUrl(p.original_url)} mode='aspectFill' lazyLoad />
-              ) : (
-                <View className='photo-grid__placeholder hint'>暂无法预览</View>
-              )}
+              <PhotoFrame className='photo-grid__frame'>
+                {p.original_url ? (
+                  <Image className='photo-grid__img' src={resolveUrl(p.original_url)} mode='aspectFill' lazyLoad />
+                ) : (
+                  <View className='photo-grid__placeholder hint'>暂无法预览</View>
+                )}
+              </PhotoFrame>
               <Text className={`photo-grid__tag${label.ok ? ' photo-grid__tag--ok' : ''}`}>{label.text}</Text>
             </View>
           )
         })}
       </View>
       {loading ? <Loading /> : null}
-      {loaded && !loading && items.length === 0 ? (
+      {loaded && !loading && !error && items.length === 0 ? (
         <EmptyState
           emoji='📷'
-          title='还没有证件照'
-          desc='选一个规格，拍一张试试'
-          actionText='去制作'
-          onAction={() => navigate(PAGES.specs)}
+          title='拍好的照片会存在这里'
+          actionText='去拍一张'
+          onAction={() => {
+            if (shoot.busy) return
+            setPicking(true)
+            if (common.specs.length === 0) void common.load().catch(handleError)
+          }}
         />
       ) : null}
       {error ? <View className='list-footer'>{describeError(error).message}，下拉重试</View> : null}
       {loaded && !hasMore && items.length > 0 ? <View className='list-footer'>没有更多了</View> : null}
+      <SpecPicker
+        open={picking}
+        specs={common.specs}
+        details={common.details}
+        loading={common.loading}
+        onClose={() => setPicking(false)}
+        onPick={(spec) => {
+          setPicking(false)
+          void shoot.open(spec.code, common.details.get(spec.code))
+        }}
+      />
+      <ShootGuide spec={shoot.spec} onChoose={shoot.choose} onClose={shoot.close} />
     </PageContainer>
   )
 }

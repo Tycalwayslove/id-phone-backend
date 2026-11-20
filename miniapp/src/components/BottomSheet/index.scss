@@ -1,0 +1,20 @@
+.nut-popup.bottom-sheet-popup {
+  box-sizing: border-box;
+  max-height: 86vh;
+  overflow-y: auto;
+  border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+  background: var(--c-surface);
+  box-shadow: 0 -4px 24px rgba(23, 35, 59, 0.12);
+}
+
+.bottom-sheet {
+  padding: 36px 32px calc(32px + env(safe-area-inset-bottom));
+
+  &__title {
+    display: block;
+    margin: 0 56px 28px 0;
+    font-size: var(--fs-title);
+    font-weight: 600;
+    color: var(--c-ink);
+  }
+}

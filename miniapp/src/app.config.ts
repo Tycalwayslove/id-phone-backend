@@ -24,17 +24,17 @@ export default defineAppConfig({
     navigationBarBackgroundColor: '#ffffff',
     navigationBarTitleText: '智拍证件照',
     navigationBarTextStyle: 'black',
-    backgroundColor: '#F5F6F8'
+    backgroundColor: '#EEF1F5'
   },
   // 暂不配图标，只用文字
   tabBar: {
-    color: '#646A73',
-    selectedColor: '#2B6BFF',
+    color: '#5B6577',
+    selectedColor: '#2F6CC8',
     backgroundColor: '#ffffff',
     borderStyle: 'white',
     list: [
       { pagePath: 'pages/index/index', text: '首页' },
-      { pagePath: 'pages/photos/index', text: '证件照' },
+      { pagePath: 'pages/photos/index', text: '我的照片' },
       { pagePath: 'pages/me/index', text: '我的' }
     ]
   }
