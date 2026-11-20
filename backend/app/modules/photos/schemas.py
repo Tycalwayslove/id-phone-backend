@@ -101,6 +101,13 @@ class PhotoOut(Schema):
         examples=["https://api.example.com/files/..."],
     )
     access: AccessOut = Field(description="权益状态，决定能否下载、能否换规格")
+    matting_level: Literal["fast", "fine", "failed"] | None = Field(
+        description=(
+            "抠图精度。fast = 可制作，正在等待或执行精细抠图。fine = 精细底片已就绪。"
+            "failed = 精细抠图失败，继续使用原有底片。上线前创建或未启用精细抠图的照片为空。"
+        ),
+        examples=["fast"],
+    )
     quality: PhotoQuality | None = Field(
         default=None,
         description="创建时的本地拍后检测结果。缺少检测结果时为空，例如这项功能上线前创建的照片。",

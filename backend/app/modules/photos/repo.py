@@ -3,19 +3,47 @@
 from collections.abc import Iterable
 from datetime import datetime
 
-from sqlalchemy import exists, or_, select, update
+from sqlalchemy import exists, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models import File, Photo, PhotoRender, Spec
 
 
-def get_photo(db: Session, user_id: int, photo_id: int) -> Photo | None:
+def get_photo(db: Session, user_id: int, photo_id: int, *, lock: bool = False) -> Photo | None:
     """本人已创建且未删除的照片。"""
-    return db.scalar(
-        select(Photo).where(
-            Photo.id == photo_id, Photo.user_id == user_id, Photo.status.in_(("active", "expired"))
-        )
+    stmt = select(Photo).where(
+        Photo.id == photo_id, Photo.user_id == user_id, Photo.status.in_(("active", "expired"))
     )
+    if lock:
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+    return db.scalar(stmt)
+
+
+def _fine_matting_candidates():
+    return Photo.matting_level == "fast", Photo.status.in_(("active", "expired"))
+
+
+def pending_fine_matting_ids(db: Session, older_than: datetime, limit: int) -> list[int]:
+    requested_at = Photo.fine_matting_requested_at
+    stmt = (
+        select(Photo.id)
+        .where(*_fine_matting_candidates(), requested_at <= older_than)
+        .order_by(requested_at, Photo.id)
+        .limit(limit)
+    )
+    return list(db.scalars(stmt))
+
+
+def try_lock_fine_matting(db: Session, photo_id: int) -> bool:
+    # 负数照片 ID 保留给精细抠图。推理期间只持 advisory lock，照片仍可读取、审核和删除。
+    return bool(db.scalar(select(func.pg_try_advisory_xact_lock(-photo_id))))
+
+
+def get_pending_fine_matting(db: Session, photo_id: int, *, lock: bool = False) -> Photo | None:
+    stmt = select(Photo).where(Photo.id == photo_id, *_fine_matting_candidates())
+    if lock:
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+    return db.scalar(stmt)
 
 
 def list_photos(db: Session, user_id: int, *, before_id: int | None, limit: int) -> list[Photo]:
@@ -169,8 +197,9 @@ def active_files_of_photo(db: Session, user_id: int, photo: Photo) -> list[File]
     """一张照片名下所有未删除的文件：原图、抠图、导出图。"""
     render_file_ids = select(PhotoRender.file_id).where(PhotoRender.photo_id == photo.id)
     ids = [photo.original_file_id]
-    if photo.matting_file_id is not None:
-        ids.append(photo.matting_file_id)
+    ids.extend(
+        file_id for file_id in (photo.matting_file_id, photo.previous_matting_file_id) if file_id is not None
+    )
     return list(
         db.scalars(
             select(File).where(
@@ -186,5 +215,12 @@ def active_files_of_user(db: Session, user_id: int) -> list[File]:
     return list(db.scalars(select(File).where(File.user_id == user_id, File.status == "active")))
 
 
-def live_photos_of_user(db: Session, user_id: int) -> list[Photo]:
-    return list(db.scalars(select(Photo).where(Photo.user_id == user_id, Photo.status != "purged")))
+def lock_live_photos_of_user(db: Session, user_id: int) -> list[Photo]:
+    stmt = (
+        select(Photo)
+        .where(Photo.user_id == user_id, Photo.status != "purged")
+        .order_by(Photo.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return list(db.scalars(stmt))

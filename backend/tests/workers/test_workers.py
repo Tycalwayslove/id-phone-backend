@@ -129,10 +129,11 @@ def test_run_once_continues_after_task_raises(monkeypatch, caplog):
     monkeypatch.setattr(
         runner.photos, "purge_orphan_uploads", lambda _db, _before: calls.append("purge") or 0
     )
+    monkeypatch.setattr(runner.photos, "recover_fine_matting", lambda _: calls.append("fine_matting"))
 
     runner.run_once(db)
 
-    assert calls == ["poll", "rollback", "send", "close", "refunds", "remind", "purge"]
+    assert calls == ["poll", "rollback", "send", "close", "refunds", "remind", "purge", "fine_matting"]
     assert "task=poll_due err=RuntimeError" in caplog.text
     assert "sensitive payload" not in caplog.text
 

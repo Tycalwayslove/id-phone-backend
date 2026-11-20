@@ -11,6 +11,7 @@ from app.modules.photos.pipeline.face import Face
 HEAD_HEIGHT_RATIO = 0.62
 MAX_HEAD_HEIGHT_RATIO = 0.70
 HEADROOM_RATIO = 0.08
+BOTTOM_FADE_RATIO = 0.04
 
 
 def _head_top(face: Face, alpha: Image.Image | None) -> float:
@@ -31,29 +32,22 @@ def _head_top(face: Face, alpha: Image.Image | None) -> float:
 def _fade_bottom(result: Image.Image, source_bottom: float, chin: float) -> None:
     # EXTENT 以像素中心采样，找到第一行落在原图下沿之外的位置。
     seam = ceil(source_bottom - 0.5)
-    rows = min(3, seam - max(0, ceil(chin - 0.5)))
-    if rows <= 0 or seam >= result.height:
+    start = max(0, ceil(chin - 0.5), seam - round(result.height * BOTTOM_FADE_RATIO))
+    if start >= seam or seam >= result.height:
         return
 
-    # 仅取下巴以下的末端行。RGBA 缩图按预乘 alpha 平均，透明区的 RGB 不会染到人像。
-    strip = result.crop((0, seam - rows, result.width, seam))
-    body_color = np.asarray(strip.resize((result.width, 1), Image.Resampling.BOX))[0, :, :3].astype(
-        np.float32
-    )
-    boundary = np.asarray(strip)[-1]
-    fade_height = result.height - seam
-    t = np.arange(1, fade_height + 1, dtype=np.float32) / max(2, fade_height)
-    weight = 1 - t**2 * (3 - 2 * t)
-    extension = np.empty((fade_height, result.width, 4), dtype=np.uint8)
-    extension[:, :, :3] = np.rint(body_color + (boundary[:, :3] - body_color) * weight[:, None, None])
-    extension[:, :, 3] = np.rint(boundary[:, 3] * weight[:, None])
-    result.paste(Image.fromarray(extension), (0, seam))
+    # 保留原图逐行纹理，线性衰减下巴以下的 alpha。越界区透明，导出时直接铺底色。
+    alpha = result.getchannel("A")
+    strip = np.asarray(alpha.crop((0, start, result.width, seam)))
+    weight = np.arange(seam - start - 1, -1, -1, dtype=np.float32) / (seam - start)
+    alpha.paste(Image.fromarray(np.rint(strip * weight[:, None]).astype(np.uint8)), (0, start))
+    result.putalpha(alpha)
 
 
 def crop_portrait(
     image: Image.Image, size: tuple[int, int], face: Face | None
 ) -> tuple[Image.Image, Face | None]:
-    """按输出比例取景，保留透明区并在需要时渐隐延伸人像下沿。"""
+    """按输出比例取景，底部越界时把原图下沿渐隐到底色。"""
     width, height = size
     ratio = width / height
     alpha = image.getchannel("A") if face is not None and image.mode == "RGBA" else None
@@ -87,6 +81,6 @@ def crop_portrait(
         return result, None
     scale = height / crop_height
     fitted = face.in_viewport(left, top, scale)
-    if alpha is not None and box[3] > image.height:
+    if box[3] > image.height:
         _fade_bottom(result, (image.height - top) * scale, fitted.y + fitted.height)
     return result, fitted
