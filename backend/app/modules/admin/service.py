@@ -17,10 +17,11 @@ from sqlalchemy.orm import Session
 
 from app.core import security
 from app.core.config import settings
-from app.core.deps import ALL_PERMISSIONS, ROLE_PERMISSIONS, CurrentAdmin, PageParams, csrf_for
+from app.core.deps import ALL_PERMISSIONS, ROLE_PERMISSIONS, CurrentAdmin, csrf_for
 from app.core.errors import AppError, ErrorCode
+from app.core.pagination import PageParams
 from app.core.schemas import OkResponse
-from app.core.utils import decode_cursor, encode_cursor, utcnow
+from app.core.utils import utcnow
 from app.models import (
     AdminSession,
     AdminUser,
@@ -66,6 +67,7 @@ from app.modules.admin.schemas import (
     AdminProviderOut,
     AdminProviderSpecCreateIn,
     AdminProviderSpecOut,
+    AdminProviderSpecPage,
     AdminProviderSpecUpdateIn,
     AdminProviderUpdateIn,
     AdminRefundIn,
@@ -73,6 +75,7 @@ from app.modules.admin.schemas import (
     AdminRefundResultOut,
     AdminRouteRuleCreateIn,
     AdminRouteRuleOut,
+    AdminRouteRulePage,
     AdminRouteRuleUpdateIn,
     AdminSpecCreateIn,
     AdminSpecOut,
@@ -188,20 +191,6 @@ def _flush_unique(db: Session, constraint: str, message: str) -> None:
 # ---------- 分页 ----------
 
 
-def _before_id(cursor: str | None) -> int | None:
-    cur = decode_cursor(cursor)
-    value = cur.get("i") if cur else None
-    return value if isinstance(value, int) else None
-
-
-def _slice[T](rows: list[T], limit: int) -> tuple[list[T], bool]:
-    return rows[:limit], len(rows) > limit
-
-
-def _next(rows: list, has_more: bool) -> str | None:
-    return encode_cursor({"i": rows[-1].id}) if has_more and rows else None
-
-
 # ---------- 登录 / 退出 / 我 ----------
 
 # 兼容已有 Argon2 哈希。前缀标识此哈希必须在首次登录时替换。
@@ -292,10 +281,10 @@ def me(admin: CurrentAdmin) -> AdminMeOut:
 
 
 def list_admin_accounts(db: Session, page: PageParams) -> AdminAccountPage:
-    rows = repo.list_admin_accounts(db, before_id=_before_id(page.cursor), limit=page.limit + 1)
-    rows, more = _slice(rows, page.limit)
+    rows = repo.list_admin_accounts(db, before_id=page.before_id(), limit=page.fetch_limit)
+    rows, next_cursor = page.slice(rows)
     return AdminAccountPage(
-        items=[AdminAccountOut.model_validate(row) for row in rows], next_cursor=_next(rows, more)
+        items=[AdminAccountOut.model_validate(row) for row in rows], next_cursor=next_cursor
     )
 
 
@@ -410,10 +399,10 @@ def stats_overview(db: Session) -> AdminStatsOverviewOut:
 
 
 def list_notify_tasks(db: Session, *, status: str | None, page: PageParams) -> AdminNotifyTaskPage:
-    rows = repo.list_notify_tasks(db, status=status, before_id=_before_id(page.cursor), limit=page.limit + 1)
-    rows, more = _slice(rows, page.limit)
+    rows = repo.list_notify_tasks(db, status=status, before_id=page.before_id(), limit=page.fetch_limit)
+    rows, next_cursor = page.slice(rows)
     return AdminNotifyTaskPage(
-        items=[AdminNotifyTaskOut.model_validate(row) for row in rows], next_cursor=_next(rows, more)
+        items=[AdminNotifyTaskOut.model_validate(row) for row in rows], next_cursor=next_cursor
     )
 
 
@@ -455,13 +444,11 @@ def list_users(
         user_id=user_id,
         phone_hash=phone_hash,
         status=status,
-        before_id=_before_id(page.cursor),
-        limit=page.limit + 1,
+        before_id=page.before_id(),
+        limit=page.fetch_limit,
     )
-    rows, more = _slice(rows, page.limit)
-    return AdminUserPage(
-        items=[AdminUserOut(**d) for d in _user_outs(db, rows)], next_cursor=_next(rows, more)
-    )
+    rows, next_cursor = page.slice(rows)
+    return AdminUserPage(items=[AdminUserOut(**d) for d in _user_outs(db, rows)], next_cursor=next_cursor)
 
 
 def get_user(db: Session, user_id: int) -> AdminUserDetail:
@@ -530,13 +517,13 @@ def list_orders(
         user_id=user_id,
         created_from=created_from,
         created_to=created_to,
-        before_id=_before_id(page.cursor),
-        limit=page.limit + 1,
+        before_id=page.before_id(),
+        limit=page.fetch_limit,
     )
-    rows, more = _slice(rows, page.limit)
+    rows, next_cursor = page.slice(rows)
     items = repo.items_by_order(db, [o.id for o in rows])
     return AdminOrderPage(
-        items=[AdminOrderOut(**_order_fields(o, items[o.id])) for o in rows], next_cursor=_next(rows, more)
+        items=[AdminOrderOut(**_order_fields(o, items[o.id])) for o in rows], next_cursor=next_cursor
     )
 
 
@@ -641,16 +628,16 @@ def list_applications(
         user_id=user_id,
         spec_code=spec_code,
         manual_review=manual_review,
-        before_id=_before_id(page.cursor),
-        limit=page.limit + 1,
+        before_id=page.before_id(),
+        limit=page.fetch_limit,
     )
-    rows, more = _slice(rows, page.limit)
+    rows, next_cursor = page.slice(rows, cursor_of=lambda row: {"i": row[0].id})
     return AdminApplicationPage(
         items=[
             AdminApplicationOut(**_application_fields(app, spec, needs_review))
             for app, spec, needs_review in rows
         ],
-        next_cursor=_next([app for app, _, _ in rows], more),
+        next_cursor=next_cursor,
     )
 
 
@@ -888,13 +875,27 @@ def _spec_out(spec: Spec, parent_code: str | None) -> AdminSpecOut:
     )
 
 
-def list_specs(db: Session, page: PageParams) -> AdminSpecPage:
-    rows = repo.list_specs(db, before_id=_before_id(page.cursor), limit=page.limit + 1)
-    rows, more = _slice(rows, page.limit)
+def list_specs(
+    db: Session,
+    *,
+    keyword: str | None = None,
+    status: str | None = None,
+    category: str | None = None,
+    page: PageParams,
+) -> AdminSpecPage:
+    rows = repo.list_specs(
+        db,
+        keyword=keyword.strip() if keyword else None,
+        status=status,
+        category=category,
+        before_id=page.before_id(),
+        limit=page.fetch_limit,
+    )
+    rows, next_cursor = page.slice(rows)
     codes = repo.spec_codes(db, (s.parent_id for s in rows if s.parent_id))
     return AdminSpecPage(
         items=[_spec_out(s, codes.get(s.parent_id) if s.parent_id else None) for s in rows],
-        next_cursor=_next(rows, more),
+        next_cursor=next_cursor,
     )
 
 
@@ -958,31 +959,60 @@ def update_spec(db: Session, admin: CurrentAdmin, code: str, body: AdminSpecUpda
 
 
 def list_providers(db: Session) -> list[AdminProviderOut]:
-    providers = repo.list_providers(db)
-    pspecs = repo.provider_specs(db)
-    rules = repo.route_rules(db)
-    specs = repo.specs_by_ids(db, [p.spec_id for p in pspecs] + [r.spec_id for r in rules])
-    out = []
-    for p in providers:
-        out.append(
-            AdminProviderOut(
-                code=p.code,
-                name=p.name,
-                adapter=p.adapter,
-                upstream_group=p.upstream_group,
-                status=p.status,  # type: ignore[arg-type]
-                updated_at=p.updated_at,
-                provider_specs=[
-                    _provider_spec_out(ps, p.code, specs[ps.spec_id])
-                    for ps in pspecs
-                    if ps.provider_id == p.id
-                ],
-                route_rules=[
-                    _route_rule_out(r, p.code, specs[r.spec_id]) for r in rules if r.provider_id == p.id
-                ],
-            )
+    spec_counts = repo.provider_spec_counts(db)
+    rule_counts = repo.route_rule_counts(db)
+    return [
+        AdminProviderOut(
+            code=p.code,
+            name=p.name,
+            adapter=p.adapter,
+            upstream_group=p.upstream_group,
+            status=p.status,  # type: ignore[arg-type]
+            updated_at=p.updated_at,
+            provider_spec_count=spec_counts.get(p.id, (0, 0))[0],
+            enabled_provider_spec_count=spec_counts.get(p.id, (0, 0))[1],
+            route_rule_count=rule_counts.get(p.id, 0),
         )
-    return out
+        for p in repo.list_providers(db)
+    ]
+
+
+def list_provider_specs(
+    db: Session,
+    *,
+    provider_code: str | None,
+    keyword: str | None,
+    is_enabled: bool | None,
+    page: PageParams,
+) -> AdminProviderSpecPage:
+    rows = repo.list_provider_specs(
+        db,
+        provider_code=provider_code,
+        keyword=keyword.strip() if keyword else None,
+        is_enabled=is_enabled,
+        before_id=page.before_id(),
+        limit=page.fetch_limit,
+    )
+    rows, next_cursor = page.slice(rows, cursor_of=lambda row: {"i": row[0].id})
+    return AdminProviderSpecPage(
+        items=[_provider_spec_out(entry, code, spec) for entry, code, spec in rows], next_cursor=next_cursor
+    )
+
+
+def list_route_rules(
+    db: Session, *, provider_code: str | None, spec_code: str | None, page: PageParams
+) -> AdminRouteRulePage:
+    rows = repo.list_route_rules(
+        db,
+        provider_code=provider_code,
+        spec_code=spec_code,
+        before_id=page.before_id(),
+        limit=page.fetch_limit,
+    )
+    rows, next_cursor = page.slice(rows, cursor_of=lambda row: {"i": row[0].id})
+    return AdminRouteRulePage(
+        items=[_route_rule_out(rule, code, spec) for rule, code, spec in rows], next_cursor=next_cursor
+    )
 
 
 def update_provider(
@@ -1189,10 +1219,10 @@ def list_audit_logs(
         admin_id=admin_id,
         action=action,
         target_type=target_type,
-        before_id=_before_id(page.cursor),
-        limit=page.limit + 1,
+        before_id=page.before_id(),
+        limit=page.fetch_limit,
     )
-    rows, more = _slice(rows, page.limit)
+    rows, next_cursor = page.slice(rows, cursor_of=lambda row: {"i": row[0].id})
     return AdminAuditLogPage(
         items=[
             AdminAuditLogOut(
@@ -1208,5 +1238,5 @@ def list_audit_logs(
             )
             for log, username in rows
         ],
-        next_cursor=encode_cursor({"i": rows[-1][0].id}) if more and rows else None,
+        next_cursor=next_cursor,
     )

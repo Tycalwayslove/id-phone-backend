@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import Field, StringConstraints
 
+from app.core.pagination import PageIn
 from app.core.schemas import Schema, page_model
 from app.modules.orders.schemas import OrderItemOut
 from app.modules.specs.schemas import SpecFormField
@@ -187,7 +188,7 @@ AdminNotifyTaskPage = page_model(AdminNotifyTaskOut, "AdminNotifyTaskPage")
 # ---------- 用户 ----------
 
 
-class AdminUserSearchIn(Schema):
+class AdminUserSearchIn(PageIn):
     """后台用户查询条件和分页参数。"""
 
     phone: str | None = Field(
@@ -203,12 +204,6 @@ class AdminUserSearchIn(Schema):
         description="按账号状态筛选：active = 正常；disabled = 已停用；cancelled = 已注销",
         examples=["active"],
     )
-    cursor: str | None = Field(
-        default=None,
-        description="翻页游标。第一页不传，之后传上一页返回的 next_cursor",
-        examples=["eyJpIjoxMDI0fQ"],
-    )
-    limit: int = Field(default=20, ge=1, le=100, description="每页条数，1～100，默认 20", examples=[20])
 
 
 class AdminUserOut(Schema):
@@ -567,7 +562,7 @@ class AdminSpecOut(Schema):
     updated_at: datetime = Field(description="最近修改时间（UTC，带时区）", examples=["2026-11-19T00:00:00Z"])
 
 
-AdminSpecPage = page_model(AdminSpecOut, "AdminSpecPage")
+AdminSpecPage = page_model(AdminSpecOut, "AdminSpecPage", "按创建时间从新到旧（新同步进来的规格排在最前）")
 
 
 class AdminSpecCreateIn(Schema):
@@ -715,6 +710,9 @@ class AdminProviderSpecOut(Schema):
     )
 
 
+AdminProviderSpecPage = page_model(AdminProviderSpecOut, "AdminProviderSpecPage", "按创建时间从新到旧")
+
+
 class AdminRouteRuleOut(Schema):
     """路由规则的一行：某规格（可限地区）下的一个候选服务商。"""
 
@@ -724,6 +722,9 @@ class AdminRouteRuleOut(Schema):
     region_code: str | None = Field(description="适用地区行政区划码；为空 = 不限地区", examples=[None])
     priority: int = Field(description="优先级，数字越小越优先", examples=[10])
     is_enabled: bool = Field(description="规则是否启用", examples=[True])
+
+
+AdminRouteRulePage = page_model(AdminRouteRuleOut, "AdminRouteRulePage", "按创建时间从新到旧")
 
 
 class AdminProviderOut(Schema):
@@ -743,8 +744,15 @@ class AdminProviderOut(Schema):
         examples=["enabled"],
     )
     updated_at: datetime = Field(description="最近修改时间（UTC，带时区）", examples=["2026-11-19T00:00:00Z"])
-    provider_specs: list[AdminProviderSpecOut] = Field(description="该服务商能办理的规格")
-    route_rules: list[AdminRouteRuleOut] = Field(description="该服务商参与的路由规则")
+    provider_spec_count: int = Field(
+        description="该服务商的规格映射总数（含停用）；明细用 GET /admin/provider-specs?provider_code= 分页查询",
+        examples=[14],
+    )
+    enabled_provider_spec_count: int = Field(description="其中已启用、可参与路由的规格映射数", examples=[8])
+    route_rule_count: int = Field(
+        description="该服务商参与的路由规则数；明细用 GET /admin/route-rules?provider_code= 分页查询",
+        examples=[8],
+    )
 
 
 class AdminProviderUpdateIn(Schema):

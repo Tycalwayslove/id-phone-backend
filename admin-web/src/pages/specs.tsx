@@ -1,10 +1,12 @@
-import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
-import { Alert, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Space } from 'antd'
+import { DeleteOutlined, DownOutlined, PlusOutlined, SyncOutlined } from '@ant-design/icons'
+import { Alert, Button, Checkbox, Dropdown, Form, Input, InputNumber, Modal, Select, Space } from 'antd'
+import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { adminApi } from '../api/admin'
+import { adminApi, type SpecFilters } from '../api/admin'
 import type { Schema } from '../api/client'
 import { changedFields, codeRule, IntegerField, useEditorSave } from '../components/editor'
-import { CursorTable, PageHeading, Status, useCursorList } from '../components/ui'
+import { useSpecSync } from '../components/spec-sync'
+import { CursorTable, FilterForm, PageHeading, Status, TextFilter, useCursorList, useFilters } from '../components/ui'
 import { dateText, enumOptions, specCategory, specStatus } from '../format'
 import { usePermission } from '../session'
 
@@ -168,14 +170,53 @@ function SpecEditor({ spec, onClose }: { spec: Spec | null; onClose: () => void 
   )
 }
 
+type Filters = Omit<SpecFilters, 'cursor' | 'limit'>
+
+/** 从服务商同步规格目录（仅 owner 有 provider:write）。 */
+function SyncSpecsButton() {
+  const { sync, syncing, reportModal } = useSpecSync()
+  const providers = useQuery({ queryKey: ['providers'], queryFn: ({ signal }) => adminApi.providers(signal) })
+  const items = (providers.data ?? []).map((provider) => ({
+    key: provider.code,
+    label: `${provider.name}（${provider.code}）`,
+    onClick: () => sync(provider),
+  }))
+  return (
+    <>
+      <Dropdown disabled={syncing !== undefined || !items.length} menu={{ items }} trigger={['click']}>
+        <Button icon={<SyncOutlined />} loading={syncing !== undefined || providers.isPending}>
+          同步规格 <DownOutlined />
+        </Button>
+      </Dropdown>
+      {reportModal}
+    </>
+  )
+}
+
 export default function Specs() {
   const canWrite = usePermission('spec:write')
+  const canSync = usePermission('provider:write')
   const [editing, setEditing] = useState<Spec | null>()
-  const query = useCursorList('specs', (cursor, signal) => adminApi.specs({ cursor }, signal))
+  const search = useFilters<Filters>()
+  const query = useCursorList('specs', (cursor, signal) => adminApi.specs({ ...search.filters, cursor }, signal), search.version)
 
   return (
     <>
-      <PageHeading title="规格" action={canWrite && <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditing(null)}>新建规格</Button>} />
+      <PageHeading title="规格" action={(canSync || canWrite) && (
+        <Space>
+          {canSync && <SyncSpecsButton />}
+          {canWrite && <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditing(null)}>新建规格</Button>}
+        </Space>
+      )} />
+      <FilterForm<Filters> onFinish={(values) => search.apply({ ...values, keyword: values.keyword?.trim() || undefined })}>
+        <TextFilter name="keyword" label="名称或编码" maxLength={64} />
+        <Form.Item label="状态" name="status">
+          <Select className="filter-select" allowClear options={enumOptions(specStatus)} placeholder="全部" />
+        </Form.Item>
+        <Form.Item label="分类" name="category">
+          <Select className="filter-select" allowClear options={enumOptions(specCategory)} placeholder="全部" />
+        </Form.Item>
+      </FilterForm>
       <CursorTable<Spec> query={query} rowKey="code" columns={[
         { title: '规格', dataIndex: 'name' },
         { title: '编码', dataIndex: 'code' },

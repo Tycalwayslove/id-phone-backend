@@ -1,11 +1,12 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { Alert, Button, Descriptions, Modal, Space } from 'antd'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Button, Form, Select, Space } from 'antd'
+import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { adminApi } from '../api/admin'
+import { adminApi, type ProviderSpecFilters } from '../api/admin'
 import type { Schema } from '../api/client'
 import { useConfirmChange } from '../components/confirm'
-import { DataTable, PageHeading, Problem, Section, Status } from '../components/ui'
+import { useSpecSync } from '../components/spec-sync'
+import { CursorTable, DataTable, FilterForm, PageHeading, Problem, Section, Status, TextFilter, useCursorList, useFilters } from '../components/ui'
 import { dateText, money, providerStatus } from '../format'
 import { usePermission } from '../session'
 import { ProviderSpecEditor, RouteRuleEditor } from './provider-editors'
@@ -13,7 +14,7 @@ import { ProviderSpecEditor, RouteRuleEditor } from './provider-editors'
 type Provider = Schema['AdminProviderOut']
 type ProviderSpec = Schema['AdminProviderSpecOut']
 type RouteRule = Schema['AdminRouteRuleOut']
-type SyncResult = Schema['ProviderSyncResult']
+type ProviderSpecSearch = Pick<ProviderSpecFilters, 'keyword' | 'is_enabled'>
 type Edit =
   | { type: 'spec'; providerCode: string; entry: ProviderSpec | null }
   | { type: 'rule'; providerCode: string; rule: RouteRule | null }
@@ -23,15 +24,31 @@ const stateChanges = [
   { value: 'circuit_open', label: '熔断' },
 ] satisfies { value: Provider['status']; label: string }[]
 
+const enabledOptions = [{ value: true, label: '启用' }, { value: false, label: '停用' }]
+
 function ProviderDetails({ provider, edit, busy }: { provider: Provider; edit?: (value: Edit) => void; busy: boolean }) {
   const confirm = useConfirmChange('providers')
+  // 列表 key 以 'providers' 开头：编辑、删除、同步后统一刷新
+  const specSearch = useFilters<ProviderSpecSearch>()
+  const specs = useCursorList('providers', (cursor, signal) => adminApi.providerSpecs(
+    { ...specSearch.filters, provider_code: provider.code, cursor }, signal,
+  ), specSearch.version)
+  const rules = useCursorList('providers', (cursor, signal) => adminApi.routeRules(
+    { provider_code: provider.code, cursor }, signal,
+  ))
   return (
     <>
       <Section title="支持的规格" action={edit && (
         <Button size="small" icon={<PlusOutlined />} disabled={busy}
           onClick={() => edit({ type: 'spec', providerCode: provider.code, entry: null })}>新增规格</Button>
       )}>
-        <DataTable<ProviderSpec> rowKey="id" dataSource={provider.provider_specs} columns={[
+        <FilterForm<ProviderSpecSearch> onFinish={(values) => specSearch.apply({ ...values, keyword: values.keyword?.trim() || undefined })}>
+          <TextFilter name="keyword" label="规格名称、编码或服务商规格 ID" maxLength={64} />
+          <Form.Item label="状态" name="is_enabled">
+            <Select className="filter-select" allowClear options={enabledOptions} placeholder="全部" />
+          </Form.Item>
+        </FilterForm>
+        <CursorTable<ProviderSpec> query={specs} rowKey="id" columns={[
           { title: '规格', dataIndex: 'spec_name' },
           { title: '规格编码', dataIndex: 'spec_code' },
           { title: '服务商规格 ID', dataIndex: 'provider_item_id' },
@@ -58,9 +75,9 @@ function ProviderDetails({ provider, edit, busy }: { provider: Provider; edit?: 
         <Button size="small" icon={<PlusOutlined />} disabled={busy}
           onClick={() => edit({ type: 'rule', providerCode: provider.code, rule: null })}>新增规则</Button>
       )}>
-        <DataTable<RouteRule>
+        <CursorTable<RouteRule>
+          query={rules}
           rowKey="id"
-          dataSource={provider.route_rules}
           columns={[
             { title: '规格编码', dataIndex: 'spec_code' },
             { title: '地区码', render: (_, row) => row.region_code ?? '不限' },
@@ -90,30 +107,11 @@ function ProviderDetails({ provider, edit, busy }: { provider: Provider; edit?: 
 export default function Providers() {
   const canWrite = usePermission('provider:write')
   const confirm = useConfirmChange('providers')
-  const cache = useQueryClient()
   const [editing, setEditing] = useState<Edit>()
-  const [syncing, setSyncing] = useState<string>()
-  const [syncReport, setSyncReport] = useState<{ providerName: string; result: SyncResult }>()
+  const { sync, syncing, reportModal } = useSpecSync()
   const query = useQuery({ queryKey: ['providers'], queryFn: ({ signal }) => adminApi.providers(signal) })
   const providerOptions = (query.data ?? []).map(({ code, name }) => ({ value: code, label: `${name}（${code}）` }))
   const closeEditor = () => setEditing(undefined)
-
-  function syncSpecs(provider: Provider) {
-    confirm({
-      title: '同步规格',
-      content: `从「${provider.name}」同步规格目录？同步会更新制照参数，并停用目录中已移除的规格映射。`,
-      okText: '确认同步',
-    }, async () => {
-      setSyncing(provider.code)
-      try {
-        const result = await adminApi.syncProviderSpecs(provider.code)
-        setSyncReport({ providerName: provider.name, result })
-        void cache.invalidateQueries({ queryKey: ['specs'] })
-      } finally {
-        setSyncing(undefined)
-      }
-    }, '规格已同步')
-  }
 
   return (
     <>
@@ -130,14 +128,15 @@ export default function Providers() {
           { title: '适配器', dataIndex: 'adapter' },
           { title: '上游分组', render: (_, row) => row.upstream_group ?? '—' },
           { title: '状态', render: (_, row) => <Status value={row.status} labels={providerStatus} /> },
-          { title: '支持规格数', render: (_, row) => row.provider_specs.length, align: 'right' },
+          { title: '规格映射（启用 / 全部）', render: (_, row) => `${row.enabled_provider_spec_count} / ${row.provider_spec_count}`, align: 'right' },
+          { title: '路由规则数', dataIndex: 'route_rule_count', align: 'right' },
           { title: '最近修改', dataIndex: 'updated_at', render: dateText },
           ...(canWrite ? [{
             title: '操作',
             render: (_: unknown, row: Provider) => (
               <Space>
                 <Button size="small" loading={syncing === row.code} disabled={query.isFetching || syncing !== undefined}
-                  onClick={() => syncSpecs(row)}>同步规格</Button>
+                  onClick={() => sync(row)}>同步规格</Button>
                 {stateChanges.filter((change) => change.value !== row.status).map(({ value, label }) => (
                   <Button key={value} size="small" danger={value !== 'enabled'} disabled={query.isFetching || syncing !== undefined}
                     onClick={() => confirm({
@@ -161,30 +160,7 @@ export default function Providers() {
       {canWrite && editing?.type === 'rule' && (
         <RouteRuleEditor providerCode={editing.providerCode} providerOptions={providerOptions} rule={editing.rule} onClose={closeEditor} />
       )}
-      {canWrite && syncReport && (
-        <Modal open title={`${syncReport.providerName}规格同步结果`} width={620}
-          onCancel={() => setSyncReport(undefined)}
-          footer={<Button type="primary" onClick={() => setSyncReport(undefined)}>关闭</Button>}>
-          <Descriptions size="small" column={2} items={[
-            { key: 'created', label: '新增', children: syncReport.result.created },
-            { key: 'updated', label: '更新', children: syncReport.result.updated },
-            { key: 'unchanged', label: '未变', children: syncReport.result.unchanged },
-            { key: 'disabled', label: '停用', children: syncReport.result.disabled },
-          ]} />
-          <Alert className="detail-note" type="info" showIcon message="新规格默认下架，请在规格页审核后上架" />
-          {syncReport.result.created > 0 && (
-            <DataTable<Schema['ProviderSyncItem']>
-              rowKey="spec_code"
-              dataSource={syncReport.result.items.filter(({ change }) => change === 'created')}
-              columns={[
-                { title: '新增规格', dataIndex: 'spec_name' },
-                { title: '规格编码', dataIndex: 'spec_code' },
-              ]}
-              scroll={{ y: 320 }}
-            />
-          )}
-        </Modal>
-      )}
+      {canWrite && reportModal}
     </>
   )
 }

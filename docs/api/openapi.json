@@ -573,10 +573,13 @@
                   "type": "null"
                 }
               ],
-              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
+              "examples": [
+                "eyJpIjoxMDI0fQ"
+              ],
               "title": "Cursor"
             },
-            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
           },
           {
             "name": "limit",
@@ -587,6 +590,9 @@
               "maximum": 100,
               "minimum": 1,
               "description": "每页条数，1～100，默认 20",
+              "examples": [
+                20
+              ],
               "default": 20,
               "title": "Limit"
             },
@@ -856,10 +862,13 @@
                   "type": "null"
                 }
               ],
-              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
+              "examples": [
+                "eyJpIjoxMDI0fQ"
+              ],
               "title": "Cursor"
             },
-            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
           },
           {
             "name": "limit",
@@ -870,6 +879,9 @@
               "maximum": 100,
               "minimum": 1,
               "description": "每页条数，1～100，默认 20",
+              "examples": [
+                20
+              ],
               "default": 20,
               "title": "Limit"
             },
@@ -1491,7 +1503,7 @@
           "套餐与订单"
         ],
         "summary": "在售套餐列表",
-        "description": "返回当前可购买的套餐，按运营配置的顺序排列。不需要登录。只包含已上架且在销售时间窗口内的套餐；权益里没有的项为 0。价格和权益以此接口为准，不要写死在前端。",
+        "description": "返回当前可购买的套餐，按运营配置的顺序排列。在售套餐只有几个，一次返回全部、不分页。不需要登录。只包含已上架且在销售时间窗口内的套餐；权益里没有的项为 0。价格和权益以此接口为准，不要写死在前端。",
         "operationId": "plans_list",
         "responses": {
           "200": {
@@ -1664,10 +1676,13 @@
                   "type": "null"
                 }
               ],
-              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
+              "examples": [
+                "eyJpIjoxMDI0fQ"
+              ],
               "title": "Cursor"
             },
-            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
           },
           {
             "name": "limit",
@@ -1678,6 +1693,9 @@
               "maximum": 100,
               "minimum": 1,
               "description": "每页条数，1～100，默认 20",
+              "examples": [
+                20
+              ],
               "default": 20,
               "title": "Limit"
             },
@@ -2133,7 +2151,7 @@
           "权益"
         ],
         "summary": "我的权益列表",
-        "description": "返回当前用户买到的权益（保管期、回执次数等），按到期时间从晚到早排序，最多 100 条，不分页。需要登录。默认只返回当前有效的权益。传 status=expired 查已到期或已撤销的权益，status=all 查全部。根据 can_renew 判断是否展示续费入口。",
+        "description": "返回当前用户买到的权益（保管期、回执次数等），按到期时间从晚到早排序，游标分页。需要登录。默认只返回当前有效的权益。传 status=expired 查已到期或已撤销的权益，status=all 查全部。根据 can_renew 判断是否展示续费入口。",
         "operationId": "entitlements_list",
         "security": [
           {
@@ -2157,19 +2175,53 @@
               "title": "Status"
             },
             "description": "按状态过滤。active：有效（状态正常且未到期，默认）；expired：已到期或已撤销；all：全部"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
+              "examples": [
+                "eyJpIjoxMDI0fQ"
+              ],
+              "title": "Cursor"
+            },
+            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数，1～100，默认 20",
+              "examples": [
+                20
+              ],
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，1～100，默认 20"
           }
         ],
         "responses": {
           "200": {
-            "description": "权益列表，没有则为空数组",
+            "description": "权益分页列表，没有则 items 为空数组",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/EntitlementOut"
-                  },
-                  "title": "Response Entitlements List"
+                  "$ref": "#/components/schemas/EntitlementPage"
                 }
               }
             }
@@ -2413,10 +2465,13 @@
                   "type": "null"
                 }
               ],
-              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
+              "examples": [
+                "eyJpIjoxMDI0fQ"
+              ],
               "title": "Cursor"
             },
-            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
           },
           {
             "name": "limit",
@@ -2427,6 +2482,9 @@
               "maximum": 100,
               "minimum": 1,
               "description": "每页条数，1～100，默认 20",
+              "examples": [
+                20
+              ],
               "default": 20,
               "title": "Limit"
             },
@@ -2996,7 +3054,7 @@
           "通知"
         ],
         "summary": "订阅消息模板列表",
-        "description": "返回小程序需要向用户申请授权的订阅消息模板。需要登录。前端在用户提交回执申请前，用这里的 template_id 调 wx.requestSubscribeMessage，再调用“上报订阅授权”接口把用户点了允许的模板告诉后端，办理结果出来后才能通知到用户。",
+        "description": "返回小程序需要向用户申请授权的订阅消息模板（固定几个，一次返回全部、不分页）。需要登录。前端在用户提交回执申请前，用这里的 template_id 调 wx.requestSubscribeMessage，再调用“上报订阅授权”接口把用户点了允许的模板告诉后端，办理结果出来后才能通知到用户。",
         "operationId": "notify_templates",
         "responses": {
           "200": {
@@ -3370,10 +3428,13 @@
                   "type": "null"
                 }
               ],
-              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
+              "examples": [
+                "eyJpIjoxMDI0fQ"
+              ],
               "title": "Cursor"
             },
-            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
           },
           {
             "name": "limit",
@@ -3384,6 +3445,9 @@
               "maximum": 100,
               "minimum": 1,
               "description": "每页条数，1～100，默认 20",
+              "examples": [
+                20
+              ],
               "default": 20,
               "title": "Limit"
             },
@@ -3778,10 +3842,13 @@
                   "type": "null"
                 }
               ],
-              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
+              "examples": [
+                "eyJpIjoxMDI0fQ"
+              ],
               "title": "Cursor"
             },
-            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
           },
           {
             "name": "limit",
@@ -3792,6 +3859,9 @@
               "maximum": 100,
               "minimum": 1,
               "description": "每页条数，1～100，默认 20",
+              "examples": [
+                20
+              ],
               "default": 20,
               "title": "Limit"
             },
@@ -4228,10 +4298,13 @@
                   "type": "null"
                 }
               ],
-              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
+              "examples": [
+                "eyJpIjoxMDI0fQ"
+              ],
               "title": "Cursor"
             },
-            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
           },
           {
             "name": "limit",
@@ -4242,6 +4315,9 @@
               "maximum": 100,
               "minimum": 1,
               "description": "每页条数，1～100，默认 20",
+              "examples": [
+                20
+              ],
               "default": 20,
               "title": "Limit"
             },
@@ -4936,7 +5012,7 @@
           "后台"
         ],
         "summary": "规格列表",
-        "description": "列出全部规格（含已下架），按创建时间从新到旧，游标分页。权限点 spec:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "description": "列出全部规格（含已下架），按创建时间从新到旧，游标分页，条件之间是“并且”。权限点 spec:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。从服务商同步进来的新规格默认下架，可用 status=inactive 筛出来逐个审核后上架。",
         "operationId": "admin_specs_list",
         "security": [
           {
@@ -4944,6 +5020,79 @@
           }
         ],
         "parameters": [
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按规格名称或编码模糊查找（包含即可，不区分大小写）",
+              "examples": [
+                "身份证"
+              ],
+              "title": "Keyword"
+            },
+            "description": "按规格名称或编码模糊查找（包含即可，不区分大小写）"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "active",
+                    "inactive"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按状态筛选：active = 上架；inactive = 下架（含同步进来待审核的）",
+              "examples": [
+                "inactive"
+              ],
+              "title": "Status"
+            },
+            "description": "按状态筛选：active = 上架；inactive = 下架（含同步进来待审核的）"
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "receipt",
+                    "normal",
+                    "exam"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按分类筛选：receipt = 回执类；normal = 普通证件照；exam = 考试报名照",
+              "examples": [
+                "receipt"
+              ],
+              "title": "Category"
+            },
+            "description": "按分类筛选：receipt = 回执类；normal = 普通证件照；exam = 考试报名照"
+          },
           {
             "name": "cursor",
             "in": "query",
@@ -4957,10 +5106,13 @@
                   "type": "null"
                 }
               ],
-              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
+              "examples": [
+                "eyJpIjoxMDI0fQ"
+              ],
               "title": "Cursor"
             },
-            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
           },
           {
             "name": "limit",
@@ -4971,6 +5123,9 @@
               "maximum": 100,
               "minimum": 1,
               "description": "每页条数，1～100，默认 20",
+              "examples": [
+                20
+              ],
               "default": 20,
               "title": "Limit"
             },
@@ -5251,7 +5406,7 @@
           "后台"
         ],
         "summary": "服务商列表",
-        "description": "列出回执服务商及其能办理的规格、路由规则，不返回密钥。数量少所以不分页。权限点 provider:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "description": "列出全部回执服务商（只有几家，所以不分页），不返回密钥。权限点 provider:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。只返回规格映射和路由规则的数量；明细分别用 GET /admin/provider-specs、GET /admin/route-rules 分页查询。",
         "operationId": "admin_providers_list",
         "security": [
           {
@@ -5549,6 +5704,184 @@
       }
     },
     "/api/v1/admin/provider-specs": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "服务商规格列表",
+        "description": "分页列出服务商规格映射（哪家服务商能办哪个规格、对方规格 ID、成本），按创建时间从新到旧，条件之间是“并且”。权限点 provider:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。同步规格目录后新增的映射默认停用，可用 is_enabled=false 筛出来逐个配置成本后启用。",
+        "operationId": "admin_provider_specs_list",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按服务商编码筛选；不存在的编码返回空列表",
+              "examples": [
+                "zheying"
+              ],
+              "title": "Provider Code"
+            },
+            "description": "按服务商编码筛选；不存在的编码返回空列表"
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按规格名称、规格编码或服务商规格 ID 模糊查找（包含即可，不区分大小写）",
+              "examples": [
+                "身份证"
+              ],
+              "title": "Keyword"
+            },
+            "description": "按规格名称、规格编码或服务商规格 ID 模糊查找（包含即可，不区分大小写）"
+          },
+          {
+            "name": "is_enabled",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按是否启用筛选：true = 已启用；false = 已停用；不传 = 全部",
+              "examples": [
+                false
+              ],
+              "title": "Is Enabled"
+            },
+            "description": "按是否启用筛选：true = 已启用；false = 已停用；不传 = 全部"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
+              "examples": [
+                "eyJpIjoxMDI0fQ"
+              ],
+              "title": "Cursor"
+            },
+            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数，1～100，默认 20",
+              "examples": [
+                20
+              ],
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，1～100，默认 20"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "服务商规格映射分页列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminProviderSpecPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "后台"
@@ -5880,6 +6213,163 @@
       }
     },
     "/api/v1/admin/route-rules": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "路由规则列表",
+        "description": "分页列出路由规则（某规格、某地区下的候选服务商及优先级），按创建时间从新到旧，条件之间是“并且”。权限点 provider:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "operationId": "admin_route_rules_list",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按服务商编码筛选；不存在的编码返回空列表",
+              "examples": [
+                "zheying"
+              ],
+              "title": "Provider Code"
+            },
+            "description": "按服务商编码筛选；不存在的编码返回空列表"
+          },
+          {
+            "name": "spec_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按规格编码精确筛选",
+              "examples": [
+                "gd_idcard"
+              ],
+              "title": "Spec Code"
+            },
+            "description": "按规格编码精确筛选"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
+              "examples": [
+                "eyJpIjoxMDI0fQ"
+              ],
+              "title": "Cursor"
+            },
+            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数，1～100，默认 20",
+              "examples": [
+                20
+              ],
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，1～100，默认 20"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "路由规则分页列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRouteRulePage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "后台"
@@ -6342,10 +6832,13 @@
                   "type": "null"
                 }
               ],
-              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
+              "examples": [
+                "eyJpIjoxMDI0fQ"
+              ],
               "title": "Cursor"
             },
-            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
           },
           {
             "name": "limit",
@@ -6356,6 +6849,9 @@
               "maximum": 100,
               "minimum": 1,
               "description": "每页条数，1～100，默认 20",
+              "examples": [
+                20
+              ],
               "default": 20,
               "title": "Limit"
             },
@@ -6451,10 +6947,13 @@
                   "type": "null"
                 }
               ],
-              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
+              "examples": [
+                "eyJpIjoxMDI0fQ"
+              ],
               "title": "Cursor"
             },
-            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
           },
           {
             "name": "limit",
@@ -6465,6 +6964,9 @@
               "maximum": 100,
               "minimum": 1,
               "description": "每页条数，1～100，默认 20",
+              "examples": [
+                20
+              ],
               "default": 20,
               "title": "Limit"
             },
@@ -7060,10 +7562,13 @@
                   "type": "null"
                 }
               ],
-              "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor",
+              "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
+              "examples": [
+                "eyJpIjoxMDI0fQ"
+              ],
               "title": "Cursor"
             },
-            "description": "翻页游标：第一页不传，之后传上一页返回的 next_cursor"
+            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor"
           },
           {
             "name": "limit",
@@ -7074,6 +7579,9 @@
               "maximum": 100,
               "minimum": 1,
               "description": "每页条数，1～100，默认 20",
+              "examples": [
+                20
+              ],
               "default": 20,
               "title": "Limit"
             },
@@ -9292,21 +9800,29 @@
               "2026-11-19T00:00:00Z"
             ]
           },
-          "provider_specs": {
-            "items": {
-              "$ref": "#/components/schemas/AdminProviderSpecOut"
-            },
-            "type": "array",
-            "title": "Provider Specs",
-            "description": "该服务商能办理的规格"
+          "provider_spec_count": {
+            "type": "integer",
+            "title": "Provider Spec Count",
+            "description": "该服务商的规格映射总数（含停用）；明细用 GET /admin/provider-specs?provider_code= 分页查询",
+            "examples": [
+              14
+            ]
           },
-          "route_rules": {
-            "items": {
-              "$ref": "#/components/schemas/AdminRouteRuleOut"
-            },
-            "type": "array",
-            "title": "Route Rules",
-            "description": "该服务商参与的路由规则"
+          "enabled_provider_spec_count": {
+            "type": "integer",
+            "title": "Enabled Provider Spec Count",
+            "description": "其中已启用、可参与路由的规格映射数",
+            "examples": [
+              8
+            ]
+          },
+          "route_rule_count": {
+            "type": "integer",
+            "title": "Route Rule Count",
+            "description": "该服务商参与的路由规则数；明细用 GET /admin/route-rules?provider_code= 分页查询",
+            "examples": [
+              8
+            ]
           }
         },
         "type": "object",
@@ -9317,8 +9833,9 @@
           "upstream_group",
           "status",
           "updated_at",
-          "provider_specs",
-          "route_rules"
+          "provider_spec_count",
+          "enabled_provider_spec_count",
+          "route_rule_count"
         ],
         "title": "AdminProviderOut",
         "description": "回执服务商。不返回密钥等配置。"
@@ -9498,6 +10015,36 @@
         ],
         "title": "AdminProviderSpecOut",
         "description": "服务商能办理的一个规格（覆盖矩阵的一行）。"
+      },
+      "AdminProviderSpecPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminProviderSpecOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本页数据，按创建时间从新到旧"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "下一页游标；为空表示没有更多了"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AdminProviderSpecPage",
+        "description": "分页列表：服务商能办理的一个规格（覆盖矩阵的一行）。"
       },
       "AdminProviderSpecUpdateIn": {
         "properties": {
@@ -10016,6 +10563,36 @@
         ],
         "title": "AdminRouteRuleOut",
         "description": "路由规则的一行：某规格（可限地区）下的一个候选服务商。"
+      },
+      "AdminRouteRulePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminRouteRuleOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本页数据，按创建时间从新到旧"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "下一页游标；为空表示没有更多了"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AdminRouteRulePage",
+        "description": "分页列表：路由规则的一行：某规格（可限地区）下的一个候选服务商。"
       },
       "AdminRouteRuleUpdateIn": {
         "properties": {
@@ -10643,7 +11220,7 @@
             },
             "type": "array",
             "title": "Items",
-            "description": "本页数据，按创建时间从新到旧"
+            "description": "本页数据，按创建时间从新到旧（新同步进来的规格排在最前）"
           },
           "next_cursor": {
             "anyOf": [
@@ -11353,6 +11930,32 @@
       },
       "AdminUserSearchIn": {
         "properties": {
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor",
+            "description": "翻页游标：第一页不传，之后原样传上一页返回的 next_cursor",
+            "examples": [
+              "eyJpIjoxMDI0fQ"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "description": "每页条数，1～100，默认 20",
+            "default": 20,
+            "examples": [
+              20
+            ]
+          },
           "phone": {
             "anyOf": [
               {
@@ -11404,32 +12007,6 @@
             "description": "按账号状态筛选：active = 正常；disabled = 已停用；cancelled = 已注销",
             "examples": [
               "active"
-            ]
-          },
-          "cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cursor",
-            "description": "翻页游标。第一页不传，之后传上一页返回的 next_cursor",
-            "examples": [
-              "eyJpIjoxMDI0fQ"
-            ]
-          },
-          "limit": {
-            "type": "integer",
-            "maximum": 100.0,
-            "minimum": 1.0,
-            "title": "Limit",
-            "description": "每页条数，1～100，默认 20",
-            "default": 20,
-            "examples": [
-              20
             ]
           }
         },
@@ -11977,6 +12554,36 @@
         ],
         "title": "EntitlementOut",
         "description": "用户买到的一份权益，包含保管期、回执次数等。续费更新原权益的到期时间。"
+      },
+      "EntitlementPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EntitlementOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本页数据，按到期时间从晚到早"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "下一页游标；为空表示没有更多了"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "EntitlementPage",
+        "description": "分页列表：用户买到的一份权益，包含保管期、回执次数等。续费更新原权益的到期时间。"
       },
       "ErrorResponse": {
         "properties": {
@@ -13851,7 +14458,7 @@
             },
             "type": "array",
             "title": "Items",
-            "description": "本页数据，按创建时间从新到旧"
+            "description": "本页数据，按排序值从小到大，排序值相同按 ID"
           },
           "next_cursor": {
             "anyOf": [
