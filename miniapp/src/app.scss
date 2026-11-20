@@ -51,8 +51,10 @@ page {
   color: var(--c-text-2);
 }
 
-.list-gap > * + * {
-  margin-top: var(--gap);
+.list-gap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
 }
 
 .hint {
@@ -81,11 +83,11 @@ page {
   background: #fff;
   box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.04);
 
-  > * + * {
-    margin-left: 24px;
-  }
+  gap: 24px;
 
-  > * {
+  /* 小程序 WXSS 不支持 * 选择器，按实际子元素标签写 */
+  > view,
+  > button {
     flex: 1;
   }
 }

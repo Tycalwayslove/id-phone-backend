@@ -44,7 +44,8 @@
     gap: var(--gap);
     margin-top: 32px;
 
-    > * {
+    > view,
+    > button {
       flex: 1;
     }
   }
