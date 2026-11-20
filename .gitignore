@@ -6,3 +6,6 @@ __pycache__/
 logs/
 backups/
 *.dump
+
+# Claude Code / Codex 并行任务的工作区
+.claude/worktrees/
