@@ -6,7 +6,7 @@ import { adminApi, type SpecFilters } from '../api/admin'
 import type { Schema } from '../api/client'
 import { changedFields, codeRule, IntegerField, useEditorSave } from '../components/editor'
 import { useSpecSync } from '../components/spec-sync'
-import { CursorTable, FilterForm, PageHeading, Status, TextFilter, useCursorList, useFilters } from '../components/ui'
+import { PagedTable, FilterForm, PageHeading, Status, TextFilter, usePagedList } from '../components/ui'
 import { dateText, enumOptions, specCategory, specStatus } from '../format'
 import { usePermission } from '../session'
 
@@ -181,7 +181,7 @@ function SpecEditor({ spec, onClose }: { spec: Spec | null; onClose: () => void 
   )
 }
 
-type Filters = Omit<SpecFilters, 'cursor' | 'limit'>
+type Filters = SpecFilters
 
 /** 从服务商同步规格目录（仅 owner 有 provider:write）。 */
 function SyncSpecsButton() {
@@ -208,8 +208,7 @@ export default function Specs() {
   const canWrite = usePermission('spec:write')
   const canSync = usePermission('provider:write')
   const [editing, setEditing] = useState<Spec | null>()
-  const search = useFilters<Filters>()
-  const query = useCursorList('specs', (cursor, signal) => adminApi.specs({ ...search.filters, cursor }, signal), search.version)
+  const query = usePagedList('specs', adminApi.specs, {} satisfies Filters)
 
   return (
     <>
@@ -219,7 +218,7 @@ export default function Specs() {
           {canWrite && <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditing(null)}>新建规格</Button>}
         </Space>
       )} />
-      <FilterForm<Filters> onFinish={(values) => search.apply({
+      <FilterForm<Filters> onFinish={(values) => query.apply({
         ...values, keyword: values.keyword?.trim() || undefined, region_code: values.region_code?.trim() || undefined,
       })}>
         <TextFilter name="keyword" label="名称或编码" maxLength={64} />
@@ -231,7 +230,7 @@ export default function Specs() {
           <Select className="filter-select" allowClear options={enumOptions(specCategory)} placeholder="全部" />
         </Form.Item>
       </FilterForm>
-      <CursorTable<Spec> query={query} rowKey="code" columns={[
+      <PagedTable<Spec> query={query} rowKey="code" columns={[
         { title: '规格', dataIndex: 'name' },
         { title: '编码', dataIndex: 'code' },
         { title: '分类', render: (_, row) => specCategory[row.category] },

@@ -1,7 +1,7 @@
 import { AutoComplete, Form, Input, Tag } from 'antd'
 import { adminApi, type AuditFilters } from '../api/admin'
 import type { Schema } from '../api/client'
-import { CursorTable, FilterForm, IdFilter, PageHeading, Section, useCursorList, useFilters } from '../components/ui'
+import { PagedTable, FilterForm, IdFilter, PageHeading, Section, usePagedList } from '../components/ui'
 import {
   auditActions, auditTargets, benefitTypes, dateText, enumOptions, labelFor, money, orderStatus,
   planStatus, providerStatus, receiptStatus, refundStatus, specCategory, specStatus, type BenefitType,
@@ -42,13 +42,12 @@ function formatSnapshot(data: AuditLog['before'], target: string) {
 }
 
 export default function Audit() {
-  const search = useFilters<AuditFilters>()
-  const query = useCursorList('audit', (cursor, signal) => adminApi.auditLogs({ ...search.filters, cursor }, signal), search.version)
+  const query = usePagedList('audit', adminApi.auditLogs, {} satisfies AuditFilters)
 
   return (
     <>
       <PageHeading title="审计日志" />
-      <FilterForm<AuditFilters> onFinish={(values) => search.apply({
+      <FilterForm<AuditFilters> onFinish={(values) => query.apply({
         ...values, action: values.action?.trim() || undefined, target_type: values.target_type?.trim() || undefined,
       })}>
         <IdFilter name="admin_id" label="账号 ID" />
@@ -63,7 +62,7 @@ export default function Audit() {
           </AutoComplete>
         </Form.Item>
       </FilterForm>
-      <CursorTable<AuditLog> query={query} rowKey="id" expandable={{
+      <PagedTable<AuditLog> query={query} rowKey="id" expandable={{
         rowExpandable: (row) => !!(row.before || row.after),
         expandedRowRender: (row) => (
           <div className="form-grid">

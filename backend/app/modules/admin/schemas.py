@@ -6,8 +6,8 @@ from uuid import UUID
 
 from pydantic import Field, StringConstraints
 
-from app.core.pagination import PageIn
-from app.core.schemas import Schema, page_model
+from app.core.pagination import OffsetPageIn, offset_page_model
+from app.core.schemas import Schema
 from app.modules.orders.schemas import OrderItemOut
 from app.modules.photos.schemas import PhotoQuality
 from app.modules.specs.schemas import SpecFormField
@@ -107,7 +107,7 @@ class AdminAccountOut(AdminBriefOut):
     updated_at: datetime = Field(description="更新时间（UTC，带时区）", examples=["2026-11-19T09:00:00Z"])
 
 
-AdminAccountPage = page_model(AdminAccountOut, "AdminAccountPage")
+AdminAccountPage = offset_page_model(AdminAccountOut, "AdminAccountPage")
 
 
 class AdminAccountCreateIn(Schema):
@@ -194,13 +194,13 @@ class AdminNotifyTaskOut(Schema):
     created_at: datetime = Field(description="创建时间（UTC，带时区）", examples=["2026-11-19T09:00:00Z"])
 
 
-AdminNotifyTaskPage = page_model(AdminNotifyTaskOut, "AdminNotifyTaskPage")
+AdminNotifyTaskPage = offset_page_model(AdminNotifyTaskOut, "AdminNotifyTaskPage")
 
 
 # ---------- 用户 ----------
 
 
-class AdminUserSearchIn(PageIn):
+class AdminUserSearchIn(OffsetPageIn):
     """后台用户查询条件和分页参数。"""
 
     phone: str | None = Field(
@@ -246,7 +246,7 @@ class AdminClientAppOut(AdminClientAppBrief):
     user_count: int = Field(description="该应用带来的注册用户数，含已注销用户", examples=[120])
 
 
-AdminClientAppPage = page_model(AdminClientAppOut, "AdminClientAppPage")
+AdminClientAppPage = offset_page_model(AdminClientAppOut, "AdminClientAppPage")
 
 
 class AdminClientAppUpdateIn(Schema):
@@ -289,7 +289,7 @@ class AdminPhotoOut(Schema):
     )
 
 
-AdminPhotoPage = page_model(AdminPhotoOut, "AdminPhotoPage")
+AdminPhotoPage = offset_page_model(AdminPhotoOut, "AdminPhotoPage")
 
 
 class AdminPhotoRenderOut(Schema):
@@ -376,7 +376,7 @@ class AdminUserDetail(AdminUserOut):
     )
 
 
-AdminUserPage = page_model(AdminUserOut, "AdminUserPage")
+AdminUserPage = offset_page_model(AdminUserOut, "AdminUserPage")
 
 # ---------- 订单与退款 ----------
 
@@ -457,7 +457,7 @@ class AdminOrderDetail(AdminOrderOut):
     refunds: list[AdminRefundOut] = Field(description="退款记录，按发起先后排列；没有退款为空列表")
 
 
-AdminOrderPage = page_model(AdminOrderOut, "AdminOrderPage")
+AdminOrderPage = offset_page_model(AdminOrderOut, "AdminOrderPage")
 
 
 class AdminRefundIn(Schema):
@@ -550,7 +550,7 @@ class AdminApplicationDetail(AdminApplicationOut):
     attempts: list[AdminAttemptOut] = Field(description="全部提交记录，按次序从早到晚")
 
 
-AdminApplicationPage = page_model(AdminApplicationOut, "AdminApplicationPage")
+AdminApplicationPage = offset_page_model(AdminApplicationOut, "AdminApplicationPage")
 
 
 class AdminManualReviewIn(Schema):
@@ -695,7 +695,9 @@ class AdminSpecOut(Schema):
     updated_at: datetime = Field(description="最近修改时间（UTC，带时区）", examples=["2026-11-19T00:00:00Z"])
 
 
-AdminSpecPage = page_model(AdminSpecOut, "AdminSpecPage", "按创建时间从新到旧（新同步进来的规格排在最前）")
+AdminSpecPage = offset_page_model(
+    AdminSpecOut, "AdminSpecPage", "按规格 ID 从大到小（新同步进来的规格排在最前）"
+)
 
 
 class AdminSpecRegionOut(Schema):
@@ -849,7 +851,7 @@ class AdminProviderSpecOut(Schema):
     )
 
 
-AdminProviderSpecPage = page_model(AdminProviderSpecOut, "AdminProviderSpecPage", "按创建时间从新到旧")
+AdminProviderSpecPage = offset_page_model(AdminProviderSpecOut, "AdminProviderSpecPage")
 
 
 class AdminRouteRuleOut(Schema):
@@ -863,7 +865,7 @@ class AdminRouteRuleOut(Schema):
     is_enabled: bool = Field(description="规则是否启用", examples=[True])
 
 
-AdminRouteRulePage = page_model(AdminRouteRuleOut, "AdminRouteRulePage", "按创建时间从新到旧")
+AdminRouteRulePage = offset_page_model(AdminRouteRuleOut, "AdminRouteRulePage")
 
 
 class AdminProviderOut(Schema):
@@ -1010,4 +1012,4 @@ class AdminAuditLogOut(Schema):
     created_at: datetime = Field(description="操作时间（UTC，带时区）", examples=["2026-11-19T09:00:00Z"])
 
 
-AdminAuditLogPage = page_model(AdminAuditLogOut, "AdminAuditLogPage")
+AdminAuditLogPage = offset_page_model(AdminAuditLogOut, "AdminAuditLogPage")

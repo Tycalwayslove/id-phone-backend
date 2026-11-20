@@ -36,7 +36,8 @@ tests/<m>/test_*.py
 - `get_photo_for_user(db, user_id, photo_id) -> Photo`：不是本人的或不存在 → `AppError(PHOTO_NOT_FOUND)`。
 - `render(db, *, user_id, photo_id, spec: Spec, bg_color, beauty_level, watermarked) -> PhotoRender`：同参数已有就复用；没有就用 Pillow 生成并保存。
 - `purge_all_for_user(db, user_id) -> int`：删除该用户全部存储文件，files 标记 purged，photos 标记 purged。
-- `list_admin_photos(db, *, before_id, limit, user_id=None, status=None, matting_level=None, quality_level=None)`：供后台按照片 ID 倒序筛选，返回 `(Photo, File | None)`。文件优先取最新的有效预览，缺少预览时取有效原图，已清理的照片无文件。调用方检查 `photo:read`。
+- `list_admin_photos(db, *, page: OffsetPageParams, user_id=None, status=None, matting_level=None, quality_level=None) -> tuple[list[tuple[Photo, File | None]], int]`：供后台按照片 ID 倒序筛选，返回单页记录和总条数。文件优先取最新的有效预览，缺少预览时取有效原图，已清理的照片无文件。调用方检查 `photo:read`。
+- `list_recent_admin_photos(db, *, user_id, limit) -> list[tuple[Photo, File | None]]`：供后台用户详情按照片 ID 倒序展示最近照片，文件选择规则同上。调用方检查 `photo:read`。
 - `get_admin_photo_detail(db, *, photo_id)`：供后台读取照片、按文件 ID 索引的原图和当前底片，以及导出记录和规格名称。照片不存在时抛 `PHOTO_NOT_FOUND`。调用方检查 `photo:read`、仅为有效文件签名并写入查看审计。
 
 ## entitlements（权益）
@@ -73,7 +74,8 @@ tests/<m>/test_*.py
 
 - `cancel_application(db, *, user_id, app_no) -> ReceiptApplication`：pending/rejected 的申请可取消，释放额度。
 - `apply_provider_status(db, attempt, status: ProviderStatus) -> str`：把服务商结果应用到尝试和申请上，返回处理结果（applied/stale/duplicate）。轮询、回调、联调接口共用。
-- `list_admin_applications(db, *, before_id, limit, status=None, app_no=None, user_id=None, spec_code=None, manual_review=None)` / `get_admin_application_detail(db, *, app_no)` / `get_admin_application_by_no(db, *, app_no, for_update=False)`：供后台查询申请摘要、脱敏详情和按单号读取申请。人工核对标记只取待办理申请的当前提交。
+- `list_admin_applications(db, *, page: OffsetPageParams, status=None, app_no=None, user_id=None, spec_code=None, manual_review=None) -> tuple[list[tuple[ReceiptApplication, Spec, bool]], int]`：供后台查询按申请 ID 倒序排列的单页摘要和总条数。人工核对标记只取待办理申请的当前提交。
+- `get_admin_application_detail(db, *, app_no)` / `get_admin_application_by_no(db, *, app_no, for_update=False)`：供后台查询申请脱敏详情和按单号读取申请。
 - `application_counts_by_status(db)` / `count_user_applications(db, *, user_id)`：供后台看板和用户详情统计回执申请。
 - `resolve_manual_review(db, *, app_no, result)`：锁定需人工核对的申请，通过现有状态机应用核对结论并清除标记，返回申请及原状态。调用方与审计记录一起提交。
 

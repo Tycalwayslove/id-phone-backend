@@ -97,13 +97,11 @@ def test_client_apps_user_attribution_and_permissions(client, db):
     _add_user(db, source_app_id=other.id)
 
     operator = admin_login(client, db, "operator", "operator")
-    response = client.get(f"{API}/client-apps", params={"limit": 1})
+    response = client.get(f"{API}/client-apps", params={"page_size": 10})
     assert response.status_code == 200
-    assert response.json()["items"][0]["user_count"] == 1
-    cursor = response.json()["next_cursor"]
-    assert cursor
-    response = client.get(f"{API}/client-apps", params={"cursor": cursor})
-    assert [(row["id"], row["user_count"]) for row in response.json()["items"]] == [(app.id, 2)]
+    page = response.json()
+    assert page["total"] == 2
+    assert [(row["id"], row["user_count"]) for row in page["items"]] == [(other.id, 1), (app.id, 2)]
     response = client.patch(f"{API}/client-apps/{app.id}", headers=operator, json={"status": "disabled"})
     assert response.status_code == 403 and response.json()["code"] == "PERMISSION_DENIED"
 
@@ -176,24 +174,19 @@ def test_photos_filters_signed_links_and_view_audit(client, db):
         "status": "active",
         "matting_level": "fine",
         "quality_level": "warn",
-        "limit": 1,
+        "page_size": 10,
     }
     start = int(time())
     response = client.get(f"{API}/photos", params=filters)
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
     page = response.json()
-    assert [item["id"] for item in page["items"]] == [second.id]
+    assert page["total"] == 2
+    assert [item["id"] for item in page["items"]] == [second.id, first.id]
     assert page["items"][0]["retain_until"] is not None
-    _assert_signed_url(page["items"][0]["thumbnail_url"], preview, start, int(time()))
-    filters["cursor"] = page["next_cursor"]
-    start = int(time())
-    page = client.get(f"{API}/photos", params=filters).json()
-    assert [item["id"] for item in page["items"]] == [first.id]
-    assert page["next_cursor"] is None
-    _assert_signed_url(
-        page["items"][0]["thumbnail_url"], db.get(File, first.original_file_id), start, int(time())
-    )
+    end = int(time())
+    _assert_signed_url(page["items"][0]["thumbnail_url"], preview, start, end)
+    _assert_signed_url(page["items"][1]["thumbnail_url"], db.get(File, first.original_file_id), start, end)
     assert client.get(f"{API}/photos", params={"quality_level": "ok"}).json()["items"] == []
     assert client.get(f"{API}/photos", params={"matting_level": "fast"}).json()["items"] == []
     removed = client.get(f"{API}/photos", params={"status": "purged"}).json()["items"][0]

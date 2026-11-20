@@ -19,7 +19,7 @@ from app.core import security
 from app.core.config import settings
 from app.core.deps import ALL_PERMISSIONS, ROLE_PERMISSIONS, CurrentAdmin, csrf_for
 from app.core.errors import AppError, ErrorCode
-from app.core.pagination import PageParams
+from app.core.pagination import OffsetPageParams
 from app.core.regions import region_name
 from app.core.schemas import OkResponse
 from app.core.utils import utcnow
@@ -202,9 +202,6 @@ def _flush_unique(db: Session, constraint: str, message: str) -> None:
         raise
 
 
-# ---------- 分页 ----------
-
-
 # ---------- 登录 / 退出 / 我 ----------
 
 # 兼容已有 Argon2 哈希。前缀标识此哈希必须在首次登录时替换。
@@ -294,11 +291,13 @@ def me(admin: CurrentAdmin) -> AdminMeOut:
 # ---------- 管理员账号 ----------
 
 
-def list_admin_accounts(db: Session, page: PageParams) -> AdminAccountPage:
-    rows = repo.list_admin_accounts(db, before_id=page.before_id(), limit=page.fetch_limit)
-    rows, next_cursor = page.slice(rows)
+def list_admin_accounts(db: Session, page: OffsetPageParams) -> AdminAccountPage:
+    rows, total = repo.list_admin_accounts(db, page=page)
     return AdminAccountPage(
-        items=[AdminAccountOut.model_validate(row) for row in rows], next_cursor=next_cursor
+        items=[AdminAccountOut.model_validate(row) for row in rows],
+        total=total,
+        page=page.page,
+        page_size=page.page_size,
     )
 
 
@@ -412,11 +411,13 @@ def stats_overview(db: Session) -> AdminStatsOverviewOut:
     )
 
 
-def list_notify_tasks(db: Session, *, status: str | None, page: PageParams) -> AdminNotifyTaskPage:
-    rows = repo.list_notify_tasks(db, status=status, before_id=page.before_id(), limit=page.fetch_limit)
-    rows, next_cursor = page.slice(rows)
+def list_notify_tasks(db: Session, *, status: str | None, page: OffsetPageParams) -> AdminNotifyTaskPage:
+    rows, total = repo.list_notify_tasks(db, status=status, page=page)
     return AdminNotifyTaskPage(
-        items=[AdminNotifyTaskOut.model_validate(row) for row in rows], next_cursor=next_cursor
+        items=[AdminNotifyTaskOut.model_validate(row) for row in rows],
+        total=total,
+        page=page.page,
+        page_size=page.page_size,
     )
 
 
@@ -460,22 +461,25 @@ def list_users(
     *,
     user_id: int | None,
     status: str | None,
-    page: PageParams,
+    page: OffsetPageParams,
     phone: str | None = None,
     source_app_id: int | None = None,
 ) -> AdminUserPage:
     phone_hash = security.keyed_hash(phone.strip(), "phone") if phone else None
-    rows = repo.list_users(
+    rows, total = repo.list_users(
         db,
         user_id=user_id,
         phone_hash=phone_hash,
         status=status,
         source_app_id=source_app_id,
-        before_id=page.before_id(),
-        limit=page.fetch_limit,
+        page=page,
     )
-    rows, next_cursor = page.slice(rows)
-    return AdminUserPage(items=[AdminUserOut(**d) for d in _user_outs(db, rows)], next_cursor=next_cursor)
+    return AdminUserPage(
+        items=[AdminUserOut(**d) for d in _user_outs(db, rows)],
+        total=total,
+        page=page.page,
+        page_size=page.page_size,
+    )
 
 
 def get_user(db: Session, user_id: int, *, admin: CurrentAdmin) -> AdminUserDetail:
@@ -483,7 +487,7 @@ def get_user(db: Session, user_id: int, *, admin: CurrentAdmin) -> AdminUserDeta
     if user is None:
         raise AppError(ErrorCode.NOT_FOUND, "用户不存在")
     photos = (
-        photo_service.list_admin_photos(db, user_id=user.id, before_id=None, limit=12)
+        photo_service.list_recent_admin_photos(db, user_id=user.id, limit=12)
         if admin.can("photo:read")
         else []
     )
@@ -506,11 +510,15 @@ def _client_app_out(app: ClientApp, counts: dict[int, int]) -> AdminClientAppOut
     )
 
 
-def list_client_apps(db: Session, page: PageParams) -> AdminClientAppPage:
-    rows = repo.list_client_apps(db, before_id=page.before_id(), limit=page.fetch_limit)
-    rows, next_cursor = page.slice(rows)
+def list_client_apps(db: Session, page: OffsetPageParams) -> AdminClientAppPage:
+    rows, total = repo.list_client_apps(db, page=page)
     counts = repo.client_app_user_counts(db, [app.id for app in rows])
-    return AdminClientAppPage(items=[_client_app_out(app, counts) for app in rows], next_cursor=next_cursor)
+    return AdminClientAppPage(
+        items=[_client_app_out(app, counts) for app in rows],
+        total=total,
+        page=page.page,
+        page_size=page.page_size,
+    )
 
 
 def update_client_app(
@@ -558,24 +566,25 @@ def _photo_summary(photo: Photo, thumbnail: File | None) -> AdminPhotoOut:
 def list_photos(
     db: Session,
     *,
-    page: PageParams,
+    page: OffsetPageParams,
     user_id: int | None,
     status: str | None,
     matting_level: str | None,
     quality_level: str | None,
 ) -> AdminPhotoPage:
-    rows = photo_service.list_admin_photos(
+    rows, total = photo_service.list_admin_photos(
         db,
-        before_id=page.before_id(),
-        limit=page.fetch_limit,
+        page=page,
         user_id=user_id,
         status=status,
         matting_level=matting_level,
         quality_level=quality_level,
     )
-    rows, next_cursor = page.slice(rows, cursor_of=lambda row: {"i": row[0].id})
     return AdminPhotoPage(
-        items=[_photo_summary(photo, thumbnail) for photo, thumbnail in rows], next_cursor=next_cursor
+        items=[_photo_summary(photo, thumbnail) for photo, thumbnail in rows],
+        total=total,
+        page=page.page,
+        page_size=page.page_size,
     )
 
 
@@ -660,22 +669,23 @@ def list_orders(
     user_id: int | None,
     created_from: datetime | None,
     created_to: datetime | None,
-    page: PageParams,
+    page: OffsetPageParams,
 ) -> AdminOrderPage:
-    rows = repo.list_orders(
+    rows, total = repo.list_orders(
         db,
         status=status,
         order_no=order_no,
         user_id=user_id,
         created_from=created_from,
         created_to=created_to,
-        before_id=page.before_id(),
-        limit=page.fetch_limit,
+        page=page,
     )
-    rows, next_cursor = page.slice(rows)
     items = repo.items_by_order(db, [o.id for o in rows])
     return AdminOrderPage(
-        items=[AdminOrderOut(**_order_fields(o, items[o.id])) for o in rows], next_cursor=next_cursor
+        items=[AdminOrderOut(**_order_fields(o, items[o.id])) for o in rows],
+        total=total,
+        page=page.page,
+        page_size=page.page_size,
     )
 
 
@@ -771,25 +781,25 @@ def list_applications(
     user_id: int | None,
     spec_code: str | None,
     manual_review: bool | None,
-    page: PageParams,
+    page: OffsetPageParams,
 ) -> AdminApplicationPage:
-    rows = receipt_service.list_admin_applications(
+    rows, total = receipt_service.list_admin_applications(
         db,
         status=status,
         app_no=app_no,
         user_id=user_id,
         spec_code=spec_code,
         manual_review=manual_review,
-        before_id=page.before_id(),
-        limit=page.fetch_limit,
+        page=page,
     )
-    rows, next_cursor = page.slice(rows, cursor_of=lambda row: {"i": row[0].id})
     return AdminApplicationPage(
         items=[
             AdminApplicationOut(**_application_fields(app, spec, needs_review))
             for app, spec, needs_review in rows
         ],
-        next_cursor=next_cursor,
+        total=total,
+        page=page.page,
+        page_size=page.page_size,
     )
 
 
@@ -1034,22 +1044,22 @@ def list_specs(
     status: str | None = None,
     category: str | None = None,
     region_code: str | None = None,
-    page: PageParams,
+    page: OffsetPageParams,
 ) -> AdminSpecPage:
-    rows = repo.list_specs(
+    rows, total = repo.list_specs(
         db,
         keyword=keyword.strip() if keyword else None,
         status=status,
         category=category,
         region_code=region_code,
-        before_id=page.before_id(),
-        limit=page.fetch_limit,
+        page=page,
     )
-    rows, next_cursor = page.slice(rows)
     codes = repo.spec_codes(db, (s.parent_id for s in rows if s.parent_id))
     return AdminSpecPage(
         items=[_spec_out(s, codes.get(s.parent_id) if s.parent_id else None) for s in rows],
-        next_cursor=next_cursor,
+        total=total,
+        page=page.page,
+        page_size=page.page_size,
     )
 
 
@@ -1141,35 +1151,37 @@ def list_provider_specs(
     provider_code: str | None,
     keyword: str | None,
     is_enabled: bool | None,
-    page: PageParams,
+    page: OffsetPageParams,
 ) -> AdminProviderSpecPage:
-    rows = repo.list_provider_specs(
+    rows, total = repo.list_provider_specs(
         db,
         provider_code=provider_code,
         keyword=keyword.strip() if keyword else None,
         is_enabled=is_enabled,
-        before_id=page.before_id(),
-        limit=page.fetch_limit,
+        page=page,
     )
-    rows, next_cursor = page.slice(rows, cursor_of=lambda row: {"i": row[0].id})
     return AdminProviderSpecPage(
-        items=[_provider_spec_out(entry, code, spec) for entry, code, spec in rows], next_cursor=next_cursor
+        items=[_provider_spec_out(entry, code, spec) for entry, code, spec in rows],
+        total=total,
+        page=page.page,
+        page_size=page.page_size,
     )
 
 
 def list_route_rules(
-    db: Session, *, provider_code: str | None, spec_code: str | None, page: PageParams
+    db: Session, *, provider_code: str | None, spec_code: str | None, page: OffsetPageParams
 ) -> AdminRouteRulePage:
-    rows = repo.list_route_rules(
+    rows, total = repo.list_route_rules(
         db,
         provider_code=provider_code,
         spec_code=spec_code,
-        before_id=page.before_id(),
-        limit=page.fetch_limit,
+        page=page,
     )
-    rows, next_cursor = page.slice(rows, cursor_of=lambda row: {"i": row[0].id})
     return AdminRouteRulePage(
-        items=[_route_rule_out(rule, code, spec) for rule, code, spec in rows], next_cursor=next_cursor
+        items=[_route_rule_out(rule, code, spec) for rule, code, spec in rows],
+        total=total,
+        page=page.page,
+        page_size=page.page_size,
     )
 
 
@@ -1373,17 +1385,15 @@ def delete_route_rule(db: Session, admin: CurrentAdmin, rule_id: int) -> OkRespo
 
 
 def list_audit_logs(
-    db: Session, *, admin_id: int | None, action: str | None, target_type: str | None, page: PageParams
+    db: Session, *, admin_id: int | None, action: str | None, target_type: str | None, page: OffsetPageParams
 ) -> AdminAuditLogPage:
-    rows = repo.list_audit_logs(
+    rows, total = repo.list_audit_logs(
         db,
         admin_id=admin_id,
         action=action,
         target_type=target_type,
-        before_id=page.before_id(),
-        limit=page.fetch_limit,
+        page=page,
     )
-    rows, next_cursor = page.slice(rows, cursor_of=lambda row: {"i": row[0].id})
     return AdminAuditLogPage(
         items=[
             AdminAuditLogOut(
@@ -1399,5 +1409,7 @@ def list_audit_logs(
             )
             for log, username in rows
         ],
-        next_cursor=next_cursor,
+        total=total,
+        page=page.page,
+        page_size=page.page_size,
     )

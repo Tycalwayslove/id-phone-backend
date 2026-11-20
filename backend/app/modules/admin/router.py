@@ -4,9 +4,8 @@ from typing import Annotated
 from fastapi import APIRouter, Cookie, Depends, Path, Query, Request, Response
 
 from app.core.config import settings
-from app.core.deps import DB, Admin, CurrentAdmin, Page, require
+from app.core.deps import DB, Admin, CurrentAdmin, Paging, require
 from app.core.errors import ErrorCode, errors_doc
-from app.core.pagination import PageParams
 from app.core.schemas import OkResponse
 from app.modules.admin import service
 from app.modules.admin.schemas import (
@@ -194,7 +193,7 @@ def get_me(admin: Admin):
     operation_id="admin_users_list",
     summary="用户列表",
     description=(
-        f"按注册时间从新到旧列出用户，游标分页，条件之间是“并且”。权限点 user:read。{_LOGIN_NOTE}"
+        f"按用户 ID 从大到小列出用户，页码分页，条件之间是“并且”。权限点 user:read。{_LOGIN_NOTE}"
         "包含首次注册应用和推广渠道。手机号只返回打码后的；按手机号筛选请调用 POST /api/v1/admin/users/search。"
     ),
     response_model=AdminUserPage,
@@ -204,7 +203,7 @@ def get_me(admin: Admin):
 def list_users(
     _: UserRead,
     db: DB,
-    page: Page,
+    page: Paging,
     user_id: Annotated[int | None, Query(ge=1, description="按用户 ID 精确查找", examples=[1024])] = None,
     status: Annotated[
         str | None,
@@ -226,7 +225,7 @@ def list_users(
     operation_id="admin_users_search",
     summary="按条件查询用户",
     description=(
-        f"按注册时间从新到旧查询用户，游标分页，条件之间是“并且”。权限点 user:read。{_LOGIN_NOTE}"
+        f"按用户 ID 从大到小查询用户，页码分页，条件之间是“并且”。权限点 user:read。{_LOGIN_NOTE}"
         "请求头需带登录时返回的 X-CSRF-Token。按手机号筛选时在请求体传完整手机号，"
         "服务端用哈希匹配，响应仅返回打码后的手机号。包含首次注册应用和推广渠道。"
     ),
@@ -239,7 +238,7 @@ def search_users(body: AdminUserSearchIn, _: UserRead, db: DB):
         db,
         user_id=body.user_id,
         status=body.status,
-        page=PageParams.of(body),
+        page=body,
         phone=body.phone,
         source_app_id=body.source_app_id,
     )
@@ -276,7 +275,7 @@ def get_user(user_id: UserIdPath, admin: UserRead, db: DB, response: Response):
     response_description="应用分页列表和各应用的注册用户数",
     responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR),
 )
-def list_client_apps(_: UserRead, db: DB, page: Page):
+def list_client_apps(_: UserRead, db: DB, page: Paging):
     return service.list_client_apps(db, page)
 
 
@@ -304,7 +303,7 @@ def update_client_app(id: ClientAppIdPath, body: AdminClientAppUpdateIn, admin: 
     operation_id="admin_photos_list",
     summary="照片列表",
     description=(
-        f"按照片 ID 从新到旧游标分页，可组合筛选用户、照片状态、抠图精度和拍后检测等级。权限点 photo:read。{_LOGIN_NOTE}"
+        f"按照片 ID 从新到旧页码分页，可组合筛选用户、照片状态、抠图精度和拍后检测等级。权限点 photo:read。{_LOGIN_NOTE}"
         "缩略图链接有效期 10 分钟，缺少有效预览图时用原图。查询列表不写审计。"
     ),
     response_model=AdminPhotoPage,
@@ -314,7 +313,7 @@ def update_client_app(id: ClientAppIdPath, body: AdminClientAppUpdateIn, admin: 
 def list_photos(
     _: PhotoRead,
     db: DB,
-    page: Page,
+    page: Paging,
     response: Response,
     user_id: Annotated[
         int | None, Query(ge=1, le=2**63 - 1, description="所属用户 ID", examples=[1024])
@@ -362,15 +361,15 @@ def get_photo(photo_id: PhotoIdPath, admin: PhotoRead, db: DB, response: Respons
     "/orders",
     operation_id="admin_orders_list",
     summary="订单列表",
-    description=f"按下单时间从新到旧列出订单，游标分页，条件之间是“并且”。权限点 order:read。{_LOGIN_NOTE}",
+    description=f"按订单 ID 从大到小列出订单，页码分页，条件之间是“并且”。权限点 order:read。{_LOGIN_NOTE}",
     response_model=AdminOrderPage,
     response_description="订单分页列表",
-    responses=errors_doc(*_AUTH),
+    responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR),
 )
 def list_orders(
     _: OrderRead,
     db: DB,
-    page: Page,
+    page: Paging,
     status: Annotated[
         str | None,
         Query(
@@ -448,7 +447,7 @@ def refund_order(order_no: OrderNoPath, body: AdminRefundIn, admin: RefundCreate
     "/receipt-applications",
     operation_id="admin_applications_list",
     summary="回执申请列表",
-    description=f"按创建时间从新到旧列出回执申请，游标分页，条件之间是“并且”。权限点 application:read。{_LOGIN_NOTE}",
+    description=f"按申请 ID 从大到小列出回执申请，页码分页，条件之间是“并且”。权限点 application:read。{_LOGIN_NOTE}",
     response_model=AdminApplicationPage,
     response_description="回执申请分页列表",
     responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR),
@@ -456,7 +455,7 @@ def refund_order(order_no: OrderNoPath, body: AdminRefundIn, admin: RefundCreate
 def list_applications(
     _: ApplicationRead,
     db: DB,
-    page: Page,
+    page: Paging,
     status: Annotated[
         str | None,
         Query(
@@ -597,17 +596,17 @@ def update_plan(code: PlanCodePath, body: AdminPlanUpdateIn, admin: PlanWrite, d
     operation_id="admin_specs_list",
     summary="规格列表",
     description=(
-        f"列出全部规格（含已下架），按创建时间从新到旧，游标分页，条件之间是“并且”。权限点 spec:read。{_LOGIN_NOTE}"
+        f"列出全部规格（含已下架），按规格 ID 从大到小，页码分页，条件之间是“并且”。权限点 spec:read。{_LOGIN_NOTE}"
         "可按名称、状态、分类和精确的地区码筛选。"
     ),
     response_model=AdminSpecPage,
     response_description="规格分页列表",
-    responses=errors_doc(*_AUTH),
+    responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR),
 )
 def list_specs(
     _: SpecRead,
     db: DB,
-    page: Page,
+    page: Paging,
     keyword: Annotated[
         str | None,
         Query(
@@ -764,18 +763,18 @@ def sync_provider_specs(
     operation_id="admin_provider_specs_list",
     summary="服务商规格列表",
     description=(
-        f"分页列出服务商规格映射（哪家服务商能办哪个规格、对方规格 ID、成本），按创建时间从新到旧，"
+        f"分页列出服务商规格映射（哪家服务商能办哪个规格、对方规格 ID、成本），按映射 ID 从大到小，"
         f"条件之间是“并且”。权限点 provider:read。{_LOGIN_NOTE}"
         "同步规格目录后新增的映射默认停用，可用 is_enabled=false 筛出来逐个配置成本后启用。"
     ),
     response_model=AdminProviderSpecPage,
     response_description="服务商规格映射分页列表",
-    responses=errors_doc(*_AUTH),
+    responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR),
 )
 def list_provider_specs(
     _: ProviderRead,
     db: DB,
-    page: Page,
+    page: Paging,
     provider_code: Annotated[
         str | None,
         Query(max_length=64, description="按服务商编码筛选；不存在的编码返回空列表", examples=["zheying"]),
@@ -848,17 +847,17 @@ def delete_provider_spec(entry_id: ProviderSpecIdPath, admin: ProviderWrite, db:
     operation_id="admin_route_rules_list",
     summary="路由规则列表",
     description=(
-        f"分页列出路由规则（某规格、某地区下的候选服务商及优先级），按创建时间从新到旧，"
+        f"分页列出路由规则（某规格、某地区下的候选服务商及优先级），按规则 ID 从大到小，"
         f"条件之间是“并且”。权限点 provider:read。{_LOGIN_NOTE}"
     ),
     response_model=AdminRouteRulePage,
     response_description="路由规则分页列表",
-    responses=errors_doc(*_AUTH),
+    responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR),
 )
 def list_route_rules(
     _: ProviderRead,
     db: DB,
-    page: Page,
+    page: Paging,
     provider_code: Annotated[
         str | None,
         Query(max_length=64, description="按服务商编码筛选；不存在的编码返回空列表", examples=["zheying"]),
@@ -933,7 +932,7 @@ def stats_overview(_: StatsRead, db: DB):
     "/notify-tasks",
     operation_id="admin_notify_tasks_list",
     summary="通知任务列表",
-    description=f"按通知任务 ID 从大到小查询，可按状态筛选和游标翻页。返回任务状态、渠道、时间及关联记录 ID。权限点 notify:read。{_LOGIN_NOTE}",
+    description=f"按通知任务 ID 从大到小查询，可按状态筛选和按页码翻页。返回任务状态、渠道、时间及关联记录 ID。权限点 notify:read。{_LOGIN_NOTE}",
     response_model=AdminNotifyTaskPage,
     response_description="通知任务分页列表",
     responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR),
@@ -941,7 +940,7 @@ def stats_overview(_: StatsRead, db: DB):
 def list_notify_tasks(
     _: NotifyRead,
     db: DB,
-    page: Page,
+    page: Paging,
     status: Annotated[
         NotifyStatus | None, Query(description=f"按状态筛选。{NOTIFY_STATUS_DOC}", examples=["pending"])
     ] = None,
@@ -961,7 +960,7 @@ def list_notify_tasks(
     response_description="管理员账号分页列表",
     responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR),
 )
-def list_admin_accounts(_: AdminAccountRead, db: DB, page: Page):
+def list_admin_accounts(_: AdminAccountRead, db: DB, page: Paging):
     return service.list_admin_accounts(db, page)
 
 
@@ -1026,15 +1025,15 @@ def reset_admin_password(admin_id: AdminIdPath, response: Response, admin: Admin
     "/audit-logs",
     operation_id="admin_audit_logs",
     summary="审计日志",
-    description=f"按时间从新到旧列出后台操作记录，游标分页。权限点 audit:read。{_LOGIN_NOTE}",
+    description=f"按日志 ID 从大到小列出后台操作记录，页码分页。权限点 audit:read。{_LOGIN_NOTE}",
     response_model=AdminAuditLogPage,
     response_description="审计日志分页列表",
-    responses=errors_doc(*_AUTH),
+    responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR),
 )
 def list_audit_logs(
     _: AuditRead,
     db: DB,
-    page: Page,
+    page: Paging,
     admin_id: Annotated[int | None, Query(ge=1, description="按操作人后台账号 ID 筛选", examples=[3])] = None,
     action: Annotated[
         str | None,

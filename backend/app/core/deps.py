@@ -6,13 +6,25 @@ from typing import Annotated
 
 from fastapi import Depends, Header, Query, Request
 from fastapi.security import APIKeyCookie, HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BeforeValidator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.errors import AppError, ErrorCode
-from app.core.pagination import CURSOR_DESCRIPTION, DEFAULT_LIMIT, LIMIT_DESCRIPTION, MAX_LIMIT, PageParams
+from app.core.pagination import (
+    CURSOR_DESCRIPTION,
+    DEFAULT_LIMIT,
+    DEFAULT_PAGE_SIZE,
+    LIMIT_DESCRIPTION,
+    MAX_LIMIT,
+    PAGE_DESCRIPTION,
+    PAGE_SIZE_DESCRIPTION,
+    OffsetPageParams,
+    PageParams,
+    PageSize,
+)
 from app.core.security import hash_token, sign
 from app.core.utils import utcnow
 from app.models import AdminSession, AdminUser, AuthSession, User, UserIdentity
@@ -218,6 +230,25 @@ def page_params(
 
 # 列表接口统一的分页查询参数，用法见 app/core/pagination.py
 Page = Annotated[PageParams, Depends(page_params)]
+
+
+def _parse_page_size(value: object) -> object:
+    # 查询参数来自 URL，先将允许的字符串转换为整数，再按 PageSize 校验。
+    if isinstance(value, str) and value in ("10", "20", "50", "100"):
+        return int(value)
+    return value
+
+
+def paging_params(
+    page: Annotated[int, Query(ge=1, description=PAGE_DESCRIPTION, examples=[2])] = 1,
+    page_size: Annotated[
+        PageSize, BeforeValidator(_parse_page_size), Query(description=PAGE_SIZE_DESCRIPTION, examples=[20])
+    ] = DEFAULT_PAGE_SIZE,
+) -> OffsetPageParams:
+    return OffsetPageParams(page=page, page_size=page_size)
+
+
+Paging = Annotated[OffsetPageParams, Depends(paging_params)]
 
 IdempotencyKeyHeader = Annotated[
     str | None,

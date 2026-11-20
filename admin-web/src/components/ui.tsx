@@ -1,6 +1,8 @@
-import { Alert, Button, Empty, Form, Input, InputNumber, Space, Spin, Table, Tag, type FormProps, type TableProps } from 'antd'
-import { useInfiniteQuery } from '@tanstack/react-query'
-import { useId, useState, type ReactNode } from 'react'
+import { Alert, Button, Empty, Form, Input, InputNumber, Space, Spin, Table, Tag, type FormProps, type TablePaginationConfig, type TableProps } from 'antd'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { startTransition, useEffect, useId, useState, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import type { PagingParams } from '../api/admin'
 import { errorText } from '../api/client'
 
 export function PageHeading({ title, action }: { title: string; action?: ReactNode }) {
@@ -74,32 +76,72 @@ export function FilterForm<T extends object>({ children, onFinish, initialValues
   )
 }
 
-type Page<Row> = { items: Row[]; next_cursor?: string | null }
+type Page<Row> = PagingParams & { items: Row[]; total: number }
+const pageSizes = [10, 20, 50, 100] as const satisfies readonly PagingParams['page_size'][]
+const defaultPageSize = 20
 
-export function useCursorList<Row>(
-  resource: string,
-  fetchPage: (cursor: string | null, signal: AbortSignal) => Promise<Page<Row>>,
-  filterVersion = 0,
-  enabled = true,
-) {
-  const instance = useId()
-  const query = useInfiniteQuery({
-    queryKey: [resource, instance, filterVersion],
-    enabled,
-    queryFn: ({ pageParam, signal }) => fetchPage(pageParam, signal),
-    initialPageParam: null as string | null,
-    getNextPageParam: (page) => page.next_cursor ?? undefined,
-  })
-
-  return { ...query, rows: query.data?.pages.flatMap((page) => page.items) ?? [] }
+function isPageSize(value: number): value is PagingParams['page_size'] {
+  return pageSizes.some((size) => size === value)
 }
 
-export function useFilters<T extends object>() {
-  const [search, setSearch] = useState<{ filters: T; version: number }>()
+export function usePagedList<Filters extends object, Row>(
+  resource: string,
+  fetchPage: (params: Filters & PagingParams, signal: AbortSignal) => Promise<Page<Row>>,
+  initialFilters: Filters,
+  { prefix = '', enabled = true }: { prefix?: string; enabled?: boolean } = {},
+) {
+  const instance = useId()
+  const [search, setSearch] = useSearchParams()
+  const [filterState, setFilters] = useState({ values: initialFilters, version: 0 })
+  const pageKey = `${prefix}page`
+  const sizeKey = `${prefix}page_size`
+  const requestedPage = Number(search.get(pageKey))
+  const requestedSize = Number(search.get(sizeKey))
+  const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1
+  const pageSize = isPageSize(requestedSize) ? requestedSize : defaultPageSize
+  const query = useQuery({
+    // 筛选条件可能含手机号，只用版本号作为缓存键。
+    queryKey: [resource, instance, filterState.version, page, pageSize],
+    enabled,
+    queryFn: ({ signal }) => fetchPage({ ...filterState.values, page, page_size: pageSize }, signal),
+    placeholderData: keepPreviousData,
+  })
+
+  const total = query.data?.total
+  const lastPage = Math.max(1, Math.ceil((total ?? 0) / pageSize))
+  useEffect(() => {
+    if (total === undefined || query.isPlaceholderData || page <= lastPage) return
+    const next = new URLSearchParams(search)
+    next.set(pageKey, String(lastPage))
+    setSearch(next, { replace: true })
+  }, [total, query.isPlaceholderData, page, lastPage, search, pageKey, setSearch])
+
+  function setPage(nextPage: number, nextSize: number, replace = false) {
+    if (nextPage === page && nextSize === pageSize) return
+    const next = new URLSearchParams(search)
+    next.set(pageKey, String(nextPage))
+    next.set(sizeKey, String(nextSize))
+    setSearch(next, { replace })
+  }
+
+  const pagination: TablePaginationConfig = {
+    current: page,
+    pageSize: query.isPlaceholderData ? (query.data?.page_size ?? pageSize) : pageSize,
+    total: total ?? 0,
+    pageSizeOptions: [...pageSizes],
+    showTotal: (count) => `共 ${count} 条`,
+    showSizeChanger: true,
+    showQuickJumper: true,
+    onChange: (nextPage, nextSize) => setPage(nextSize === pageSize ? nextPage : 1, nextSize),
+  }
   return {
-    filters: search?.filters,
-    version: search?.version ?? 0,
-    apply: (filters: T) => setSearch((previous) => ({ filters, version: (previous?.version ?? 0) + 1 })),
+    ...query,
+    rows: query.data?.items ?? [],
+    pagination,
+    apply: (values: Filters) => startTransition(() => {
+      setFilters((previous) => ({ values, version: previous.version + 1 }))
+      setPage(1, pageSize, true)
+    }),
   }
 }
 
@@ -115,25 +157,13 @@ export function DataTable<Row extends object>(props: TableProps<Row>) {
   )
 }
 
-export function CursorTable<Row extends object>({ query, ...props }: Omit<TableProps<Row>, 'dataSource'> & {
-  query: ReturnType<typeof useCursorList<Row>>
+export function PagedTable<Row extends object>({ query, ...props }: Omit<TableProps<Row>, 'dataSource' | 'pagination' | 'loading'> & {
+  query: Pick<ReturnType<typeof usePagedList<object, Row>>, 'rows' | 'pagination' | 'isError' | 'error' | 'refetch' | 'isFetching'>
 }) {
   return (
     <div className="data-surface">
-      {query.isError && (
-        <Problem error={query.error} retry={() => { void (query.isFetchNextPageError ? query.fetchNextPage() : query.refetch()) }} />
-      )}
-      <DataTable<Row> {...props} dataSource={query.rows} loading={query.isPending} />
-      {query.data && query.rows.length > 0 && (
-        <div className="table-footer">
-          <span>已加载 {query.rows.length} 条</span>
-          {query.hasNextPage && (
-            <Button loading={query.isFetchingNextPage} disabled={query.isFetching && !query.isFetchingNextPage} onClick={() => { void query.fetchNextPage() }}>
-              加载更多
-            </Button>
-          )}
-        </div>
-      )}
+      {query.isError && <Problem error={query.error} retry={() => { void query.refetch() }} />}
+      <DataTable<Row> {...props} dataSource={query.rows} pagination={query.pagination} loading={query.isFetching} />
     </div>
   )
 }

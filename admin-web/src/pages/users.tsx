@@ -1,10 +1,10 @@
 import { Avatar, Descriptions, Drawer, Form, Select, Space, Tag } from 'antd'
 import { useQuery } from '@tanstack/react-query'
-import { Link, useMatch, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useMatch, useNavigate } from 'react-router-dom'
 import { adminApi, type UserFilters } from '../api/admin'
 import { type Schema } from '../api/client'
 import { PhotoGallery } from '../components/photo-gallery'
-import { CursorTable, FilterForm, IdFilter, Loading, PageHeading, Problem, Section, Status, TextFilter, useCursorList, useFilters } from '../components/ui'
+import { PagedTable, FilterForm, IdFilter, Loading, PageHeading, Problem, Section, Status, TextFilter, usePagedList } from '../components/ui'
 import { clientAppPlatforms, dateText, enumOptions, identitySources, labelFor, money, userStatus } from '../format'
 import { usePermission } from '../session'
 
@@ -12,12 +12,12 @@ type ClientApp = Schema['AdminClientAppOut']
 
 async function fetchAppOptions(signal: AbortSignal) {
   const apps: ClientApp[] = []
-  let cursor: string | null = null
-  do {
-    const page = await adminApi.clientApps({ cursor, limit: 100 }, signal)
-    apps.push(...page.items)
-    cursor = page.next_cursor ?? null
-  } while (cursor)
+  const pageSize = 100
+  for (let page = 1; ; page += 1) {
+    const result = await adminApi.clientApps({ page, page_size: pageSize }, signal)
+    apps.push(...result.items)
+    if (page * pageSize >= result.total) break
+  }
   return apps
 }
 
@@ -60,18 +60,18 @@ function UserDetail({ userId }: { userId: number }) {
 }
 
 export default function Users() {
-  const search = useFilters<UserFilters>()
-  const query = useCursorList('users', (cursor, signal) => adminApi.users({ ...search.filters, cursor }, signal), search.version)
+  const query = usePagedList('users', adminApi.users, {} satisfies UserFilters)
   const apps = useQuery({ queryKey: ['client-apps', 'options'], queryFn: ({ signal }) => fetchAppOptions(signal) })
   const match = useMatch('/users/:userId')
   const userId = Number(match?.params.userId)
   const navigate = useNavigate()
+  const { search } = useLocation()
 
   return (
     <>
       <PageHeading title="用户" />
       {apps.isError && <Problem error={apps.error} retry={() => { void apps.refetch() }} />}
-      <FilterForm<UserFilters> onFinish={(values) => search.apply({ ...values, phone: values.phone?.trim() || undefined })}>
+      <FilterForm<UserFilters> onFinish={(values) => query.apply({ ...values, phone: values.phone?.trim() || undefined })}>
         <IdFilter />
         <TextFilter label="完整手机号" name="phone" minLength={5} maxLength={20} />
         <Form.Item label="账号状态" name="status">
@@ -82,8 +82,8 @@ export default function Users() {
             options={apps.data?.map((app) => ({ value: app.id, label: `${app.name}（${clientAppPlatforms[app.platform]} / ${app.app_id}）` }))} />
         </Form.Item>
       </FilterForm>
-      <CursorTable<Schema['AdminUserOut']> query={query} rowKey="id" columns={[
-        { title: '用户 ID', dataIndex: 'id', render: (id: number) => <Link to={`/users/${id}`}>{id}</Link> },
+      <PagedTable<Schema['AdminUserOut']> query={query} rowKey="id" columns={[
+        { title: '用户 ID', dataIndex: 'id', render: (id: number) => <Link to={{ pathname: `/users/${id}`, search }}>{id}</Link> },
         { title: '昵称', dataIndex: 'nickname', render: (value: string | null) => value || '—' },
         { title: '手机号', dataIndex: 'phone_masked', render: (value: string | null) => value ?? '—' },
         { title: '状态', render: (_, user) => <Status value={user.status} labels={userStatus} /> },
@@ -96,7 +96,7 @@ export default function Users() {
         { title: '最近活跃', dataIndex: 'last_active_at', render: dateText },
       ]} />
       {match && (
-        <Drawer open title="用户详情" width="min(100vw, 660px)" onClose={() => navigate('/users', { replace: true })}>
+        <Drawer open title="用户详情" width="min(100vw, 660px)" onClose={() => navigate({ pathname: '/users', search }, { replace: true })}>
           {Number.isSafeInteger(userId) && userId > 0
             ? <UserDetail userId={userId} />
             : <p>用户 ID 无效。</p>}
