@@ -1,11 +1,10 @@
 """运营后台业务：登录会话、查询、退款、套餐/规格/服务商配置、审计。
 
 事务：写操作在这里 commit，并且审计日志和业务改动在同一个事务里提交。
-列表/详情直接读各业务表（见 repo.py）；写操作尽量调用对应模块的 service。
+回执申请通过 receipts service 读取和操作。其他后台列表和详情可直接查询业务表。
 审计日志的 before/after 只放关键字段，不放手机号、身份证号。
 """
 
-import json
 import threading
 import time
 from dataclasses import replace
@@ -52,6 +51,7 @@ from app.modules.admin.schemas import (
     AdminAuditLogPage,
     AdminBriefOut,
     AdminLoginOut,
+    AdminManualReviewIn,
     AdminMeOut,
     AdminNotifyTaskOut,
     AdminNotifyTaskPage,
@@ -395,7 +395,8 @@ def reset_admin_password(db: Session, admin: CurrentAdmin, target_id: int) -> Ad
 
 
 def stats_overview(db: Session) -> AdminStatsOverviewOut:
-    users, orders, paid_orders, paid_total, receipts = repo.overview_counts(db)
+    users, orders, paid_orders, paid_total = repo.overview_counts(db)
+    receipts = receipt_service.application_counts_by_status(db)
     return AdminStatsOverviewOut(
         user_count=users,
         order_count=orders,
@@ -468,7 +469,7 @@ def get_user(db: Session, user_id: int) -> AdminUserDetail:
     return AdminUserDetail(
         **_user_outs(db, [user])[0],
         avatar_url=user.avatar_url,
-        applications_count=repo.applications_count(db, user.id),
+        applications_count=receipt_service.count_user_applications(db, user_id=user.id),
     )
 
 
@@ -603,11 +604,12 @@ def refund_order(
 # ---------- 回执申请 ----------
 
 
-def _application_fields(app: ReceiptApplication, spec: Spec) -> dict:
+def _application_fields(app: ReceiptApplication, spec: Spec, manual_review_required: bool) -> dict:
     return dict(
         app_no=app.app_no,
         user_id=app.user_id,
         status=app.status,
+        manual_review_required=manual_review_required,
         spec_code=spec.code,
         spec_name=spec.name,
         photo_id=app.photo_id,
@@ -627,36 +629,40 @@ def list_applications(
     app_no: str | None,
     user_id: int | None,
     spec_code: str | None,
+    manual_review: bool | None,
     page: PageParams,
 ) -> AdminApplicationPage:
-    rows = repo.list_applications(
+    rows = receipt_service.list_admin_applications(
         db,
         status=status,
         app_no=app_no,
         user_id=user_id,
         spec_code=spec_code,
+        manual_review=manual_review,
         before_id=_before_id(page.cursor),
         limit=page.limit + 1,
     )
     rows, more = _slice(rows, page.limit)
-    specs = repo.specs_by_ids(db, (a.spec_id for a in rows))
     return AdminApplicationPage(
-        items=[AdminApplicationOut(**_application_fields(a, specs[a.spec_id])) for a in rows],
-        next_cursor=_next(rows, more),
+        items=[
+            AdminApplicationOut(**_application_fields(app, spec, needs_review))
+            for app, spec, needs_review in rows
+        ],
+        next_cursor=_next([app for app, _, _ in rows], more),
     )
 
 
-def _application_detail(db: Session, app: ReceiptApplication) -> AdminApplicationDetail:
-    spec = repo.specs_by_ids(db, [app.spec_id])[app.spec_id]
-    attempts = repo.attempts_by_app(db, [app.id])[app.id]
-    form = json.loads(security.decrypt(app.form_data_enc, "receipt_form")) if app.form_data_enc else {}
+def get_application(db: Session, app_no: str) -> AdminApplicationDetail:
+    app, spec, needs_review, form_masked, attempts = receipt_service.get_admin_application_detail(
+        db, app_no=app_no
+    )
     return AdminApplicationDetail(
-        **_application_fields(app, spec),
+        **_application_fields(app, spec, needs_review),
         region_code=app.region_code,
         image_code=app.image_code,
         rejected_at=app.rejected_at,
         official_expire_at=app.official_expire_at,
-        form_masked=receipt_service.mask_form(form),
+        form_masked=form_masked,
         attempts=[
             AdminAttemptOut(
                 seq=a.seq,
@@ -673,26 +679,41 @@ def _application_detail(db: Session, app: ReceiptApplication) -> AdminApplicatio
     )
 
 
-def get_application(db: Session, app_no: str) -> AdminApplicationDetail:
-    app = repo.get_application_by_no(db, app_no)
-    if app is None:
-        raise AppError(ErrorCode.APPLICATION_NOT_FOUND)
-    return _application_detail(db, app)
-
-
 def cancel_application(db: Session, admin: CurrentAdmin, app_no: str) -> AdminApplicationDetail:
-    app = repo.get_application_by_no(db, app_no)
-    if app is None:
-        raise AppError(ErrorCode.APPLICATION_NOT_FOUND)
-    before = {"status": app.status}
-    _audit(db, admin.id, "application.cancel", "receipt_application", app.id, before, {"status": "cancelled"})
     try:
-        app = receipt_service.cancel_application(db, user_id=app.user_id, app_no=app_no)
+        app = receipt_service.get_admin_application_by_no(db, app_no=app_no, for_update=True)
+        before = {"status": app.status}
+        receipt_service.cancel_application(db, user_id=app.user_id, app_no=app_no)
+        _audit(
+            db, admin.id, "application.cancel", "receipt_application", app.id, before, {"status": "cancelled"}
+        )
         db.commit()
     except Exception:
         db.rollback()
         raise
-    return _application_detail(db, app)
+    return get_application(db, app_no)
+
+
+def resolve_manual_review(
+    db: Session, admin: CurrentAdmin, app_no: str, payload: AdminManualReviewIn
+) -> AdminApplicationDetail:
+    try:
+        app, before_status = receipt_service.resolve_manual_review(db, app_no=app_no, result=payload.result)
+        _audit(
+            db,
+            admin.id,
+            "application.manual_review",
+            "receipt_application",
+            app.id,
+            {"status": before_status, "manual_review_required": True},
+            {"status": app.status, "manual_review_required": False, "remark": payload.remark},
+        )
+        detail = get_application(db, app_no)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return detail
 
 
 # ---------- 套餐 ----------

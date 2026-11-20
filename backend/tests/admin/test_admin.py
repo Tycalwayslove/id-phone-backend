@@ -1,12 +1,14 @@
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.integrations.payment import FakePay
 from app.main import app
-from app.models import Entitlement, ReceiptApplication
+from app.models import Entitlement, NotifyTask, ReceiptApplication
+from app.modules.receipts.repo import MANUAL_REVIEW_REQUIRED
 from scripts.check_api_docs import find_problems
 from tests.admin.helpers import API, PASSWORD, admin_login, entitlement_statuses, make_admin, user_buys
 from tests.conftest import login
@@ -15,7 +17,9 @@ from tests.orders.helpers import latest_user_id, make_photo
 from tests.receipts.helpers import (
     PROVIDER_CODE,
     create_app,
+    current_attempt,
     get_application,
+    join_user,
     make_world,
     quota_used,
     simulate,
@@ -434,6 +438,7 @@ def test_applications_list_detail_and_cancel(client: TestClient, db: Session):
     items = client.get(f"{API}/receipt-applications", params={"user_id": uid}).json()["items"]
     assert [a["app_no"] for a in items] == [app_no]
     assert items[0]["status"] == "processing" and items[0]["spec_code"] == w.spec.code
+    assert items[0]["manual_review_required"] is False
     assert client.get(f"{API}/receipt-applications", params={"status": "rejected"}).json()["items"] == []
     assert (
         len(client.get(f"{API}/receipt-applications", params={"spec_code": w.spec.code}).json()["items"]) == 1
@@ -443,6 +448,7 @@ def test_applications_list_detail_and_cancel(client: TestClient, db: Session):
     r = client.get(f"{API}/receipt-applications/{app_no}")
     assert r.status_code == 200, r.text
     detail = r.json()
+    assert detail["manual_review_required"] is False
     assert detail["attempts"][0]["provider_code"] == PROVIDER_CODE
     assert detail["attempts"][0]["seq"] == 1 and detail["attempts"][0]["is_current"] is True
     assert detail["form_masked"]["name"] == "张*"
@@ -468,6 +474,68 @@ def test_applications_list_detail_and_cancel(client: TestClient, db: Session):
     assert client.get(f"{API}/receipt-applications/NOPE").json()["code"] == "APPLICATION_NOT_FOUND"
     r = client.post(f"{API}/receipt-applications/NOPE/cancel", headers=csrf)
     assert r.json()["code"] == "APPLICATION_NOT_FOUND"
+
+
+@pytest.mark.parametrize(
+    ("result", "used", "event"),
+    [("completed", 1, "receipt_completed"), ("rejected", 1, "receipt_rejected"), ("failed", 0, None)],
+)
+def test_manual_review_filters_and_applies_conclusion(client, db, result, used, event):
+    world = make_world(client, db)
+    created = create_app(client, world)
+    app_no = created["app_no"]
+    attempt = current_attempt(db, app_no)
+    attempt.status = "unknown"
+    attempt.next_poll_at = None
+    attempt.request_payload = {**attempt.request_payload, MANUAL_REVIEW_REQUIRED: True}
+    db.commit()
+
+    other = create_app(client, join_user(client, world.spec, user="dev:other"))
+    base = f"{API}/receipt-applications"
+    detail_path = f"{base}/{app_no}"
+    endpoint = f"{detail_path}/manual-review"
+    body = {"result": result, "remark": "  已与服务商确认办理结果  "}
+
+    finance_csrf = admin_login(client, db, "fin", "finance")
+    assert client.post(endpoint, headers=finance_csrf, json=body).status_code == 403
+    csrf = admin_login(client, db, "op", "operator")
+    assert client.post(endpoint, json=body).status_code == 403
+    assert client.post(endpoint, headers=csrf, json={**body, "result": "processing"}).status_code == 422
+    assert client.post(endpoint, headers=csrf, json={**body, "remark": " "}).status_code == 422
+    assert client.post(f"{base}/NOPE/manual-review", headers=csrf, json=body).status_code == 404
+    assert _audit(client, action="application.manual_review") == []
+
+    flagged = client.get(base, params={"manual_review": "true", "status": "processing", "limit": 1}).json()
+    assert [(row["app_no"], row["manual_review_required"]) for row in flagged["items"]] == [(app_no, True)]
+    assert flagged["next_cursor"] is None
+    unflagged = client.get(base, params={"manual_review": "false"}).json()["items"]
+    assert [(row["app_no"], row["manual_review_required"]) for row in unflagged] == [(other["app_no"], False)]
+    assert client.get(detail_path).json()["manual_review_required"] is True
+
+    response = client.post(endpoint, headers=csrf, json=body)
+    assert response.status_code == 200, response.text
+    detail = response.json()
+    assert detail["status"] == detail["attempts"][0]["status"] == result
+    assert detail["manual_review_required"] is False
+    assert MANUAL_REVIEW_REQUIRED not in attempt.request_payload
+    assert attempt.finished_at is not None and attempt.next_poll_at is None
+    assert quota_used(db, created["entitlement_id"]) == used
+    events = list(
+        db.scalars(select(NotifyTask.event).where(NotifyTask.application_id == attempt.application_id))
+    )
+    assert events == ([event] if event else [])
+
+    duplicate = client.post(endpoint, headers=csrf, json=body)
+    assert duplicate.status_code == 409 and duplicate.json()["code"] == "CONFLICT"
+    assert client.get(base, params={"manual_review": "true"}).json()["items"] == []
+    audit = _audit(client, action="application.manual_review")
+    assert len(audit) == 1
+    assert audit[0]["before"] == {"status": "processing", "manual_review_required": True}
+    assert audit[0]["after"] == {
+        "status": result,
+        "manual_review_required": False,
+        "remark": "已与服务商确认办理结果",
+    }
 
 
 # ---------- 规格、服务商、审计 ----------

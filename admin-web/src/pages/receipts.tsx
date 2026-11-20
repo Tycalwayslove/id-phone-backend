@@ -1,17 +1,46 @@
-import { Alert, Button, Descriptions, Drawer, Empty, Form, Select, Space, Tag, Timeline } from 'antd'
+import { Alert, Button, Descriptions, Drawer, Empty, Form, Input, Modal, Select, Space, Tag, Timeline } from 'antd'
 import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 import { Link, useMatch, useNavigate } from 'react-router-dom'
 import { adminApi, type ReceiptFilters } from '../api/admin'
 import type { Schema } from '../api/client'
 import { useConfirmChange } from '../components/confirm'
+import { useEditorSave } from '../components/editor'
 import { CursorTable, FilterForm, IdFilter, Loading, PageHeading, Problem, Section, Status, TextFilter, useCursorList, useFilters } from '../components/ui'
 import { attemptStatus, dateText, enumOptions, labelFor, money, receiptStatus } from '../format'
 import { usePermission } from '../session'
 
 const formLabels = { name: '姓名', id_no: '身份证号', id_card: '身份证号', id_number: '身份证号', phone: '手机号', mobile: '手机号' }
 
+type ReviewInput = Schema['AdminManualReviewIn']
+type ReceiptFilterForm = Omit<ReceiptFilters, 'manual_review'> & { manual_review?: 'true' | 'false' }
+const reviewResults = { completed: '已出回执（仅登记结论）', rejected: '已驳回', failed: '办理失败' } satisfies Record<ReviewInput['result'], string>
+
+function ManualReviewDialog({ appNo, onClose }: { appNo: string; onClose: () => void }) {
+  const [form] = Form.useForm<ReviewInput>()
+  const { saving, error, save, close } = useEditorSave('receipts', onClose)
+  return (
+    <Modal open title="标记已核对" okText="提交核对结论" cancelText="取消"
+      onOk={() => form.submit()} onCancel={close} confirmLoading={saving}
+      cancelButtonProps={{ disabled: saving }} closable={!saving} maskClosable={false} keyboard={!saving}>
+      {error && <Alert className="detail-note" type="error" showIcon message={error} />}
+      <Form<ReviewInput> form={form} layout="vertical" disabled={saving}
+        onFinish={(values) => { void save(() => adminApi.resolveReceiptReview(appNo, { ...values, remark: values.remark.trim() })) }}>
+        <Form.Item label="核对结论" name="result" rules={[{ required: true, message: '请选择核对结论' }]}>
+          <Select options={enumOptions(reviewResults)} />
+        </Form.Item>
+        <Form.Item label="核对备注" name="remark" extra="备注仅用于后台审计。请勿填写手机号、身份证号、令牌或密钥。"
+          rules={[{ required: true, whitespace: true, max: 200, message: '请输入 1～200 字的核对备注' }]}>
+          <Input.TextArea rows={3} maxLength={200} showCount />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
+}
+
 function ReceiptDetail({ appNo }: { appNo: string }) {
-  const canCancel = usePermission('application:operate')
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const canOperate = usePermission('application:operate')
   const canReadUsers = usePermission('user:read')
   const confirm = useConfirmChange('receipts')
   const query = useQuery({
@@ -27,7 +56,10 @@ function ReceiptDetail({ appNo }: { appNo: string }) {
     <>
       <Descriptions bordered size="small" column={{ xs: 1, sm: 2 }} items={[
         { label: '申请单号', children: receipt.app_no },
-        { label: '状态', children: <Status value={receipt.status} labels={receiptStatus} /> },
+        { label: '状态', children: <Space wrap>
+          <Status value={receipt.status} labels={receiptStatus} />
+          {receipt.manual_review_required && <Tag color="warning">需人工核对</Tag>}
+        </Space> },
         { label: '用户 ID', children: canReadUsers ? <Link to={`/users/${receipt.user_id}`}>{receipt.user_id}</Link> : receipt.user_id },
         { label: '规格', children: `${receipt.spec_name}（${receipt.spec_code}）` },
         { label: '地区码', children: receipt.region_code ?? '不限' },
@@ -42,7 +74,11 @@ function ReceiptDetail({ appNo }: { appNo: string }) {
         { label: '官方有效期截止', children: dateText(receipt.official_expire_at) },
       ]} />
       {receipt.reject_reason && <Alert className="detail-note" type="warning" showIcon message="当前驳回原因" description={receipt.reject_reason} />}
-      {canCancel && (receipt.status === 'pending' || receipt.status === 'rejected') && (
+      {canOperate && receipt.manual_review_required && (
+        <Button className="detail-note" type="primary" disabled={query.isFetching} onClick={() => setReviewOpen(true)}>标记已核对</Button>
+      )}
+      {reviewOpen && canOperate && <ManualReviewDialog appNo={appNo} onClose={() => setReviewOpen(false)} />}
+      {canOperate && (receipt.status === 'pending' || receipt.status === 'rejected') && (
         <Button className="detail-note" danger disabled={query.isFetching} onClick={() => confirm({
           title: '取消回执办理',
           content: `取消申请 ${receipt.app_no} 后，将退还已占用的回执次数。`,
@@ -91,8 +127,9 @@ export default function Receipts() {
   return (
     <>
       <PageHeading title="回执" />
-      <FilterForm<ReceiptFilters> onFinish={(values) => search.apply({
+      <FilterForm<ReceiptFilterForm> onFinish={(values) => search.apply({
         ...values, app_no: values.app_no?.trim() || undefined, spec_code: values.spec_code?.trim() || undefined,
+        manual_review: values.manual_review == null ? undefined : values.manual_review === 'true',
       })}>
         <TextFilter label="申请单号" name="app_no" maxLength={64} />
         <IdFilter />
@@ -100,12 +137,21 @@ export default function Receipts() {
         <Form.Item label="申请状态" name="status">
           <Select className="filter-select" allowClear options={enumOptions(receiptStatus)} />
         </Form.Item>
+        <Form.Item label="人工核对" name="manual_review">
+          <Select className="filter-select" allowClear options={[
+            { value: 'true', label: '需人工核对' },
+            { value: 'false', label: '无需人工核对' },
+          ]} />
+        </Form.Item>
       </FilterForm>
       <CursorTable<Schema['AdminApplicationOut']> query={query} rowKey="app_no" columns={[
         { title: '申请单号', render: (_, row) => <Link to={`/receipts/${encodeURIComponent(row.app_no)}`}>{row.app_no}</Link> },
         { title: '用户 ID', dataIndex: 'user_id' },
         { title: '规格', dataIndex: 'spec_name' },
-        { title: '状态', render: (_, row) => <Status value={row.status} labels={receiptStatus} /> },
+        { title: '状态', render: (_, row) => <Space wrap>
+          <Status value={row.status} labels={receiptStatus} />
+          {row.manual_review_required && <Tag color="warning">需人工核对</Tag>}
+        </Space> },
         { title: '重提次数', dataIndex: 'resubmit_count', align: 'right' },
         { title: '创建时间', dataIndex: 'created_at', render: dateText },
         { title: '最近更新', dataIndex: 'updated_at', render: dateText },
