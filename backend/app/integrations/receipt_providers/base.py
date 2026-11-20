@@ -43,6 +43,10 @@ class ProviderItem:
     file_size_max_kb: int | None
     sort: int
     raw: dict = field(default_factory=dict)
+    is_receipt: bool | None = None
+    receipt_fields: list[str] = field(default_factory=list)
+    provider_category: str | None = None
+    unknown_color_count: int = 0
 
 
 class ReceiptProvider(Protocol):

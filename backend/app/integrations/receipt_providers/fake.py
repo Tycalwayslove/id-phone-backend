@@ -18,7 +18,7 @@ from app.integrations.receipt_providers.base import ProviderItem, ProviderStatus
 _ITEMS = (
     ("1001", "一寸", 295, 413, 25, 35, "['blue','white','red']", 20, 200),
     ("1002", "二寸", 413, 579, 35, 49, "['blue','white','red']", 30, 200),
-    ("1003", "小一寸", 260, 378, 22, 32, "['blue','white']", 20, 100),
+    ("1003", "小一寸", 260, 378, 22, 32, "['sky_blue','gray','dark_red','pose_1']", 20, 100),
     ("713", "广东身份证（回执）", 358, 441, 26, 32, "['white']", 20, 100),
     ("625", "贵州身份证（回执）", 358, 441, 26, 32, "['white']", 20, 100),
     ("755", "安徽身份证（回执）", 358, 441, 26, 32, "['white']", 20, 100),
@@ -31,6 +31,7 @@ _ITEMS = (
     ("1005", "教师资格证", 295, 413, 25, 35, "['white']", 20, 200),
     ("1006", "普通话考试", 390, 567, 33, 48, "['blue','white']", 20, 200),
 )
+_RECEIPT_ITEMS = {"713", "625", "755", "712", "622", "736", "714"}
 
 
 def _catalog() -> list[ProviderItem]:
@@ -48,6 +49,11 @@ def _catalog() -> list[ProviderItem]:
                 sort=sort,
                 file_size_min=size_min,
                 file_size_max=size_max,
+                is_receipt="1" if item_id in _RECEIPT_ITEMS else "0",
+                receipt_param=json.dumps(["text_mobile", "text_city", "text_name", "text_idcard"])
+                if item_id in _RECEIPT_ITEMS
+                else "[]",
+                category="1" if sort < 3 else "2" if item_id in {"1004", "624"} else "3",
             ),
             id_field="item_id",
         )
