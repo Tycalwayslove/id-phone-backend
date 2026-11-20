@@ -254,7 +254,7 @@ def test_fine_matting_updates_status_and_export_cache(
         assert db.get(File, fast_id).status == fine_file.status == "purged"
     else:
         assert photo.matting_file_id == fast_id and render() == fast_render
-        assert "birefnet_general_swin_tiny.onnx" in caplog.text
+        assert settings.fine_matting_model in caplog.text
 
 
 @pytest.mark.parametrize("error", [TimeoutError, RuntimeError])

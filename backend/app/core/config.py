@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     )
     photo_models_dir: Path = Path(__file__).resolve().parents[2] / "models"
     fine_matting_workers: int = Field(default=1, ge=1)
+    # 精细抠图模型文件名（backend/models/ 下）。人像版去背后椅子等物体明显更干净，CPU 约 12 秒/张；
+    # 通用轻量版 birefnet_general_swin_tiny.onnx 约 6 秒/张，但会把紧贴人身后的物体当前景
+    fine_matting_model: str = "birefnet_portrait.onnx"
     matting_timeout_seconds: float = 5
     preview_spec_code: str = ""
 

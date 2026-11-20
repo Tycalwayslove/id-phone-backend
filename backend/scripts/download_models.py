@@ -19,6 +19,11 @@ MODELS = {
         "https://github.com/Zeyi-Lin/HivisionIDPhotos/releases/download/pretrained-model/modnet_photographic_portrait_matting.onnx",
         "07c308cf0fc7e6e8b2065a12ed7fc07e1de8febb7dc7839d7b7f15dd66584df9",
     ),
+    # BiRefNet 人像版（MIT），精细抠图默认模型：只保留人，能去掉紧贴身后的椅子等；约 972MB，CPU 约 12 秒/张
+    "birefnet_portrait.onnx": (
+        "https://github.com/ZhengPeng7/BiRefNet/releases/download/v1/BiRefNet-portrait-epoch_150.onnx",
+        "1ba1c8ff5a7bbfadc8d8d13fb11d7be793f91f23d9d466549e37a854f6668f99",
+    ),
     # BiRefNet 通用分割 swin_v1_tiny（MIT），复杂背景下的精细抠图，CPU 约 5~8 秒/张，后台运行
     "birefnet_general_swin_tiny.onnx": (
         "https://github.com/ZhengPeng7/BiRefNet/releases/download/v1/BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx",

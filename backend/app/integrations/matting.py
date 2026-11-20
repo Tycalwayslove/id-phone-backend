@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 DEFAULT_TIMEOUT_SECONDS = 5.0
 BACKGROUND_TOLERANCE = 24
 MODNET_MODEL = "modnet_photographic_portrait_matting.onnx"
-BIREFNET_MODEL = "birefnet_general_swin_tiny.onnx"
 BIREFNET_SIZE = (1024, 1024)
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
@@ -88,7 +87,7 @@ class FineMatting:
     """用 BiRefNet 在本机生成精细人像底片。"""
 
     def matte(self, data: bytes) -> bytes:
-        session = _get_session(BIREFNET_MODEL, _birefnet_lock)
+        session = _get_session(settings.fine_matting_model, _birefnet_lock)
         with Image.open(io.BytesIO(data)) as src:
             ImageOps.exif_transpose(src, in_place=True)
             resized = src.convert("RGB").resize(BIREFNET_SIZE, Image.Resampling.BILINEAR)

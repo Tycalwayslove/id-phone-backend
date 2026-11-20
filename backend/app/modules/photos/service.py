@@ -24,7 +24,7 @@ from app.core.errors import AppError, ErrorCode
 from app.core.pagination import PageParams
 from app.core.utils import utcnow
 from app.integrations import wechat
-from app.integrations.matting import BIREFNET_MODEL, FineMatting, get_matting
+from app.integrations.matting import FineMatting, get_matting
 from app.integrations.storage import build_key, get_storage
 from app.models import File, Photo, PhotoRender, Spec
 from app.modules.photos import imaging, repo
@@ -408,7 +408,7 @@ def _process_fine_matting(db: Session, photo_id: int) -> None:
             raise FileNotFoundError
         data = FineMatting().matte(storage.get(original.storage_key))
     except FileNotFoundError:
-        log.warning("精细抠图缺少原图或模型 %s photo_id=%s", BIREFNET_MODEL, photo_id)
+        log.warning("精细抠图缺少原图或模型 %s photo_id=%s", settings.fine_matting_model, photo_id)
     except Exception as exc:
         log.warning("精细抠图失败 photo_id=%s err=%s", photo_id, type(exc).__name__)
 
