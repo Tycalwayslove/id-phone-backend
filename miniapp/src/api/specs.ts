@@ -29,3 +29,7 @@ export function listSpecRegions(): Promise<components['schemas']['SpecRegionProv
 export function getSpec(code: string): Promise<SpecDetail> {
   return request<SpecDetail>({ path: `/specs/${encodeURIComponent(code)}`, auth: false })
 }
+
+export function getPreviewSpec(): Promise<operations['specs_preview']['responses'][200]['content']['application/json']> {
+  return request({ path: '/specs/preview', auth: false })
+}

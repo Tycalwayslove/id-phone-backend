@@ -13,11 +13,12 @@ type Region = Pick<Province, 'region_code' | 'region_name'>
 interface Props {
   open: boolean
   city: City | null
+  skipLabel?: string
   onClose: () => void
   onPick: (city: City) => void
 }
 
-export default function CityPicker({ open, city, onClose, onPick }: Props) {
+export default function CityPicker({ open, city, skipLabel = '我的城市不在这里', onClose, onPick }: Props) {
   const [provinces, setProvinces] = useState<Province[] | null>(null)
   const [failed, setFailed] = useState(false)
   const [attempt, setAttempt] = useState(0)
@@ -75,7 +76,7 @@ export default function CityPicker({ open, city, onClose, onPick }: Props) {
           </ScrollView>
         ) : null}
         <Button className='btn-native btn-native--plain' onClick={() => onPick({ code: '', name: '全国' })}>
-          我的城市不在这里
+          {skipLabel}
         </Button>
       </View>
     </BottomSheet>

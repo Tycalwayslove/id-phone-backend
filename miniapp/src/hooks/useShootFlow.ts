@@ -9,13 +9,13 @@ import { pickAndCreatePhoto, type PhotoSource } from '../utils/pickPhoto'
 type SpecDetail = components['schemas']['SpecDetail']
 const SKIP_GUIDE_KEY = 'shoot-guide.skip'
 
-async function createPhoto(specCode: string, source: PhotoSource): Promise<void> {
+async function createPhoto(source: PhotoSource, specCode?: string): Promise<void> {
   const photo = await pickAndCreatePhoto(source)
   if (photo) await navigate(PAGES.editor, { photo_id: photo.id, spec_code: specCode })
 }
 
 export default function useShootFlow() {
-  const [spec, setSpec] = useState<SpecDetail | null>(null)
+  const [guide, setGuide] = useState<{ spec?: SpecDetail } | null>(null)
   const [busy, setBusy] = useState(false)
   const locked = useRef(false)
 
@@ -33,26 +33,26 @@ export default function useShootFlow() {
     }
   }
 
-  function open(code: string, detail?: SpecDetail): Promise<void> {
+  function open(code?: string, detail?: SpecDetail): Promise<void> {
     return run(async () => {
       if (Taro.getStorageSync(SKIP_GUIDE_KEY) === true) {
         // 系统菜单先区分两个入口，给创建照片接口传入真实来源。
         const { tapIndex } = await Taro.showActionSheet({ itemList: ['拍照', '从相册选'] })
-        if (tapIndex === 0 || tapIndex === 1) await createPhoto(code, tapIndex === 0 ? 'camera' : 'upload')
+        if (tapIndex === 0 || tapIndex === 1) await createPhoto(tapIndex === 0 ? 'camera' : 'upload', code)
         return
       }
-      setSpec(detail ?? await getSpec(code))
+      setGuide({ spec: detail ?? (code ? await getSpec(code) : undefined) })
     })
   }
 
   function choose(source: PhotoSource, skip: boolean): Promise<void> {
-    if (!spec) return Promise.resolve()
+    if (!guide) return Promise.resolve()
     return run(async () => {
       if (skip) Taro.setStorageSync(SKIP_GUIDE_KEY, true)
-      setSpec(null)
-      await createPhoto(spec.code, source)
+      setGuide(null)
+      await createPhoto(source, guide.spec?.code)
     })
   }
 
-  return { spec, busy, open, choose, close: () => setSpec(null) }
+  return { guideOpen: guide !== null, spec: guide?.spec, busy, open, choose, close: () => setGuide(null) }
 }

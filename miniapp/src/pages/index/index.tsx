@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Button, ScrollView, Text, View } from '@tarojs/components'
 import Taro, { usePullDownRefresh } from '@tarojs/taro'
-import type { components } from '../../api/schema'
 import CityChip from '../../components/CityChip'
 import CityPicker from '../../components/CityPicker'
 import HeroFrame from '../../components/HeroFrame'
@@ -12,7 +11,6 @@ import PrivateDomainCard from '../../components/PrivateDomainCard'
 import SearchBox from '../../components/SearchBox'
 import ShootGuide from '../../components/ShootGuide'
 import SpecGroups from '../../components/SpecGroups'
-import SpecPicker from '../../components/SpecPicker'
 import SpecTile from '../../components/SpecTile'
 import useCity from '../../hooks/useCity'
 import useCommonSpecs from '../../hooks/useCommonSpecs'
@@ -20,8 +18,6 @@ import useShootFlow from '../../hooks/useShootFlow'
 import { handleError } from '../../utils/errors'
 import { PAGES, navigate } from '../../utils/nav'
 import './index.scss'
-
-type SpecOut = components['schemas']['SpecOut']
 
 const REASONS = [
   ['修得自然', '美颜可调，五官不变形，按官方尺寸和底色制作。'],
@@ -34,7 +30,6 @@ export default function Index() {
   const { city, setCity, regionCode } = useCity()
   const { specs, loading, load } = useCommonSpecs(regionCode)
   const receipts = useCommonSpecs(regionCode, { category: 'receipt', limit: 6 })
-  const [picking, setPicking] = useState(false)
   const [cityAction, setCityAction] = useState<'change' | { keyword?: string } | null>(null)
   const shoot = useShootFlow()
 
@@ -51,21 +46,6 @@ export default function Index() {
     void refresh().finally(() => Taro.stopPullDownRefresh())
   })
 
-  function pickSpec(spec: SpecOut): void {
-    if (!city) {
-      openPicker()
-      return
-    }
-    setPicking(false)
-    void shoot.open(spec.code)
-  }
-
-  function openPicker(): void {
-    if (shoot.busy) return
-    setPicking(true)
-    if (city && specs.length === 0) void load().catch(handleError)
-  }
-
   function openCatalog(keyword?: string): void {
     if (city) void navigate(PAGES.specs, { keyword })
     else setCityAction({ keyword })
@@ -80,7 +60,7 @@ export default function Index() {
         <Text className='home-hero__title'>在家拍证件照</Text>
         <Text className='home-hero__intro'>手机拍一张，自动换底色、裁尺寸，修得自然。</Text>
         <HeroFrame />
-        <Button className='btn-native' onClick={openPicker} disabled={shoot.busy}>开始拍</Button>
+        <Button className='btn-native' onClick={() => void shoot.open()} disabled={shoot.busy}>开始拍</Button>
         <Text className='hint home-hero__note'>先免费看成品，满意再保存</Text>
       </View>
 
@@ -100,7 +80,7 @@ export default function Index() {
             <SpecTile
               key={spec.code}
               spec={spec}
-              onClick={() => pickSpec(spec)}
+              onClick={() => void shoot.open(spec.code)}
             />
           ))}
         </View>
@@ -116,10 +96,7 @@ export default function Index() {
             <ScrollView scrollX className='home-scroll' enhanced showScrollbar={false}>
               <View className='home-scroll__row'>
                 {items.map((spec) => (
-                  <Text key={spec.code} className='home-receipt' onClick={() => {
-                    if (city) void navigate(PAGES.specDetail, { code: spec.code })
-                    else openPicker()
-                  }}>
+                  <Text key={spec.code} className='home-receipt' onClick={() => void navigate(PAGES.specDetail, { code: spec.code })}>
                     {spec.name}
                   </Text>
                 ))}
@@ -139,13 +116,6 @@ export default function Index() {
         ))}
       </View>
       <PrivateDomainCard />
-      <SpecPicker
-        open={picking}
-        specs={specs}
-        loading={loading}
-        onPick={pickSpec}
-        onClose={() => setPicking(false)}
-      />
       <CityPicker
         open={cityAction !== null}
         city={city}
@@ -156,7 +126,7 @@ export default function Index() {
           if (cityAction && cityAction !== 'change') void navigate(PAGES.specs, { keyword: cityAction.keyword })
         }}
       />
-      <ShootGuide spec={shoot.spec} onChoose={shoot.choose} onClose={shoot.close} />
+      <ShootGuide open={shoot.guideOpen} spec={shoot.spec} onChoose={shoot.choose} onClose={shoot.close} />
       <PrivacyPopup page={PAGES.index} />
     </PageContainer>
   )

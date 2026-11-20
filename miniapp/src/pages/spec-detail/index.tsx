@@ -8,7 +8,7 @@ import PageContainer from '../../components/PageContainer'
 import ShootGuide from '../../components/ShootGuide'
 import useShootFlow from '../../hooks/useShootFlow'
 import { handleError } from '../../utils/errors'
-import { formatMm, formatSizeRange } from '../../utils/format'
+import { bgColorHex, formatMm, formatSizeRange } from '../../utils/format'
 import './index.scss'
 
 type SpecDetail = components['schemas']['SpecDetail']
@@ -65,7 +65,7 @@ export default function SpecDetailPage() {
           <Text className='spec-detail__label'>可选底色</Text>
           <View className='spec-detail__colors'>
             {spec.bg_colors.map((c) => (
-              <View key={c} className='spec-detail__color' style={{ background: c }} />
+              <View key={c} className='spec-detail__color' style={{ background: bgColorHex(c) }} />
             ))}
           </View>
         </View>
@@ -98,7 +98,7 @@ export default function SpecDetailPage() {
           开始拍
         </Button>
       </View>
-      <ShootGuide spec={shoot.spec} onChoose={shoot.choose} onClose={shoot.close} />
+      <ShootGuide open={shoot.guideOpen} spec={shoot.spec} onChoose={shoot.choose} onClose={shoot.close} />
     </PageContainer>
   )
 }
