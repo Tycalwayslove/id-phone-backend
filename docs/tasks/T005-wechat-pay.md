@@ -1,6 +1,6 @@
 # T005 微信支付正式接入（APIv3）
 
-- 状态：进行中（Codex）
+- 状态：已完成（PR #6，提交 b6a77e8；实际未引入 SDK，用 cryptography + httpx 自实现；记录见 devlog 0019）
 
 ## 目标
 实现 `backend/app/integrations/payment.py` 的 `WechatPay`：JSAPI 下单（小程序支付）返回 wx.requestPayment 参数、支付通知验签与解密、退款、查询订单、关闭订单。
