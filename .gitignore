@@ -9,3 +9,7 @@ backups/
 
 # Claude Code / Codex 并行任务的工作区
 .claude/worktrees/
+
+# 图像模型（scripts/download_models.py 下载）
+backend/models/*.onnx
+backend/models/*.part
