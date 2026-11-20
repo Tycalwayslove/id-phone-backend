@@ -215,6 +215,7 @@ def test_sync_catalog_logs_one_unknown_color_count(monkeypatch, caplog):
 def test_sync_result_does_not_depend_on_provider_order(db: Session, monkeypatch):
     """黔微云列表不带回执标记和办理字段；先同步哪家，最终结果都必须一样。"""
     fake = FakeProvider("zheying")
+    base_receipt, base_normal = fake.get_item("713"), fake.get_item("1001")  # 替换 list_items 之前取样例
     catalogs: dict[str, list] = {}
     monkeypatch.setattr(FakeProvider, "list_items", lambda self: catalogs[self.code])
 
@@ -224,8 +225,8 @@ def test_sync_result_does_not_depend_on_provider_order(db: Session, monkeypatch)
         db.add_all([zy, qwy])
         db.flush()
         # 名称带 tag，避免两轮之间按名称和尺寸合并
-        receipt = replace(fake.get_item("713"), name=f"广州市身份证{tag}")
-        normal = replace(fake.get_item("1001"), name=f"一寸{tag}")
+        receipt = replace(base_receipt, name=f"广州市身份证{tag}")
+        normal = replace(base_normal, name=f"一寸{tag}")
         catalogs[zy.code] = [receipt, normal]
         catalogs[qwy.code] = [
             replace(item, is_receipt=None, receipt_fields=[], provider_category=None)
