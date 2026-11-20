@@ -385,6 +385,10 @@ class AdminApplicationOut(Schema):
         description="申请状态：pending = 已创建未提交；processing = 办理中；rejected = 被驳回，可重提或取消；completed = 已出回执；failed = 办理失败；cancelled = 已取消",
         examples=["processing"],
     )
+    manual_review_required: bool = Field(
+        description="是否需人工核对。当前提交在真实服务商两小时未取得结果而尚未处理时为 true",
+        examples=[True, False],
+    )
     spec_code: str = Field(description="规格编码", examples=["gd_idcard"])
     spec_name: str = Field(description="规格名称", examples=["广东省身份证"])
     photo_id: int = Field(description="当前使用的照片 ID", examples=[12])
@@ -419,6 +423,20 @@ class AdminApplicationDetail(AdminApplicationOut):
 
 
 AdminApplicationPage = page_model(AdminApplicationOut, "AdminApplicationPage")
+
+
+class AdminManualReviewIn(Schema):
+    """标记回执申请已人工核对的请求。"""
+
+    result: Literal["completed", "rejected", "failed"] = Field(
+        description="核对结论。completed 表示已出回执，rejected 表示被驳回，failed 表示办理失败",
+        examples=["completed"],
+    )
+    remark: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)] = Field(
+        description="核对备注，1～200 字，仅写入后台审计。请勿填写手机号、身份证号、令牌或密钥",
+        examples=["已与服务商确认办理结果"],
+    )
+
 
 # ---------- 套餐 ----------
 

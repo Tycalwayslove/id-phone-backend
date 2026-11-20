@@ -171,6 +171,57 @@ def _get_owned(db: Session, user_id: int, app_no: str, *, for_update: bool = Fal
     return app
 
 
+def list_admin_applications(
+    db: Session,
+    *,
+    before_id: int | None,
+    limit: int,
+    status: str | None = None,
+    app_no: str | None = None,
+    user_id: int | None = None,
+    spec_code: str | None = None,
+    manual_review: bool | None = None,
+) -> list[tuple[ReceiptApplication, Spec, bool]]:
+    """查询后台申请摘要及当前提交的人工核对标记。"""
+    return repo.list_admin_applications(
+        db,
+        before_id=before_id,
+        limit=limit,
+        status=status,
+        app_no=app_no,
+        user_id=user_id,
+        spec_code=spec_code,
+        manual_review=manual_review,
+    )
+
+
+def get_admin_application_detail(
+    db: Session, *, app_no: str
+) -> tuple[ReceiptApplication, Spec, bool, dict[str, str], list[tuple[ReceiptAttempt, str]]]:
+    """读取申请摘要、脱敏表单及附有服务商编码的全部提交记录。"""
+    rows = list_admin_applications(db, app_no=app_no, before_id=None, limit=1)
+    if not rows:
+        raise AppError(ErrorCode.APPLICATION_NOT_FOUND)
+    app, spec, needs_review = rows[0]
+    return app, spec, needs_review, mask_form(_load_form(app)), repo.admin_attempts(db, app.id)
+
+
+def get_admin_application_by_no(db: Session, *, app_no: str, for_update: bool = False) -> ReceiptApplication:
+    """按申请单号读取，供后台操作锁定目标申请。"""
+    app = repo.get_admin_application_by_no(db, app_no, for_update=for_update)
+    if app is None:
+        raise AppError(ErrorCode.APPLICATION_NOT_FOUND)
+    return app
+
+
+def application_counts_by_status(db: Session) -> dict[str, int]:
+    return repo.application_counts_by_status(db)
+
+
+def count_user_applications(db: Session, *, user_id: int) -> int:
+    return repo.count_user_applications(db, user_id)
+
+
 # ---------- 查询 ----------
 
 
@@ -514,6 +565,34 @@ def apply_provider_status(db: Session, attempt: ReceiptAttempt, status: Provider
         ent_service.release_quota(db, app.entitlement_id, app.id)
     db.flush()
     return "applied"
+
+
+def resolve_manual_review(db: Session, *, app_no: str, result: str) -> tuple[ReceiptApplication, str]:
+    """按原有状态机应用人工核对结论。由后台调用方提交事务。"""
+    if result not in ("completed", "rejected", "failed"):
+        raise AppError(ErrorCode.VALIDATION_ERROR, "人工核对结论无效")
+    app = get_admin_application_by_no(db, app_no=app_no, for_update=True)
+    before_status = app.status
+    attempt = repo.get_current_attempt(db, app.id)
+    if (
+        attempt is None
+        or attempt.status not in repo.POLLABLE_STATUSES
+        or (attempt.request_payload or {}).get(repo.MANUAL_REVIEW_REQUIRED) is not True
+    ):
+        raise AppError(ErrorCode.CONFLICT, "当前申请无需人工核对，请刷新后查看")
+
+    status = ProviderStatus(
+        provider_order_no=attempt.provider_order_no or "",
+        result=result,
+        reject_reason="人工核对后驳回" if result == "rejected" else None,
+    )
+    if apply_provider_status(db, attempt, status) != "applied":
+        raise AppError(ErrorCode.CONFLICT, "当前申请无法应用核对结论，请刷新后查看")
+    attempt.request_payload = {
+        key: value for key, value in attempt.request_payload.items() if key != repo.MANUAL_REVIEW_REQUIRED
+    }
+    db.flush()
+    return app, before_status
 
 
 # ---------- 服务商回调 ----------

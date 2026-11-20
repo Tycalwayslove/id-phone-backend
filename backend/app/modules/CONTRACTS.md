@@ -70,6 +70,9 @@ tests/<m>/test_*.py
 
 - `cancel_application(db, *, user_id, app_no) -> ReceiptApplication`：pending/rejected 的申请可取消，释放额度。
 - `apply_provider_status(db, attempt, status: ProviderStatus) -> str`：把服务商结果应用到尝试和申请上，返回处理结果（applied/stale/duplicate）。轮询、回调、联调接口共用。
+- `list_admin_applications(db, *, before_id, limit, status=None, app_no=None, user_id=None, spec_code=None, manual_review=None)` / `get_admin_application_detail(db, *, app_no)` / `get_admin_application_by_no(db, *, app_no, for_update=False)`：供后台查询申请摘要、脱敏详情和按单号读取申请。人工核对标记只取待办理申请的当前提交。
+- `application_counts_by_status(db)` / `count_user_applications(db, *, user_id)`：供后台看板和用户详情统计回执申请。
+- `resolve_manual_review(db, *, app_no, result)`：锁定需人工核对的申请，通过现有状态机应用核对结论并清除标记，返回申请及原状态。调用方与审计记录一起提交。
 
 ## orders（补充）
 
@@ -78,4 +81,4 @@ tests/<m>/test_*.py
 
 ## admin（后台）例外
 
-- admin 模块的列表/详情查询可以直接只读查询各业务表（后台需要跨用户、跨模块的视图）；写操作仍调用对应模块的 service。
+- 回执申请查询与操作使用 receipts service。其他后台列表和详情可以直接只读查询业务表，写操作仍调用对应模块的 service。

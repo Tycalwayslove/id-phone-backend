@@ -38,6 +38,8 @@ export const adminApi = {
     result(await client.GET('/api/v1/admin/receipt-applications/{app_no}', { params: { path: { app_no } }, signal })),
   cancelReceipt: async (app_no: string) =>
     result(await client.POST('/api/v1/admin/receipt-applications/{app_no}/cancel', { params: { path: { app_no } } })),
+  resolveReceiptReview: async (app_no: string, body: Schema['AdminManualReviewIn']) =>
+    result(await client.POST('/api/v1/admin/receipt-applications/{app_no}/manual-review', { params: { path: { app_no } }, body })),
 
   plans: async (signal: AbortSignal) =>
     result(await client.GET('/api/v1/admin/plans', { signal })),

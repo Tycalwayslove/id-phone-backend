@@ -67,6 +67,75 @@ def list_applications(
 # ---------- 内部（回调、轮询、联调用，不带用户） ----------
 
 
+def list_admin_applications(
+    db: Session,
+    *,
+    before_id: int | None,
+    limit: int,
+    status: str | None = None,
+    app_no: str | None = None,
+    user_id: int | None = None,
+    spec_code: str | None = None,
+    manual_review: bool | None = None,
+) -> list[tuple[ReceiptApplication, Spec, bool]]:
+    flagged_attempt = (
+        select(ReceiptAttempt.id)
+        .where(
+            ReceiptAttempt.application_id == ReceiptApplication.id,
+            ReceiptAttempt.is_current.is_(True),
+            ReceiptAttempt.status.in_(POLLABLE_STATUSES),
+            ReceiptAttempt.request_payload.contains({MANUAL_REVIEW_REQUIRED: True}),
+        )
+        .exists()
+    )
+    needs_review = and_(ReceiptApplication.status.in_(("pending", "processing")), flagged_attempt)
+    stmt = select(ReceiptApplication, Spec, needs_review).join(Spec, Spec.id == ReceiptApplication.spec_id)
+    if status is not None:
+        stmt = stmt.where(ReceiptApplication.status == status)
+    if app_no is not None:
+        stmt = stmt.where(ReceiptApplication.app_no == app_no)
+    if user_id is not None:
+        stmt = stmt.where(ReceiptApplication.user_id == user_id)
+    if spec_code is not None:
+        stmt = stmt.where(Spec.code == spec_code)
+    if manual_review is not None:
+        stmt = stmt.where(needs_review.is_(manual_review))
+    if before_id is not None:
+        stmt = stmt.where(ReceiptApplication.id < before_id)
+    return list(db.execute(stmt.order_by(ReceiptApplication.id.desc()).limit(limit)).tuples())
+
+
+def get_admin_application_by_no(
+    db: Session, app_no: str, *, for_update: bool = False
+) -> ReceiptApplication | None:
+    stmt = select(ReceiptApplication).where(ReceiptApplication.app_no == app_no)
+    if for_update:
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+    return db.scalar(stmt)
+
+
+def admin_attempts(db: Session, application_id: int) -> list[tuple[ReceiptAttempt, str]]:
+    stmt = (
+        select(ReceiptAttempt, Provider.code)
+        .join(Provider, Provider.id == ReceiptAttempt.provider_id)
+        .where(ReceiptAttempt.application_id == application_id)
+        .order_by(ReceiptAttempt.seq)
+    )
+    return list(db.execute(stmt).tuples())
+
+
+def application_counts_by_status(db: Session) -> dict[str, int]:
+    stmt = select(ReceiptApplication.status, func.count(ReceiptApplication.id)).group_by(
+        ReceiptApplication.status
+    )
+    return dict(db.execute(stmt).tuples().all())
+
+
+def count_user_applications(db: Session, user_id: int) -> int:
+    stmt = select(func.count(ReceiptApplication.id)).where(ReceiptApplication.user_id == user_id)
+    return db.scalar(stmt) or 0
+
+
 def get_application_by_id(db: Session, app_id: int, *, for_update: bool = False) -> ReceiptApplication | None:
     stmt = select(ReceiptApplication).where(ReceiptApplication.id == app_id)
     if for_update:

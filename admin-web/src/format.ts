@@ -36,6 +36,7 @@ export const auditActions: Record<string, string> = {
   'auth.logout': '退出登录',
   'refund.create': '发起退款',
   'application.cancel': '取消回执',
+  'application.manual_review': '标记回执已核对',
   'plan.create': '新建套餐',
   'plan.update': '修改套餐',
   'spec.create': '新建规格',

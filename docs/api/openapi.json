@@ -4195,6 +4195,27 @@
             "description": "按规格编码筛选"
           },
           {
+            "name": "manual_review",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按人工核对标记筛选。true 仅查需人工核对，false 仅查无需人工核对，省略则全部",
+              "examples": [
+                true
+              ],
+              "title": "Manual Review"
+            },
+            "description": "按人工核对标记筛选。true 仅查需人工核对，false 仅查无需人工核对，省略则全部"
+          },
+          {
             "name": "cursor",
             "in": "query",
             "required": false,
@@ -4490,6 +4511,127 @@
           },
           "409": {
             "description": "错误码：APPLICATION_NOT_RESUBMITTABLE（当前状态不能重新提交）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/receipt-applications/{app_no}/manual-review": {
+      "post": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "标记回执申请已核对",
+        "description": "为需人工核对的申请登记结论，按回执状态机更新申请和当前提交。权限点 application:operate。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。待核对状态已变化时返回 CONFLICT。选择 completed 仅登记已出回执结论。",
+        "operationId": "admin_applications_manual_review",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "app_no",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "回执申请单号",
+              "examples": [
+                "R20261119083012A1B2C3"
+              ],
+              "title": "App No"
+            },
+            "description": "回执申请单号"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminManualReviewIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "核对后的申请详情",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminApplicationDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "错误码：APPLICATION_NOT_FOUND（回执申请不存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：CONFLICT（数据已存在）",
             "content": {
               "application/json": {
                 "schema": {
@@ -7142,6 +7284,15 @@
               "processing"
             ]
           },
+          "manual_review_required": {
+            "type": "boolean",
+            "title": "Manual Review Required",
+            "description": "是否需人工核对。当前提交在真实服务商两小时未取得结果而尚未处理时为 true",
+            "examples": [
+              true,
+              false
+            ]
+          },
           "spec_code": {
             "type": "string",
             "title": "Spec Code",
@@ -7321,6 +7472,7 @@
           "app_no",
           "user_id",
           "status",
+          "manual_review_required",
           "spec_code",
           "spec_name",
           "photo_id",
@@ -7372,6 +7524,15 @@
             "description": "申请状态：pending = 已创建未提交；processing = 办理中；rejected = 被驳回，可重提或取消；completed = 已出回执；failed = 办理失败；cancelled = 已取消",
             "examples": [
               "processing"
+            ]
+          },
+          "manual_review_required": {
+            "type": "boolean",
+            "title": "Manual Review Required",
+            "description": "是否需人工核对。当前提交在真实服务商两小时未取得结果而尚未处理时为 true",
+            "examples": [
+              true,
+              false
             ]
           },
           "spec_code": {
@@ -7469,6 +7630,7 @@
           "app_no",
           "user_id",
           "status",
+          "manual_review_required",
           "spec_code",
           "spec_name",
           "photo_id",
@@ -7901,6 +8063,40 @@
         ],
         "title": "AdminLoginOut",
         "description": "登录成功的返回。会话令牌通过 httpOnly Cookie（admin_session）下发，前端拿不到也不需要拿。"
+      },
+      "AdminManualReviewIn": {
+        "properties": {
+          "result": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "rejected",
+              "failed"
+            ],
+            "title": "Result",
+            "description": "核对结论。completed 表示已出回执，rejected 表示被驳回，failed 表示办理失败",
+            "examples": [
+              "completed"
+            ]
+          },
+          "remark": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Remark",
+            "description": "核对备注，1～200 字，仅写入后台审计。请勿填写手机号、身份证号、令牌或密钥",
+            "examples": [
+              "已与服务商确认办理结果"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "result",
+          "remark"
+        ],
+        "title": "AdminManualReviewIn",
+        "description": "标记回执申请已人工核对的请求。"
       },
       "AdminMeOut": {
         "properties": {

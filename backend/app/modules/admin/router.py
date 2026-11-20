@@ -19,6 +19,7 @@ from app.modules.admin.schemas import (
     AdminAuditLogPage,
     AdminLoginIn,
     AdminLoginOut,
+    AdminManualReviewIn,
     AdminMeOut,
     AdminNotifyTaskPage,
     AdminOrderDetail,
@@ -327,7 +328,7 @@ def refund_order(order_no: OrderNoPath, body: AdminRefundIn, admin: RefundCreate
     description=f"按创建时间从新到旧列出回执申请，游标分页，条件之间是“并且”。权限点 application:read。{_LOGIN_NOTE}",
     response_model=AdminApplicationPage,
     response_description="回执申请分页列表",
-    responses=errors_doc(*_AUTH),
+    responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR),
 )
 def list_applications(
     _: ApplicationRead,
@@ -348,9 +349,22 @@ def list_applications(
     spec_code: Annotated[
         str | None, Query(max_length=64, description="按规格编码筛选", examples=["gd_idcard"])
     ] = None,
+    manual_review: Annotated[
+        bool | None,
+        Query(
+            description="按人工核对标记筛选。true 仅查需人工核对，false 仅查无需人工核对，省略则全部",
+            examples=[True],
+        ),
+    ] = None,
 ):
     return service.list_applications(
-        db, status=status, app_no=app_no, user_id=user_id, spec_code=spec_code, page=page
+        db,
+        status=status,
+        app_no=app_no,
+        user_id=user_id,
+        spec_code=spec_code,
+        manual_review=manual_review,
+        page=page,
     )
 
 
@@ -384,6 +398,24 @@ def get_application(app_no: AppNoPath, _: ApplicationRead, db: DB):
 )
 def cancel_application(app_no: AppNoPath, admin: ApplicationOperate, db: DB):
     return service.cancel_application(db, admin, app_no)
+
+
+@admin_router.post(
+    "/receipt-applications/{app_no}/manual-review",
+    operation_id="admin_applications_manual_review",
+    summary="标记回执申请已核对",
+    description=(
+        f"为需人工核对的申请登记结论，按回执状态机更新申请和当前提交。权限点 application:operate。{_LOGIN_NOTE}{_WRITE_NOTE}"
+        "待核对状态已变化时返回 CONFLICT。选择 completed 仅登记已出回执结论。"
+    ),
+    response_model=AdminApplicationDetail,
+    response_description="核对后的申请详情",
+    responses=errors_doc(
+        *_AUTH, ErrorCode.APPLICATION_NOT_FOUND, ErrorCode.CONFLICT, ErrorCode.VALIDATION_ERROR
+    ),
+)
+def resolve_manual_review(app_no: AppNoPath, admin: ApplicationOperate, db: DB, payload: AdminManualReviewIn):
+    return service.resolve_manual_review(db, admin, app_no, payload)
 
 
 # ---------- 套餐 ----------

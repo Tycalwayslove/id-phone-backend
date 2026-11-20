@@ -19,8 +19,6 @@ from app.models import (
     PlanBenefit,
     Provider,
     ProviderSpec,
-    ReceiptApplication,
-    ReceiptAttempt,
     Refund,
     RouteRule,
     Spec,
@@ -80,7 +78,7 @@ def get_session_by_hash(db: Session, token_hash: str) -> AdminSession | None:
 # ---------- 看板与通知 ----------
 
 
-def overview_counts(db: Session) -> tuple[int, int, int, int, dict[str, int]]:
+def overview_counts(db: Session) -> tuple[int, int, int, int]:
     paid = Order.status.in_(PAID_STATUSES)
     user_count, order_count, paid_count, paid_fen = db.execute(
         select(
@@ -90,14 +88,7 @@ def overview_counts(db: Session) -> tuple[int, int, int, int, dict[str, int]]:
             func.coalesce(func.sum(Order.paid_fen).filter(paid), 0),
         )
     ).one()
-    receipt_counts = dict(
-        db.execute(
-            select(ReceiptApplication.status, func.count(ReceiptApplication.id)).group_by(
-                ReceiptApplication.status
-            )
-        ).all()
-    )
-    return user_count, order_count, paid_count, paid_fen, receipt_counts
+    return user_count, order_count, paid_count, paid_fen
 
 
 def list_notify_tasks(
@@ -168,12 +159,6 @@ def identity_providers(db: Session, user_ids: Iterable[int]) -> dict[int, list[s
     return result
 
 
-def applications_count(db: Session, user_id: int) -> int:
-    return int(
-        db.scalar(select(func.count(ReceiptApplication.id)).where(ReceiptApplication.user_id == user_id)) or 0
-    )
-
-
 # ---------- 订单 ----------
 
 
@@ -226,59 +211,6 @@ def refunds_of(db: Session, order_id: int) -> list[Refund]:
     return list(db.scalars(select(Refund).where(Refund.order_id == order_id).order_by(Refund.id)))
 
 
-# ---------- 回执申请 ----------
-
-
-def list_applications(
-    db: Session,
-    *,
-    status: str | None,
-    app_no: str | None,
-    user_id: int | None,
-    spec_code: str | None,
-    before_id: int | None,
-    limit: int,
-) -> list[ReceiptApplication]:
-    stmt = select(ReceiptApplication)
-    if spec_code is not None:
-        stmt = stmt.join(Spec, Spec.id == ReceiptApplication.spec_id).where(Spec.code == spec_code)
-    if status is not None:
-        stmt = stmt.where(ReceiptApplication.status == status)
-    if app_no is not None:
-        stmt = stmt.where(ReceiptApplication.app_no == app_no)
-    if user_id is not None:
-        stmt = stmt.where(ReceiptApplication.user_id == user_id)
-    if before_id is not None:
-        stmt = stmt.where(ReceiptApplication.id < before_id)
-    return list(db.scalars(stmt.order_by(ReceiptApplication.id.desc()).limit(limit)))
-
-
-def get_application_by_no(db: Session, app_no: str) -> ReceiptApplication | None:
-    return db.scalar(select(ReceiptApplication).where(ReceiptApplication.app_no == app_no))
-
-
-def specs_by_ids(db: Session, ids: Iterable[int]) -> dict[int, Spec]:
-    ids = set(ids)
-    if not ids:
-        return {}
-    return {s.id: s for s in db.scalars(select(Spec).where(Spec.id.in_(ids)))}
-
-
-def attempts_by_app(db: Session, app_ids: list[int]) -> dict[int, list[tuple[ReceiptAttempt, str]]]:
-    result: dict[int, list[tuple[ReceiptAttempt, str]]] = {i: [] for i in app_ids}
-    if not app_ids:
-        return result
-    rows = db.execute(
-        select(ReceiptAttempt, Provider.code)
-        .join(Provider, Provider.id == ReceiptAttempt.provider_id)
-        .where(ReceiptAttempt.application_id.in_(app_ids))
-        .order_by(ReceiptAttempt.application_id, ReceiptAttempt.seq)
-    )
-    for attempt, code in rows:
-        result[attempt.application_id].append((attempt, code))
-    return result
-
-
 # ---------- 套餐 ----------
 
 
@@ -302,6 +234,13 @@ def benefit_rows(db: Session, plan_ids: list[int]) -> dict[int, list[PlanBenefit
 
 
 # ---------- 规格 ----------
+
+
+def specs_by_ids(db: Session, ids: Iterable[int]) -> dict[int, Spec]:
+    ids = set(ids)
+    if not ids:
+        return {}
+    return {s.id: s for s in db.scalars(select(Spec).where(Spec.id.in_(ids)))}
 
 
 def list_specs(db: Session, *, before_id: int | None, limit: int) -> list[Spec]:
