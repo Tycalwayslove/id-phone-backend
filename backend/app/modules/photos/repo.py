@@ -3,21 +3,23 @@
 from collections.abc import Iterable
 from datetime import datetime
 
-from sqlalchemy import exists, or_, select
+from sqlalchemy import exists, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models import File, Photo, PhotoRender, Spec
 
 
 def get_photo(db: Session, user_id: int, photo_id: int) -> Photo | None:
-    """本人且未删除的照片。"""
+    """本人已创建且未删除的照片。"""
     return db.scalar(
-        select(Photo).where(Photo.id == photo_id, Photo.user_id == user_id, Photo.status != "purged")
+        select(Photo).where(
+            Photo.id == photo_id, Photo.user_id == user_id, Photo.status.in_(("active", "expired"))
+        )
     )
 
 
 def list_photos(db: Session, user_id: int, *, before_id: int | None, limit: int) -> list[Photo]:
-    q = select(Photo).where(Photo.user_id == user_id, Photo.status != "purged")
+    q = select(Photo).where(Photo.user_id == user_id, Photo.status.in_(("active", "expired")))
     if before_id is not None:
         q = q.where(Photo.id < before_id)
     return list(db.scalars(q.order_by(Photo.id.desc()).limit(limit)))
@@ -32,15 +34,52 @@ def get_files(db: Session, user_id: int, file_ids: Iterable[int]) -> dict[int, F
 
 
 def get_unused_upload(db: Session, user_id: int, file_id: int) -> File | None:
-    """锁定本人上传的、有效且还没被照片引用的原图。"""
-    return db.scalar(_unused_originals().where(File.id == file_id, File.user_id == user_id).with_for_update())
+    """锁定本人上传的有效原图，再检查是否已被正式照片使用。"""
+    file = db.scalar(
+        select(File)
+        .where(File.id == file_id, File.user_id == user_id, File.kind == "original", File.status == "active")
+        .with_for_update()
+    )
+    if file is None:
+        return None
+    return db.scalar(_unused_originals().where(File.id == file_id, File.user_id == user_id))
 
 
 def _unused_originals():
     return select(File).where(
         File.kind == "original",
         File.status == "active",
-        ~exists().where(or_(Photo.original_file_id == File.id, Photo.matting_file_id == File.id)),
+        ~exists().where(
+            or_(
+                (Photo.original_file_id == File.id) & (Photo.status != "draft"),
+                Photo.matting_file_id == File.id,
+            )
+        ),
+    )
+
+
+def get_upload_draft(db: Session, user_id: int, file_id: int) -> Photo | None:
+    return db.scalar(
+        select(Photo).where(
+            Photo.user_id == user_id, Photo.original_file_id == file_id, Photo.status == "draft"
+        )
+    )
+
+
+def lock_photo_for_media_check(db: Session, trace_id: str) -> Photo | None:
+    return db.scalar(
+        select(Photo)
+        .where(Photo.check_result["trace_id"].astext == trace_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+
+
+def purge_upload_drafts(db: Session, file_ids: list[int]) -> None:
+    db.execute(
+        update(Photo)
+        .where(Photo.original_file_id.in_(file_ids), Photo.status == "draft")
+        .values(status="purged")
     )
 
 

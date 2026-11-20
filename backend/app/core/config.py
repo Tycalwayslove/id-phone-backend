@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     wechat_mode: Literal["fake", "real"] = "fake"
     wx_mini_app_id: str = "wx-dev-app"
     wx_mini_app_secret: str = ""
+    wx_msg_token: str = Field(default="", repr=False)
 
     # 微信支付
     pay_mode: Literal["fake", "wechat"] = "fake"

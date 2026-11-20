@@ -1,19 +1,27 @@
+import hashlib
 import io
 from datetime import timedelta
+from types import SimpleNamespace
 from urllib.parse import urlparse
 
 import pytest
 from PIL import Image
 from sqlalchemy import event, select
 
+from app.core.config import settings
+from app.core.deps import current_user
 from app.core.utils import utcnow
+from app.integrations import wechat
 from app.integrations.storage import get_storage
-from app.models import File, Photo
+from app.main import app
+from app.models import File, Photo, PhotoRender, UserIdentity
 from app.modules.photos import service as photo_service
 from tests.conftest import login
 from tests.factories import make_spec, make_standard_plans
 from tests.orders.helpers import grant_plan
-from tests.photos.helpers import jpeg_bytes, make_photo, set_access, upload
+from tests.photos.helpers import jpeg_bytes, make_photo, png_rgba_bytes, set_access, upload
+
+WECHAT_CALLBACK = "/api/v1/callbacks/wechat/media-check"
 
 
 @pytest.fixture
@@ -30,6 +38,50 @@ def bob(client):
 def no_access(monkeypatch):
     """默认没有权益；需要有权益的用例再调用 set_access 覆盖。"""
     set_access(monkeypatch, active=False)
+
+
+@pytest.fixture
+def real_media(client, db, alice, monkeypatch):
+    # 在登录后换为真实模式；使用主会话约定提供的已验证 OpenID。
+    monkeypatch.setattr(settings, "wechat_mode", "real")
+    monkeypatch.setattr(settings, "wx_msg_token", "test-message-token")
+    identity = db.scalar(select(UserIdentity).where(UserIdentity.open_id == "alice"))
+    auth_user = SimpleNamespace(id=identity.user_id, wx_mini_open_id=identity.open_id)
+    monkeypatch.setitem(app.dependency_overrides, current_user, lambda: auth_user)
+    tasks = []
+
+    def submit(*, media_url, open_id):
+        assert open_id == "alice"
+        url = urlparse(media_url)
+        assert get_storage().get(url.path.removeprefix("/files/")) == jpeg_bytes()
+        assert "sig=" in url.query
+        tasks.append(f"trace-{len(tasks) + 1}")
+        return tasks[-1]
+
+    monkeypatch.setattr(wechat, "media_check_async", submit)
+    return tasks
+
+
+def wechat_callback(client, trace_id, *, suggest="pass", errcode=0, signature=None):
+    timestamp, nonce = "1763452800", "98765"
+    signed = "".join(sorted((settings.wx_msg_token, timestamp, nonce))).encode()
+    response = client.post(
+        WECHAT_CALLBACK,
+        params={
+            "timestamp": timestamp,
+            "nonce": nonce,
+            "signature": signature or hashlib.sha1(signed).hexdigest(),
+        },
+        json={
+            "MsgType": "event",
+            "Event": "wxa_media_check",
+            "appid": settings.wx_mini_app_id,
+            "trace_id": trace_id,
+            "errcode": errcode,
+            "result": {"suggest": suggest},
+        },
+    )
+    return response
 
 
 def test_requires_login(client):
@@ -64,6 +116,7 @@ def test_upload_create_list(client, alice):
     assert r.status_code == 200
     up = r.json()
     assert (up["width"], up["height"]) == (600, 800)
+    assert client.get("/api/v1/photos", headers=alice).json()["items"] == []
 
     r = client.post("/api/v1/photos", json={"file_id": up["file_id"], "source": "camera"}, headers=alice)
     assert r.status_code == 200, r.text
@@ -78,6 +131,143 @@ def test_upload_create_list(client, alice):
     # 同一个文件不能再创建第二张照片
     r = client.post("/api/v1/photos", json={"file_id": up["file_id"], "source": "camera"}, headers=alice)
     assert r.json()["code"] == "UPLOAD_NOT_FOUND"
+
+
+def test_create_saves_rgba_matting_and_render_uses_it(client, db, alice, monkeypatch):
+    spec = make_spec(db, "ph_matte")
+    set_access(monkeypatch, active=True)
+    output = png_rgba_bytes()
+
+    def matte(data):
+        assert data == jpeg_bytes()
+        return output
+
+    monkeypatch.setattr(photo_service, "get_matting", lambda: SimpleNamespace(matte=matte))
+    photo_id = make_photo(client, alice)
+    photo = db.get(Photo, photo_id)
+    assert photo.check_result == {"status": "passed"}
+    matting = db.get(File, photo.matting_file_id)
+    assert (matting.kind, matting.mime) == ("matting", "image/png")
+    assert matting.storage_key == f"test/u{photo.user_id}/p{photo.id}/matting_f{matting.id}.png"
+    assert get_storage().get(matting.storage_key) == output
+
+    response = client.post(
+        f"/api/v1/photos/{photo_id}/renders",
+        json={"spec_code": spec.code, "bg_color": "#438EDB"},
+        headers=alice,
+    )
+    assert response.status_code == 200, response.text
+    url = urlparse(response.json()["preview_url"])
+    image = client.get(f"{url.path}?{url.query}")
+    with Image.open(io.BytesIO(image.content)) as rendered:
+        assert rendered.getpixel((10, 10)) == pytest.approx((0x43, 0x8E, 0xDB), abs=3)
+
+
+@pytest.mark.parametrize("error", [TimeoutError, RuntimeError])
+def test_matting_failure_falls_back_to_original(client, db, alice, monkeypatch, caplog, error):
+    spec = make_spec(db, "ph_fallback")
+    monkeypatch.setattr(settings, "matting_mode", "zheying")
+
+    def matte(_data):
+        raise error("upstream-private-detail")
+
+    monkeypatch.setattr(photo_service, "get_matting", lambda: SimpleNamespace(matte=matte))
+    photo_id = make_photo(client, alice)
+    assert db.get(Photo, photo_id).matting_file_id is None
+    assert "使用原图" in caplog.text
+    assert "upstream-private-detail" not in caplog.text
+    response = client.post(f"/api/v1/photos/{photo_id}/renders", json={"spec_code": spec.code}, headers=alice)
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize("callback_before_create", [True, False])
+def test_wechat_callback_enables_render(client, db, alice, real_media, callback_before_create):
+    spec = make_spec(db, "ph_checked")
+    assert wechat_callback(client, "trace-1").status_code == 503
+    original = upload(client, alice)
+    assert original.status_code == 200, original.text
+    assert real_media == ["trace-1"]
+    file_id = original.json()["file_id"]
+    draft = db.scalar(select(Photo).where(Photo.original_file_id == file_id))
+    assert draft.check_result == {"status": "pending", "trace_id": "trace-1"}
+    assert client.get("/api/v1/photos", headers=alice).json()["items"] == []
+    if callback_before_create:
+        assert wechat_callback(client, "trace-1").text == "success"
+
+    response = client.post("/api/v1/photos", json={"file_id": file_id, "source": "camera"}, headers=alice)
+    assert response.status_code == 200, response.text
+    photo_id = response.json()["id"]
+    assert photo_id == draft.id
+    renders = f"/api/v1/photos/{photo_id}/renders"
+    if not callback_before_create:
+        assert response.json()["original_url"] == ""
+        assert (
+            client.post(renders, json={"spec_code": spec.code}, headers=alice).json()["code"]
+            == "PHOTO_NOT_READY"
+        )
+        assert wechat_callback(client, "trace-1", signature="a" * 40).status_code == 401
+        assert draft.check_result["status"] == "pending"
+        assert wechat_callback(client, "trace-1").text == "success"
+    detail = client.get(f"/api/v1/photos/{photo_id}", headers=alice).json()
+    assert detail["original_url"]
+    assert draft.check_result == {"status": "passed", "trace_id": "trace-1"}
+    assert client.post(renders, json={"spec_code": spec.code}, headers=alice).status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("suggest", "errcode", "stored_status", "error_code"),
+    [
+        ("review", 0, "rejected", "PHOTO_REJECTED"),
+        ("risky", 0, "rejected", "PHOTO_REJECTED"),
+        ("pass", -1008, "failed", "PHOTO_NOT_READY"),
+    ],
+)
+def test_wechat_nonpassing_result_blocks_export_and_download(
+    client, db, alice, real_media, monkeypatch, suggest, errcode, stored_status, error_code
+):
+    set_access(monkeypatch, active=True)
+    spec = make_spec(db, "ph_rejected")
+    photo_id = make_photo(client, alice)
+    photo = db.get(Photo, photo_id)
+    file = photo_service.save_file(
+        db,
+        user_id=photo.user_id,
+        kind="render",
+        data=jpeg_bytes(),
+        mime="image/jpeg",
+        ext="jpg",
+        owner=f"p{photo_id}",
+    )
+    cached = PhotoRender(
+        photo_id=photo_id, spec_id=spec.id, file_id=file.id, bg_color="#FFFFFF", watermarked=False
+    )
+    db.add(cached)
+    db.flush()
+    assert wechat_callback(client, real_media[0], suggest=suggest, errcode=errcode).text == "success"
+    assert wechat_callback(client, real_media[0]).text == "success"
+    assert photo.check_result["status"] == stored_status
+
+    path = f"/api/v1/photos/{photo_id}"
+    rendered = client.post(f"{path}/renders", json={"spec_code": spec.code}, headers=alice)
+    downloaded = client.get(f"{path}/renders/{cached.id}/download", headers=alice)
+    assert rendered.json()["code"] == downloaded.json()["code"] == error_code
+    detail = client.get(path, headers=alice).json()
+    assert detail["original_url"] == "" and detail["renders"] == []
+
+
+def test_wechat_submission_failure_rolls_back_upload(client, db, alice, real_media, monkeypatch):
+    keys = []
+
+    def submit(*, media_url, open_id):
+        keys.append(urlparse(media_url).path.removeprefix("/files/"))
+        raise wechat.DeliveryError("network_error")
+
+    monkeypatch.setattr(wechat, "media_check_async", submit)
+    response = upload(client, alice)
+    assert (response.status_code, response.json()["code"]) == (503, "PROVIDER_UNAVAILABLE")
+    assert db.scalar(select(File).where(File.storage_key == keys[0])) is None
+    with pytest.raises(FileNotFoundError):
+        get_storage().get(keys[0])
 
 
 def test_list_pagination_newest_first(client, alice):
@@ -236,7 +426,7 @@ def test_delete_removes_files_and_hides_photo(client, db, alice):
 
     photo = db.get(Photo, pid)
     keys = [f.storage_key for f in db.scalars(select(File).where(File.user_id == photo.user_id))]
-    assert len(keys) == 2
+    assert len(keys) == 3
     assert all(get_storage().get(k) for k in keys)
 
     assert client.delete(f"/api/v1/photos/{pid}", headers=alice).json() == {"ok": True}
@@ -260,7 +450,7 @@ def test_purge_all_for_user(client, db, alice, bob):
     alice_uid = db.get(Photo, alice_photo).user_id
 
     n = photo_service.purge_all_for_user(db, alice_uid)
-    assert n == 2
+    assert n == 4
     assert client.get("/api/v1/photos", headers=alice).json()["items"] == []
     # 别人的不受影响
     assert len(client.get("/api/v1/photos", headers=bob).json()["items"]) == 1
@@ -286,6 +476,8 @@ def test_purge_orphan_uploads_only_removes_old_unreferenced_originals(client, db
 
     assert photo_service.purge_orphan_uploads(db, cutoff) == 1
     assert orphan.status == "purged" and orphan.purged_at is not None
+    draft = db.scalar(select(Photo).where(Photo.original_file_id == orphan.id))
+    assert draft.status == "purged"
     with pytest.raises(FileNotFoundError):
         get_storage().get(orphan.storage_key)
     for file in (attached, matting, fresh, boundary, receipt):
