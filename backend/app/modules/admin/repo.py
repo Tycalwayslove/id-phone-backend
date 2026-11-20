@@ -95,7 +95,7 @@ def overview_counts(db: Session) -> tuple[int, int, int, int, dict[str, int]]:
             select(ReceiptApplication.status, func.count(ReceiptApplication.id)).group_by(
                 ReceiptApplication.status
             )
-        ).tuples()
+        ).all()
     )
     return user_count, order_count, paid_count, paid_fen, receipt_counts
 
