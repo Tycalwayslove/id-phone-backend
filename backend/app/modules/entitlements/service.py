@@ -17,6 +17,7 @@ from app.core.utils import utcnow
 from app.models import Entitlement, EntitlementLedger, EntitlementQuota, OrderItem, Plan
 from app.modules.entitlements import repo
 from app.modules.entitlements.schemas import EntitlementOut
+from app.modules.notify import service as notify_service
 
 DEFAULT_STORAGE_DAYS = 30
 LIST_LIMIT = 100
@@ -277,3 +278,18 @@ def get_entitlement(db: Session, user_id: int, entitlement_id: int) -> Entitleme
     if ent is None:
         raise AppError(ErrorCode.ENTITLEMENT_NOT_FOUND)
     return _to_outs(db, [ent])[0]
+
+
+def create_expiration_reminders(db: Session) -> int:
+    """在剩余 (6, 7] 天和 (0, 1] 天时分别建一次到期提醒。"""
+    now = utcnow()
+    created = 0
+    for days in (7, 1):
+        starts_after = now + timedelta(days=days - 1)
+        ends_by = now + timedelta(days=days)
+        for ent in repo.active_expiring_between(db, starts_after, ends_by):
+            created += notify_service.create_task_once(
+                db, user_id=ent.user_id, entitlement_id=ent.id, event="entitlement_expiring", step=days
+            )
+    db.commit()
+    return created

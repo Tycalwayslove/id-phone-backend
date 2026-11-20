@@ -79,6 +79,29 @@ def create_task(
     return task
 
 
+def create_task_once(
+    db: Session,
+    *,
+    user_id: int,
+    event: str,
+    step: int,
+    application_id: int | None = None,
+    entitlement_id: int | None = None,
+) -> bool:
+    """仅首次创建该档的小程序订阅消息任务，返回是否新建。由调用方提交。"""
+    if (application_id is None) == (entitlement_id is None):
+        raise ValueError("application_id 和 entitlement_id 必须且只能传一个")
+    return repo.insert_task_once(
+        db,
+        user_id=user_id,
+        event=event,
+        step=step,
+        application_id=application_id,
+        entitlement_id=entitlement_id,
+        scheduled_at=utcnow(),
+    )
+
+
 def send_due(db: Session, limit: int = 100) -> int:
     """发送到期任务，返回处理数量。目前只有 fake 发送：记录结果，不真正调用微信。"""
     now = utcnow()

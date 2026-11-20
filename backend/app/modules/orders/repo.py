@@ -75,6 +75,17 @@ def items_by_order(db: Session, order_ids: list[int]) -> dict[int, list[OrderIte
     return result
 
 
+def lock_expired_order_ids(db: Session, now: datetime, limit: int) -> list[int]:
+    stmt = (
+        select(Order.id)
+        .where(Order.status == "pending", Order.expire_at <= now)
+        .order_by(Order.expire_at, Order.id)
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    return list(db.scalars(stmt))
+
+
 def close_expired(db: Session, order_ids: list[int], now: datetime) -> None:
     """把仍为待支付且已过期的订单和它的待支付流水改为 closed（条件更新，避免覆盖刚支付成功的订单）。"""
     db.execute(
