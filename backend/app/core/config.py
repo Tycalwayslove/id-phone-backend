@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -51,6 +51,10 @@ class Settings(BaseSettings):
 
     # 抠图与美颜：fake 时直接用原图
     matting_mode: Literal["fake", "zheying"] = "fake"
+    matting_timeout_seconds: float = 5
+
+    # 定时任务 worker（python -m app.workers.runner）每轮间隔
+    worker_interval_seconds: int = 60
 
     # 回执服务商：fake 模式下提交后自动出回执，用来联调
     receipt_mode: Literal["fake", "real"] = "fake"
@@ -60,6 +64,29 @@ class Settings(BaseSettings):
     clipimg_api_base: str = "https://www.qwyun.top"
     clipimg_app_key: str = ""
     clipimg_app_secret: str = ""
+
+    # 生产环境默认禁止 fake 模式和默认密钥；临时演示环境可显式设为 true
+    allow_fake_in_prod: bool = False
+
+    @model_validator(mode="after")
+    def _check_prod(self) -> Settings:
+        if self.app_env != "prod" or self.allow_fake_in_prod:
+            return self
+        problems = [
+            name
+            for name, fake in (
+                ("WECHAT_MODE", self.wechat_mode == "fake"),
+                ("PAY_MODE", self.pay_mode == "fake"),
+                ("RECEIPT_MODE", self.receipt_mode == "fake"),
+                ("SECRET_KEY", self.secret_key.startswith("dev-only-")),
+            )
+            if fake
+        ]
+        if problems:
+            raise ValueError(
+                f"生产环境不能使用 fake/默认配置：{', '.join(problems)}（如确需演示，设 ALLOW_FAKE_IN_PROD=true）"
+            )
+        return self
 
     @property
     def is_prod(self) -> bool:
