@@ -568,19 +568,20 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[0-9]{6}$"
+                  "pattern": "^(?:[0-9]{6}|national)$"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "6 位省或市行政区划码。选市返回全国通用、该省和该市规格。选省返回全国通用和该省规格。不传返回全部地区。",
+              "description": "6 位省或市行政区划码，或 national（只返回全国通用规格）。选市返回全国通用、该省和该市规格。选省返回全国通用和该省规格。不传返回全部地区。",
               "examples": [
-                "440100"
+                "440100",
+                "national"
               ],
               "title": "Region Code"
             },
-            "description": "6 位省或市行政区划码。选市返回全国通用、该省和该市规格。选省返回全国通用和该省规格。不传返回全部地区。"
+            "description": "6 位省或市行政区划码，或 national（只返回全国通用规格）。选市返回全国通用、该省和该市规格。选省返回全国通用和该省规格。不传返回全部地区。"
           },
           {
             "name": "cursor",
@@ -14418,6 +14419,15 @@
               32
             ]
           },
+          "supports_receipt": {
+            "type": "boolean",
+            "title": "Supports Receipt",
+            "description": "当前是否能办理该规格的官方回执；须同时有启用的服务商、规格映射和路由规则。",
+            "examples": [
+              true,
+              false
+            ]
+          },
           "dpi": {
             "type": "integer",
             "title": "Dpi",
@@ -14486,14 +14496,6 @@
             "title": "Form Schema",
             "description": "办理回执时要用户填写的字段列表；不支持回执的规格通常为空列表"
           },
-          "supports_receipt": {
-            "type": "boolean",
-            "title": "Supports Receipt",
-            "description": "当前是否能办理该规格的官方回执（有启用的服务商通道）；false 时不要展示办理入口",
-            "examples": [
-              true
-            ]
-          },
           "official_valid_days": {
             "anyOf": [
               {
@@ -14534,11 +14536,11 @@
           "cert_type",
           "width_px",
           "height_px",
+          "supports_receipt",
           "dpi",
           "bg_colors",
           "beauty_max",
           "form_schema",
-          "supports_receipt",
           "region_name"
         ],
         "title": "SpecDetail",
@@ -14681,6 +14683,15 @@
               32
             ]
           },
+          "supports_receipt": {
+            "type": "boolean",
+            "title": "Supports Receipt",
+            "description": "当前是否能办理该规格的官方回执；须同时有启用的服务商、规格映射和路由规则。",
+            "examples": [
+              true,
+              false
+            ]
+          },
           "region_name": {
             "anyOf": [
               {
@@ -14706,6 +14717,7 @@
           "cert_type",
           "width_px",
           "height_px",
+          "supports_receipt",
           "region_name"
         ],
         "title": "SpecOut",

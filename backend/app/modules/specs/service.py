@@ -20,6 +20,7 @@ from app.modules.specs.schemas import (
     ProviderSyncItem,
     ProviderSyncResult,
     SpecDetail,
+    SpecFields,
     SpecOut,
     SpecPage,
     SpecRegionCity,
@@ -63,7 +64,11 @@ def list_specs(
     page: PageParams,
     region_code: str | None = None,
 ) -> SpecPage:
-    region_codes = {region_code, province_of(region_code) or region_code} if region_code else set()
+    region_codes = None
+    if region_code == "national":
+        region_codes = set()
+    elif region_code:
+        region_codes = {region_code, province_of(region_code) or region_code}
     rows = repo.list_active(
         db,
         category=category,
@@ -73,7 +78,15 @@ def list_specs(
         limit=page.fetch_limit,
     )
     rows, next_cursor = page.slice(rows, cursor_of=lambda r: {"s": r.sort, "i": r.id})
-    return SpecPage(items=[SpecOut.model_validate(r) for r in rows], next_cursor=next_cursor)
+    receipt_ids = repo.receipt_spec_ids(db, [spec.id for spec in rows])
+    return SpecPage(
+        items=[SpecOut(**_spec_fields(spec), supports_receipt=spec.id in receipt_ids) for spec in rows],
+        next_cursor=next_cursor,
+    )
+
+
+def _spec_fields(spec: Spec) -> dict:
+    return SpecFields.model_validate(spec).model_dump(exclude_computed_fields=True)
 
 
 def list_spec_regions(db: Session) -> list[SpecRegionProvince]:
@@ -103,14 +116,14 @@ def list_spec_regions(db: Session) -> list[SpecRegionProvince]:
 def get_spec_detail(db: Session, code: str) -> SpecDetail:
     spec = get_active_spec(db, code)
     return SpecDetail(
-        **SpecOut.model_validate(spec).model_dump(exclude_computed_fields=True),
+        **_spec_fields(spec),
         dpi=spec.dpi,
         bg_colors=spec.bg_colors,
         file_size_min_kb=spec.file_size_min_kb,
         file_size_max_kb=spec.file_size_max_kb,
         beauty_max=spec.beauty_max,
         form_schema=spec.form_schema,
-        supports_receipt=repo.supports_receipt(db, spec.id),
+        supports_receipt=spec.id in repo.receipt_spec_ids(db, [spec.id]),
         official_valid_days=spec.official_valid_days,
     )
 

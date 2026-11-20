@@ -41,9 +41,12 @@ def list_specs(
     region_code: Annotated[
         str | None,
         Query(
-            pattern=r"^[0-9]{6}$",
-            description="6 位省或市行政区划码。选市返回全国通用、该省和该市规格。选省返回全国通用和该省规格。不传返回全部地区。",
-            examples=["440100"],
+            pattern=r"^(?:[0-9]{6}|national)$",
+            description=(
+                "6 位省或市行政区划码，或 national（只返回全国通用规格）。"
+                "选市返回全国通用、该省和该市规格。选省返回全国通用和该省规格。不传返回全部地区。"
+            ),
+            examples=["440100", "national"],
         ),
     ] = None,
 ):
