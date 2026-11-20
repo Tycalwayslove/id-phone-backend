@@ -19,6 +19,7 @@ from app.models import (
 )
 
 POLLABLE_STATUSES = ("submitted", "unknown", "processing")
+REFUND_CANCELLABLE_STATUSES = ("pending", "processing", "rejected")
 
 
 # ---------- C 端（带用户） ----------
@@ -31,8 +32,22 @@ def get_application(
         ReceiptApplication.user_id == user_id, ReceiptApplication.app_no == app_no
     )
     if for_update:
-        stmt = stmt.with_for_update()
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
     return db.scalar(stmt)
+
+
+def lock_refundable_applications(db: Session, entitlement_ids: set[int]) -> list[ReceiptApplication]:
+    stmt = (
+        select(ReceiptApplication)
+        .where(
+            ReceiptApplication.entitlement_id.in_(entitlement_ids),
+            ReceiptApplication.status.in_(REFUND_CANCELLABLE_STATUSES),
+        )
+        .order_by(ReceiptApplication.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return list(db.scalars(stmt))
 
 
 def list_applications(
@@ -50,7 +65,7 @@ def list_applications(
 def get_application_by_id(db: Session, app_id: int, *, for_update: bool = False) -> ReceiptApplication | None:
     stmt = select(ReceiptApplication).where(ReceiptApplication.id == app_id)
     if for_update:
-        stmt = stmt.with_for_update()
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
     return db.scalar(stmt)
 
 
@@ -129,10 +144,12 @@ def due_attempt_ids(db: Session, now: datetime, limit: int) -> list[int]:
     return list(
         db.scalars(
             select(ReceiptAttempt.id)
+            .join(ReceiptApplication, ReceiptApplication.id == ReceiptAttempt.application_id)
             .where(
                 ReceiptAttempt.is_current.is_(True),
                 ReceiptAttempt.status.in_(POLLABLE_STATUSES),
                 ReceiptAttempt.next_poll_at <= now,
+                ReceiptApplication.status.in_(("pending", "processing")),
             )
             .order_by(ReceiptAttempt.next_poll_at)
             .limit(limit)

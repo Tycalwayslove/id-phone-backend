@@ -130,6 +130,28 @@ def test_photo_access_scoped_to_user(client, db):
     assert service.photo_access(db, bob, p.id).active is False
 
 
+def test_photo_access_many_combines_coverage_and_ignores_inactive_and_foreign_grants(client, db):
+    plans = make_standard_plans(db)
+    _, uid = _user(client, db)
+    _, other_uid = _user(client, db, "dev:bob")
+    p1, p2, p3 = (make_photo(db, uid) for _ in range(3))
+    global_plan = make_plan(db, "short_global", 100, {"storage_days": 7, "spec_change": 1})
+    shared = grant_plan(db, uid, global_plan)
+    scoped = grant_plan(db, uid, plans["single_19_9"], photo_id=p1.id)
+    revoked = grant_plan(db, uid, plans["photo_year_39_9"], photo_id=p2.id)
+    revoked.status = "revoked"
+    grant_plan(db, uid, plans["photo_year_39_9"], photo_id=p3.id, paid_at=utcnow() - timedelta(days=400))
+    grant_plan(db, other_uid, plans["unlimited_99"])
+    db.flush()
+
+    assert service.photo_access_many(db, uid, []) == {}
+    assert service.photo_access_many(db, uid, [p1.id, p2.id, p3.id, p1.id]) == {
+        p1.id: service.PhotoAccess(True, scoped.ends_at, True),
+        p2.id: service.PhotoAccess(True, shared.ends_at, True),
+        p3.id: service.PhotoAccess(True, shared.ends_at, True),
+    }
+
+
 def test_pick_for_receipt(client, db):
     plans = make_standard_plans(db)
     _, uid = _user(client, db)

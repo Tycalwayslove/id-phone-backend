@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any
 
+from psycopg.errors import UniqueViolation
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -266,7 +267,7 @@ def _user_outs(db: Session, users: list[User]) -> list[dict]:
 
 
 def list_users(
-    db: Session, *, user_id: int | None, phone: str | None, status: str | None, page: PageParams
+    db: Session, *, user_id: int | None, status: str | None, page: PageParams, phone: str | None = None
 ) -> AdminUserPage:
     phone_hash = security.keyed_hash(phone.strip(), "phone") if phone else None
     rows = repo.list_users(
@@ -384,31 +385,32 @@ def get_order(db: Session, order_no: str) -> AdminOrderDetail:
 def refund_order(
     db: Session, admin: CurrentAdmin, order_no: str, body: AdminRefundIn
 ) -> AdminRefundResultOut:
-    order = repo.get_order_by_no(db, order_no)
-    if order is None:
-        raise AppError(ErrorCode.ORDER_NOT_FOUND)
-    before = {"status": order.status, "refunded_fen": order.refunded_fen}
-    order_id = order.id
     try:
-        refund = order_service.refund_order(
-            db, order_no=order_no, amount_fen=body.amount_fen, reason=body.reason, operator=admin.username
-        )
-        db.refresh(order)  # refund_order 里是锁行重读，这里取最新值
-        _audit(
+        result = order_service.refund_order(
             db,
-            admin.id,
-            "refund.create",
-            "order",
-            order_id,
-            before,
-            {
-                "status": order.status,
-                "refunded_fen": order.refunded_fen,
-                "out_refund_no": refund.out_refund_no,
-                "refund_status": refund.status,
-                "amount_fen": refund.amount_fen,
-            },
+            order_no=order_no,
+            request_id=body.request_id,
+            amount_fen=body.amount_fen,
+            reason=body.reason,
+            operator=admin.username,
         )
+        refund, order = result.refund, result.order
+        if result.before is not None:
+            _audit(
+                db,
+                admin.id,
+                "refund.create",
+                "order",
+                order.id,
+                result.before,
+                {
+                    "status": order.status,
+                    "refunded_fen": order.refunded_fen,
+                    "out_refund_no": refund.out_refund_no,
+                    "refund_status": refund.status,
+                    "amount_fen": refund.amount_fen,
+                },
+            )
         db.commit()
     except Exception:
         db.rollback()
@@ -506,10 +508,10 @@ def cancel_application(db: Session, admin: CurrentAdmin, app_no: str) -> AdminAp
     if app is None:
         raise AppError(ErrorCode.APPLICATION_NOT_FOUND)
     before = {"status": app.status}
-    # 先把审计加进会话：receipts.cancel_application 内部会 commit，审计随同一次提交落库
     _audit(db, admin.id, "application.cancel", "receipt_application", app.id, before, {"status": "cancelled"})
     try:
         app = receipt_service.cancel_application(db, user_id=app.user_id, app_no=app_no)
+        db.commit()
     except Exception:
         db.rollback()
         raise
@@ -574,7 +576,7 @@ def create_plan(db: Session, admin: CurrentAdmin, body: AdminPlanCreateIn) -> Ad
     _check_benefits(body.benefits)
     _check_window(body.sale_starts_at, body.sale_ends_at)
     if repo.get_plan_by_code(db, body.code) is not None:
-        raise AppError(ErrorCode.VALIDATION_ERROR, "套餐编码已存在")
+        raise AppError(ErrorCode.CONFLICT)
     plan = Plan(
         code=body.code,
         name=body.name,
@@ -590,7 +592,9 @@ def create_plan(db: Session, admin: CurrentAdmin, body: AdminPlanCreateIn) -> Ad
         db.flush()
     except IntegrityError as e:
         db.rollback()
-        raise AppError(ErrorCode.VALIDATION_ERROR, "套餐编码已存在") from e
+        if isinstance(e.orig, UniqueViolation) and e.orig.diag.constraint_name == "uq_plans_code":
+            raise AppError(ErrorCode.CONFLICT) from e
+        raise
     db.add_all(PlanBenefit(plan_id=plan.id, benefit_type=k, int_value=v) for k, v in body.benefits.items())
     db.flush()
     db.refresh(plan)
@@ -697,7 +701,7 @@ def list_specs(db: Session, page: PageParams) -> AdminSpecPage:
 def create_spec(db: Session, admin: CurrentAdmin, body: AdminSpecCreateIn) -> AdminSpecOut:
     _check_file_size(body.file_size_min_kb, body.file_size_max_kb)
     if repo.get_spec_by_code(db, body.code) is not None:
-        raise AppError(ErrorCode.VALIDATION_ERROR, "规格编码已存在")
+        raise AppError(ErrorCode.CONFLICT)
     parent = None
     if body.parent_code:
         parent = repo.get_spec_by_code(db, body.parent_code)
@@ -710,7 +714,9 @@ def create_spec(db: Session, admin: CurrentAdmin, body: AdminSpecCreateIn) -> Ad
         db.flush()
     except IntegrityError as e:
         db.rollback()
-        raise AppError(ErrorCode.VALIDATION_ERROR, "规格编码已存在") from e
+        if isinstance(e.orig, UniqueViolation) and e.orig.diag.constraint_name == "uq_specs_code":
+            raise AppError(ErrorCode.CONFLICT) from e
+        raise
     db.refresh(spec)
     _audit(
         db,

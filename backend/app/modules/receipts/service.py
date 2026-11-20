@@ -304,7 +304,7 @@ def _resubmit(db: Session, user_id: int, app_no: str, payload: ResubmitRequest) 
     ent = db.get(Entitlement, app.entitlement_id)
     if app.resubmit_count >= ent_service.resubmit_limit(ent):
         raise AppError(ErrorCode.RESUBMIT_LIMIT_REACHED)
-    if ent.ends_at <= utcnow():
+    if ent.status != "active" or ent.ends_at <= utcnow():
         raise AppError(ErrorCode.ENTITLEMENT_EXPIRED)
     if payload.photo_id is not None:
         photo_service.get_photo_for_user(db, user_id, payload.photo_id)
@@ -337,19 +337,30 @@ def resubmit_application(
     )
 
 
-def cancel_application(db: Session, *, user_id: int, app_no: str) -> ReceiptApplication:
-    """跨模块约定：pending/rejected 的申请可取消，释放额度。"""
+def cancel_application(
+    db: Session, *, user_id: int, app_no: str, for_refund: bool = False
+) -> ReceiptApplication:
+    """取消申请并释放额度。全额退款还可取消 processing 的申请。不 commit。"""
     app = _get_owned(db, user_id, app_no, for_update=True)
-    if app.status not in ("pending", "rejected"):
+    allowed = repo.REFUND_CANCELLABLE_STATUSES if for_refund else ("pending", "rejected")
+    if app.status not in allowed:
         raise AppError(ErrorCode.APPLICATION_NOT_RESUBMITTABLE)
     ent_service.release_quota(db, app.entitlement_id, app.id)  # 已释放过的重复调用无副作用
     app.status = "cancelled"
-    db.commit()
+    db.flush()
     return app
 
 
+def cancel_for_refund(db: Session, entitlement_ids: set[int]) -> None:
+    """取消撤销权益下尚未办结的申请。不 commit。"""
+    for app in repo.lock_refundable_applications(db, entitlement_ids):
+        cancel_application(db, user_id=app.user_id, app_no=app.app_no, for_refund=True)
+
+
 def cancel_application_out(db: Session, *, user_id: int, app_no: str) -> ApplicationOut:
-    return _build_out(db, cancel_application(db, user_id=user_id, app_no=app_no))
+    out = _build_out(db, cancel_application(db, user_id=user_id, app_no=app_no))
+    db.commit()
+    return out
 
 
 # ---------- 应用服务商结果 ----------

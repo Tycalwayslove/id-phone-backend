@@ -1,15 +1,18 @@
 import io
+from datetime import timedelta
 from urllib.parse import urlparse
 
 import pytest
 from PIL import Image
-from sqlalchemy import select
+from sqlalchemy import event, select
 
+from app.core.utils import utcnow
 from app.integrations.storage import get_storage
 from app.models import File, Photo
 from app.modules.photos import service as photo_service
 from tests.conftest import login
-from tests.factories import make_spec
+from tests.factories import make_spec, make_standard_plans
+from tests.orders.helpers import grant_plan
 from tests.photos.helpers import jpeg_bytes, make_photo, set_access, upload
 
 
@@ -84,6 +87,32 @@ def test_list_pagination_newest_first(client, alice):
     p2 = client.get("/api/v1/photos", params={"limit": 2, "cursor": p1["next_cursor"]}, headers=alice).json()
     assert [i["id"] for i in p2["items"]] == [ids[0]]
     assert p2["next_cursor"] is None
+
+
+def test_photo_list_loads_access_in_one_query(client, db, alice):
+    plans = make_standard_plans(db)
+    photo_ids = [make_photo(client, alice) for _ in range(3)]
+    user_id = db.get(Photo, photo_ids[0]).user_id
+    grant_plan(db, user_id, plans["photo_year_39_9"], photo_id=photo_ids[0])
+    grant_plan(db, user_id, plans["single_19_9"], photo_id=photo_ids[1])
+    queries = []
+
+    def capture(_conn, _cursor, statement, _parameters, _context, _executemany):
+        if "FROM entitlements" in statement:
+            queries.append(statement)
+
+    connection = db.connection()
+    event.listen(connection, "before_cursor_execute", capture)
+    try:
+        response = client.get("/api/v1/photos", headers=alice)
+    finally:
+        event.remove(connection, "before_cursor_execute", capture)
+
+    assert response.status_code == 200, response.text
+    assert len(queries) == 1
+    access = {item["id"]: item["access"] for item in response.json()["items"]}
+    assert [access[pid]["active"] for pid in photo_ids] == [True, True, False]
+    assert [access[pid]["spec_change"] for pid in photo_ids] == [True, False, False]
 
 
 def test_other_users_cannot_access(client, alice, bob):
@@ -236,3 +265,32 @@ def test_purge_all_for_user(client, db, alice, bob):
     # 别人的不受影响
     assert len(client.get("/api/v1/photos", headers=bob).json()["items"]) == 1
     assert uid != alice_uid
+
+
+def test_purge_orphan_uploads_only_removes_old_unreferenced_originals(client, db, alice):
+    photo = db.get(Photo, make_photo(client, alice))
+    attached = db.get(File, photo.original_file_id)
+    matting = db.get(File, upload(client, alice).json()["file_id"])
+    photo.matting_file_id = matting.id
+    orphan = db.get(File, upload(client, alice).json()["file_id"])
+    fresh = db.get(File, upload(client, alice).json()["file_id"])
+    boundary = db.get(File, upload(client, alice).json()["file_id"])
+    receipt = photo_service.save_file(
+        db, user_id=photo.user_id, kind="receipt", data=b"receipt", mime="image/png", ext="png", owner="a1"
+    )
+    cutoff = utcnow() - timedelta(hours=24)
+    for file in (attached, matting, orphan, receipt):
+        file.created_at = cutoff - timedelta(seconds=1)
+    boundary.created_at = cutoff
+    db.flush()
+
+    assert photo_service.purge_orphan_uploads(db, cutoff) == 1
+    assert orphan.status == "purged" and orphan.purged_at is not None
+    with pytest.raises(FileNotFoundError):
+        get_storage().get(orphan.storage_key)
+    for file in (attached, matting, fresh, boundary, receipt):
+        assert file.status == "active" and file.purged_at is None
+        assert get_storage().get(file.storage_key)
+    assert photo_service.purge_orphan_uploads(db, cutoff) == 0
+    r = client.post("/api/v1/photos", headers=alice, json={"file_id": orphan.id, "source": "upload"})
+    assert r.json()["code"] == "UPLOAD_NOT_FOUND"

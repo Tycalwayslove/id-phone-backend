@@ -57,10 +57,10 @@ def grant_for_order_item(
     photo_id: int | None
     if benefits.get("attach_to_parent") == 1:
         parent_id = (item.snapshot or {}).get("parent_entitlement_id")
-        parent = repo.get_for_user(db, user_id, int(parent_id)) if parent_id else None
+        parent = repo.get_for_user(db, user_id, int(parent_id), for_update=True) if parent_id else None
         if parent is None:
             raise AppError(ErrorCode.ENTITLEMENT_NOT_FOUND)
-        if parent.ends_at <= paid_at:
+        if parent.status != "active" or parent.ends_at <= paid_at:
             # TODO: 付款时主权益已到期，需要人工或自动退款
             raise AppError(ErrorCode.ENTITLEMENT_EXPIRED)
         ends_at, photo_id = parent.ends_at, parent.photo_id
@@ -106,23 +106,59 @@ def require_active_entitlement(db: Session, user_id: int, entitlement_id: int) -
     return ent
 
 
+def revoke_for_order(db: Session, order_id: int) -> set[int]:
+    """撤销该订单的权益及各级附属加购权益，返回受影响的权益 ID。不 commit。"""
+    revoked: set[int] = set()
+    rows = repo.lock_order_entitlements(db, order_id)
+    while rows:
+        current_ids = {ent.id for ent in rows} - revoked
+        if not current_ids:
+            break
+        revoked.update(current_ids)
+        # 发放加购也锁主权益。按层查询能看到拿到主权益锁之前已提交的加购。
+        rows = repo.lock_attached_entitlements(db, current_ids)
+    if revoked:
+        db.execute(update(Entitlement).where(Entitlement.id.in_(revoked)).values(status="revoked"))
+    return revoked
+
+
 # ---------- 查询 ----------
 
 
 def photo_access(db: Session, user_id: int, photo_id: int) -> PhotoAccess:
-    ents = repo.active_covering_photo(db, user_id, photo_id, utcnow())
-    if not ents:
-        return PhotoAccess(active=False, access_until=None, spec_change=False)
-    return PhotoAccess(
-        active=True,
-        access_until=max(e.ends_at for e in ents),
-        spec_change=any(e.benefits_snapshot.get("spec_change") == 1 for e in ents),
-    )
+    return photo_access_many(db, user_id, [photo_id])[photo_id]
+
+
+def photo_access_many(db: Session, user_id: int, photo_ids: list[int]) -> dict[int, PhotoAccess]:
+    """一次查询取得指定照片的访问权限，全照片权益和单张权益合并。"""
+    if not photo_ids:
+        return {}
+    no_access = PhotoAccess(active=False, access_until=None, spec_change=False)
+    by_scope: dict[int | None, PhotoAccess] = {}
+    for ent in repo.active_covering_photos(db, user_id, photo_ids, utcnow()):
+        previous = by_scope.get(ent.photo_id, no_access)
+        by_scope[ent.photo_id] = PhotoAccess(
+            active=True,
+            access_until=max(ent.ends_at, previous.access_until or ent.ends_at),
+            spec_change=previous.spec_change or ent.benefits_snapshot.get("spec_change") == 1,
+        )
+
+    shared = by_scope.get(None, no_access)
+    result = dict.fromkeys(photo_ids, shared)
+    for photo_id in result:
+        scoped = by_scope.get(photo_id)
+        if scoped is not None:
+            result[photo_id] = PhotoAccess(
+                active=True,
+                access_until=max(filter(None, (scoped.access_until, shared.access_until))),
+                spec_change=scoped.spec_change or shared.spec_change,
+            )
+    return result
 
 
 def pick_for_receipt(db: Session, user_id: int, photo_id: int) -> Entitlement:
     """选覆盖该照片且回执额度有剩余的权益，到期早的优先。"""
-    ents = repo.active_covering_photo(db, user_id, photo_id, utcnow())
+    ents = repo.active_covering_photos(db, user_id, [photo_id], utcnow(), for_update=True)
     if not ents:
         raise AppError(ErrorCode.ENTITLEMENT_EXPIRED)
     quotas = repo.quotas_by_entitlement(db, [e.id for e in ents])

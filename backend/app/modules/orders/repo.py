@@ -5,10 +5,11 @@
 
 from datetime import datetime
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.models import Order, OrderItem, Payment, Plan, PlanBenefit, UserIdentity
+from app.models import Order, OrderItem, Payment, Plan, PlanBenefit, Refund, UserIdentity
 
 # ---------- 套餐 ----------
 
@@ -141,3 +142,50 @@ def lock_payment(db: Session, payment_id: int) -> Payment:
         .with_for_update()
         .execution_options(populate_existing=True)
     ).scalar_one()
+
+
+# ---------- 退款 ----------
+
+
+def order_id_by_no(db: Session, order_no: str) -> int | None:
+    return db.scalar(select(Order.id).where(Order.order_no == order_no))
+
+
+def successful_payment_id(db: Session, order_id: int) -> int | None:
+    return db.scalar(
+        select(Payment.id)
+        .where(Payment.order_id == order_id, Payment.status == "success")
+        .order_by(Payment.id.desc())
+        .limit(1)
+    )
+
+
+def pending_refund_fen(db: Session, order_id: int) -> int:
+    return db.scalar(
+        select(func.coalesce(func.sum(Refund.amount_fen), 0)).where(
+            Refund.order_id == order_id, Refund.status == "pending"
+        )
+    )
+
+
+def refund_by_no(db: Session, out_refund_no: str) -> Refund | None:
+    return db.scalar(select(Refund).where(Refund.out_refund_no == out_refund_no))
+
+
+def insert_refund(
+    db: Session, payment: Payment, *, out_refund_no: str, amount_fen: int, reason: str, operator: str
+) -> Refund | None:
+    stmt = (
+        insert(Refund)
+        .values(
+            payment_id=payment.id,
+            order_id=payment.order_id,
+            out_refund_no=out_refund_no,
+            amount_fen=amount_fen,
+            reason=reason,
+            operator=operator,
+        )
+        .on_conflict_do_nothing(index_elements=[Refund.out_refund_no])
+        .returning(Refund)
+    )
+    return db.scalar(stmt)

@@ -1,7 +1,10 @@
+from uuid import uuid4
+
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.integrations.payment import FakePay
 from app.main import app
 from app.models import Entitlement, ReceiptApplication
 from scripts.check_api_docs import find_problems
@@ -33,6 +36,10 @@ def _audit(client: TestClient, **params) -> list[dict]:
     r = client.get(f"{API}/audit-logs", params=params)
     assert r.status_code == 200, r.text
     return r.json()["items"]
+
+
+def _refund_body(amount_fen: int, reason: str = "用户重复购买") -> dict:
+    return {"request_id": str(uuid4()), "amount_fen": amount_fen, "reason": reason}
 
 
 # ---------- 登录与会话 ----------
@@ -164,7 +171,7 @@ def test_plan_validation(client: TestClient, db: Session):
     assert r.status_code == 422 and r.json()["code"] == "VALIDATION_ERROR"
     assert client.post(f"{API}/plans", json=NEW_PLAN, headers=csrf).status_code == 200
     r = client.post(f"{API}/plans", json=NEW_PLAN, headers=csrf)
-    assert r.json()["code"] == "VALIDATION_ERROR"
+    assert (r.status_code, r.json()) == (409, {"code": "CONFLICT", "message": "数据已存在"})
     r = client.patch(f"{API}/plans/nope", json={"name": "x"}, headers=csrf)
     assert r.status_code == 404 and r.json()["code"] == "NOT_FOUND"
 
@@ -193,9 +200,7 @@ def test_full_refund_revokes_entitlements_and_audits(client: TestClient, db: Ses
     assert entitlement_statuses(db, order_no) == ["active"]
     csrf = admin_login(client, db, "fin", "finance")
 
-    r = client.post(
-        f"{API}/orders/{order_no}/refunds", json={"amount_fen": 3990, "reason": "用户重复购买"}, headers=csrf
-    )
+    r = client.post(f"{API}/orders/{order_no}/refunds", json=_refund_body(3990), headers=csrf)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["status"] == "success" and body["operator"] == "fin"
@@ -214,9 +219,7 @@ def test_full_refund_revokes_entitlements_and_audits(client: TestClient, db: Ses
     assert logs[0]["admin_username"] == "fin"
 
     # 已全额退款，不能再退
-    r = client.post(
-        f"{API}/orders/{order_no}/refunds", json={"amount_fen": 1, "reason": "再退"}, headers=csrf
-    )
+    r = client.post(f"{API}/orders/{order_no}/refunds", json=_refund_body(1, "再退"), headers=csrf)
     assert r.status_code == 409 and r.json()["code"] == "REFUND_NOT_ALLOWED"
 
 
@@ -226,17 +229,104 @@ def test_partial_refunds_and_over_refund(client: TestClient, db: Session):
     csrf = admin_login(client, db, "fin", "finance")
     url = f"{API}/orders/{order_no}/refunds"
 
-    r = client.post(url, json={"amount_fen": 1000, "reason": "部分退款"}, headers=csrf)
+    r = client.post(url, json=_refund_body(1000, "部分退款"), headers=csrf)
     assert r.status_code == 200 and r.json()["order_status"] == "part_refunded"
     assert entitlement_statuses(db, order_no) == ["active"]  # 没退完，权益保留
 
-    r = client.post(url, json={"amount_fen": 3000, "reason": "超额"}, headers=csrf)  # 剩余 2990
+    r = client.post(url, json=_refund_body(3000, "超额"), headers=csrf)  # 剩余 2990
     assert r.status_code == 409 and r.json()["code"] == "REFUND_NOT_ALLOWED"
     assert client.get(f"{API}/orders/{order_no}").json()["refunded_fen"] == 1000
 
-    r = client.post(url, json={"amount_fen": 2990, "reason": "退完"}, headers=csrf)
+    r = client.post(url, json=_refund_body(2990, "退完"), headers=csrf)
     assert r.json()["order_status"] == "refunded"
     assert entitlement_statuses(db, order_no) == ["revoked"]
+
+
+def test_full_refund_cancels_open_applications_and_revokes_addons(client: TestClient, db: Session):
+    world = make_world(client, db)
+    main_order = client.get("/api/v1/orders", headers=world.headers).json()["items"][0]["order_no"]
+    main_app = create_app(client, world)
+
+    def buy_addon(parent_id: int) -> str:
+        r = client.post(
+            "/api/v1/orders",
+            headers=world.headers,
+            json={"plan_code": "addon_receipt_10", "parent_entitlement_id": parent_id},
+        )
+        assert r.status_code == 200, r.text
+        order_no = r.json()["order_no"]
+        paid = client.post(f"/api/v1/dev/orders/{order_no}/simulate-paid", headers=world.headers)
+        assert paid.status_code == 200, paid.text
+        return order_no
+
+    addon = buy_addon(main_app["entitlement_id"])
+    addon_app = create_app(client, world)
+    nested_addon = buy_addon(addon_app["entitlement_id"])
+    completed = create_app(client, world)
+    assert simulate(client, world.headers, main_app["app_no"], "rejected").json()["status"] == "rejected"
+    assert simulate(client, world.headers, completed["app_no"], "completed").json()["status"] == "completed"
+
+    csrf = admin_login(client, db, "fin", "finance")
+    refunded = client.post(f"{API}/orders/{main_order}/refunds", json=_refund_body(3990), headers=csrf)
+    assert refunded.status_code == 200, refunded.text
+    assert refunded.json()["order_status"] == "refunded"
+    for order_no in (main_order, addon, nested_addon):
+        assert entitlement_statuses(db, order_no) == ["revoked"]
+    for application in (main_app, addon_app):
+        assert get_application(db, application["app_no"]).status == "cancelled"
+        assert quota_used(db, application["entitlement_id"]) == 0
+    assert get_application(db, completed["app_no"]).status == "completed"
+    assert quota_used(db, completed["entitlement_id"]) == 1
+    late_result = simulate(client, world.headers, addon_app["app_no"], "completed")
+    assert late_result.json()["status"] == "cancelled"
+
+
+def test_refund_request_id_replays_full_refund_and_rejects_mismatches(client: TestClient, db: Session):
+    make_standard_plans(db)
+    _, order_no, _ = user_buys(client, db)
+    _, other_order, _ = user_buys(client, db, code="dev:bob")
+    csrf = admin_login(client, db, "fin", "finance")
+    body = _refund_body(3990)
+    url = f"{API}/orders/{order_no}/refunds"
+
+    first = client.post(url, json=body, headers=csrf)
+    assert first.status_code == 200, first.text
+    replay = client.post(url, json={**body, "reason": "重试"}, headers=csrf)
+    assert replay.json() == first.json()
+    assert first.json()["out_refund_no"] == f"RA{body['request_id'].replace('-', '')}"
+
+    for path, payload in (
+        (url, {**body, "amount_fen": 1000}),
+        (f"{API}/orders/{other_order}/refunds", body),
+    ):
+        conflict = client.post(path, json=payload, headers=csrf)
+        assert (conflict.status_code, conflict.json()["code"]) == (409, "IDEMPOTENCY_CONFLICT")
+    assert len(client.get(f"{API}/orders/{order_no}").json()["refunds"]) == 1
+    assert client.get(f"{API}/orders/{other_order}").json()["refunds"] == []
+    assert len(_audit(client, action="refund.create")) == 1
+
+
+def test_pending_refund_replays_without_resubmission_and_reserves_balance(client, db, monkeypatch):
+    make_standard_plans(db)
+    _, order_no, _ = user_buys(client, db)
+    csrf = admin_login(client, db, "fin", "finance")
+    submissions = []
+
+    def refund_pending(self, **kwargs):
+        submissions.append(kwargs["out_refund_no"])
+        return "pending"
+
+    monkeypatch.setattr(FakePay, "refund", refund_pending)
+    url = f"{API}/orders/{order_no}/refunds"
+    body = _refund_body(3000)
+    first = client.post(url, json=body, headers=csrf)
+    assert first.status_code == 200, first.text
+    assert first.json()["status"] == "pending" and first.json()["finished_at"] is None
+    assert first.json()["order_status"] == "paid" and first.json()["order_refunded_fen"] == 0
+    assert client.post(url, json=body, headers=csrf).json() == first.json()
+    assert client.post(url, json=_refund_body(1000), headers=csrf).json()["code"] == "REFUND_NOT_ALLOWED"
+    assert submissions == [first.json()["out_refund_no"]]
+    assert entitlement_statuses(db, order_no) == ["active"]
 
 
 def test_refund_rejected_for_unpaid_missing_and_invalid(client: TestClient, db: Session):
@@ -248,12 +338,15 @@ def test_refund_rejected_for_unpaid_missing_and_invalid(client: TestClient, db: 
     ).json()["order_no"]
     csrf = admin_login(client, db, "fin", "finance")
 
-    r = client.post(f"{API}/orders/{pending}/refunds", json={"amount_fen": 100, "reason": "x"}, headers=csrf)
+    r = client.post(f"{API}/orders/{pending}/refunds", json=_refund_body(100), headers=csrf)
     assert r.status_code == 409 and r.json()["code"] == "REFUND_NOT_ALLOWED"
-    r = client.post(f"{API}/orders/NOPE/refunds", json={"amount_fen": 100, "reason": "x"}, headers=csrf)
+    r = client.post(f"{API}/orders/NOPE/refunds", json=_refund_body(100), headers=csrf)
     assert r.status_code == 404 and r.json()["code"] == "ORDER_NOT_FOUND"
-    r = client.post(f"{API}/orders/{pending}/refunds", json={"amount_fen": 0, "reason": "x"}, headers=csrf)
+    r = client.post(f"{API}/orders/{pending}/refunds", json=_refund_body(0), headers=csrf)
     assert r.status_code == 422 and r.json()["code"] == "VALIDATION_ERROR"
+    for body in ({"amount_fen": 100, "reason": "x"}, {**_refund_body(100), "request_id": "invalid"}):
+        r = client.post(f"{API}/orders/{pending}/refunds", json=body, headers=csrf)
+        assert r.status_code == 422 and r.json()["errors"][0]["field"] == "body.request_id"
     assert _audit(client, action="refund.create") == []
 
 
@@ -261,7 +354,7 @@ def test_operator_cannot_refund(client: TestClient, db: Session):
     make_standard_plans(db)
     _, order_no, _ = user_buys(client, db)
     csrf = admin_login(client, db, "op", "operator")
-    r = client.post(f"{API}/orders/{order_no}/refunds", json={"amount_fen": 100, "reason": "x"}, headers=csrf)
+    r = client.post(f"{API}/orders/{order_no}/refunds", json=_refund_body(100), headers=csrf)
     assert r.status_code == 403 and r.json()["code"] == "PERMISSION_DENIED"
 
 
@@ -290,16 +383,19 @@ def test_orders_list_filters_and_pagination(client: TestClient, db: Session):
     assert client.get(f"{API}/orders/NOPE").json()["code"] == "ORDER_NOT_FOUND"
 
 
-def test_users_list_by_phone_masked(client: TestClient, db: Session):
+def test_users_search_by_phone_masked(client: TestClient, db: Session):
     make_standard_plans(db)
     uid, _, h = user_buys(client, db)
     r = client.post("/api/v1/me/phone", headers=h, json={"code": "phone:13800001234"})
     assert r.status_code == 200, r.text
     other = login(client, "dev:bob")
     assert other  # 另一个没有手机号的用户
-    admin_login(client, db, "op", "operator")
+    url = f"{API}/users/search"
+    assert client.post(url, json={}).status_code == 401
+    csrf = admin_login(client, db, "op", "operator")
+    assert client.post(url, json={}).status_code == 403
 
-    r = client.get(f"{API}/users", params={"phone": "13800001234"})
+    r = client.post(url, json={"phone": "13800001234", "status": "active", "user_id": uid}, headers=csrf)
     assert r.status_code == 200, r.text
     items = r.json()["items"]
     assert len(items) == 1 and items[0]["id"] == uid
@@ -308,7 +404,15 @@ def test_users_list_by_phone_masked(client: TestClient, db: Session):
     assert items[0]["identities"] == ["wx_mini"]
     assert items[0]["orders_count"] == 1 and items[0]["paid_fen_total"] == 3990
 
-    assert client.get(f"{API}/users", params={"phone": "13900009999"}).json()["items"] == []
+    assert client.post(url, json={"phone": "13900009999"}, headers=csrf).json()["items"] == []
+    assert (
+        client.post(url, json={"phone": "13800001234", "status": "disabled"}, headers=csrf).json()["items"]
+        == []
+    )
+    first = client.post(url, json={"limit": 1, "status": "active"}, headers=csrf).json()
+    assert len(first["items"]) == 1 and first["next_cursor"]
+    second = client.post(url, json={"cursor": first["next_cursor"], "limit": 1}, headers=csrf).json()
+    assert [u["id"] for u in second["items"]] == [uid] and second["next_cursor"] is None
     assert len(client.get(f"{API}/users", params={"user_id": uid}).json()["items"]) == 1
     assert len(client.get(f"{API}/users", params={"status": "active"}).json()["items"]) == 2
 
@@ -388,7 +492,8 @@ def test_specs_create_update_list(client: TestClient, db: Session):
 
     child = {**SPEC_BODY, "code": "adm_child", "parent_code": "adm_spec"}
     assert client.post(f"{API}/specs", json=child, headers=csrf).json()["parent_code"] == "adm_spec"
-    assert client.post(f"{API}/specs", json=SPEC_BODY, headers=csrf).json()["code"] == "VALIDATION_ERROR"
+    duplicate = client.post(f"{API}/specs", json=SPEC_BODY, headers=csrf)
+    assert (duplicate.status_code, duplicate.json()) == (409, {"code": "CONFLICT", "message": "数据已存在"})
     bad = {**SPEC_BODY, "code": "adm_bad", "bg_colors": ["white"]}
     assert client.post(f"{API}/specs", json=bad, headers=csrf).status_code == 422
 
@@ -450,4 +555,16 @@ def test_admin_api_docs_complete():
         if path.startswith("/api/v1/admin")
         for op in ops.values()
     ]
-    assert len(ids) == 20 and all(i.startswith("admin_") for i in ids)
+    assert len(ids) == 21 and all(i.startswith("admin_") for i in ids)
+    users_list = spec["paths"][f"{API}/users"]["get"]
+    assert "phone" not in {p["name"] for p in users_list["parameters"]}
+    users_search = spec["paths"][f"{API}/users/search"]["post"]
+    assert users_search["operationId"] == "admin_users_search"
+    assert "422" in users_search["responses"]
+    assert set(spec["components"]["schemas"]["AdminUserSearchIn"]["properties"]) == {
+        "phone",
+        "user_id",
+        "status",
+        "cursor",
+        "limit",
+    }
