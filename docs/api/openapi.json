@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "证件照与回执 API",
-    "description": "证件照制作、回执办理、权益和订单相关接口。\n\n- C 端接口需要登录的，请求头带 `Authorization: Bearer <token>`（登录接口返回）。\n- 后台接口使用登录后写入的 Cookie，修改类请求还要带 `X-CSRF-Token`。\n- 金额单位一律是分（字段名以 `_fen` 结尾）；时间是带时区的 ISO 8601。\n- 列表接口用游标翻页：第一页不传 cursor，之后传上一页的 next_cursor。\n- 出错时统一返回 `{\"code\": \"...\", \"message\": \"...\"}`，前端按 code 处理。\n\n## 错误码\n\n| 错误码 | HTTP 状态 | 默认提示 |\n|---|---|---|\n| VALIDATION_ERROR | 422 | 请求参数不正确 |\n| NOT_FOUND | 404 | 资源不存在 |\n| METHOD_NOT_ALLOWED | 405 | 不支持这种请求方式 |\n| RATE_LIMITED | 429 | 操作太频繁，请稍后再试 |\n| IDEMPOTENCY_CONFLICT | 409 | 同一个请求正在处理或参数不一致 |\n| INTERNAL_ERROR | 500 | 服务开小差了，请稍后再试 |\n| DB_UNAVAILABLE | 503 | 数据库暂时不可用，请稍后再试 |\n| AUTH_REQUIRED | 401 | 请先登录 |\n| AUTH_INVALID | 401 | 登录已失效，请重新登录 |\n| WECHAT_LOGIN_FAILED | 400 | 微信登录失败，请重试 |\n| ACCOUNT_DISABLED | 403 | 账号已被停用 |\n| PHONE_ALREADY_BOUND | 409 | 这个手机号已绑定其他账号，请联系客服 |\n| ADMIN_LOGIN_FAILED | 401 | 账号或密码错误 |\n| PERMISSION_DENIED | 403 | 没有这个操作的权限 |\n| SPEC_NOT_FOUND | 404 | 规格不存在 |\n| PHOTO_NOT_FOUND | 404 | 照片不存在 |\n| PHOTO_ACCESS_EXPIRED | 403 | 照片保管期已过，续费后可继续下载和换规格 |\n| PHOTO_NOT_READY | 409 | 照片还在处理中 |\n| UPLOAD_NOT_FOUND | 404 | 上传的文件不存在或已过期 |\n| UPLOAD_INVALID | 422 | 上传的文件格式或大小不符合要求 |\n| SPEC_CHANGE_NOT_ALLOWED | 403 | 当前权益不支持更换规格 |\n| PLAN_NOT_AVAILABLE | 409 | 这个套餐暂不可购买 |\n| ORDER_NOT_FOUND | 404 | 订单不存在 |\n| ORDER_NOT_PAYABLE | 409 | 订单当前不能支付 |\n| ORDER_NOT_CANCELLABLE | 409 | 订单当前不能取消 |\n| PAYMENT_SIGNATURE_INVALID | 401 | 支付通知签名不正确 |\n| REFUND_NOT_ALLOWED | 409 | 订单当前不能退款 |\n| ENTITLEMENT_NOT_FOUND | 404 | 权益不存在 |\n| ENTITLEMENT_EXPIRED | 403 | 权益已过期 |\n| QUOTA_EXHAUSTED | 409 | 回执次数已用完 |\n| ONE_PERSON_MISMATCH | 403 | 该权益仅限本人使用 |\n| RECEIPT_NOT_SUPPORTED | 409 | 这个规格暂不支持办理回执 |\n| APPLICATION_NOT_FOUND | 404 | 回执申请不存在 |\n| APPLICATION_NOT_RESUBMITTABLE | 409 | 当前状态不能重新提交 |\n| RESUBMIT_LIMIT_REACHED | 409 | 重新提交次数已用完 |\n| RECEIPT_NOT_READY | 409 | 回执还没有出来 |\n| PROVIDER_UNAVAILABLE | 503 | 回执通道暂时不可用，请稍后再试 |\n| CALLBACK_SIGNATURE_INVALID | 401 | 回调签名不正确 |\n",
+    "description": "证件照制作、回执办理、权益和订单相关接口。\n\n- C 端接口需要登录的，请求头带 `Authorization: Bearer <token>`（登录接口返回）。\n- 后台接口使用登录后写入的 Cookie，修改类请求还要带 `X-CSRF-Token`。\n- 金额单位一律是分（字段名以 `_fen` 结尾）；时间是带时区的 ISO 8601。\n- 列表接口用游标翻页：第一页不传 cursor，之后传上一页的 next_cursor。\n- 出错时统一返回 `{\"code\": \"...\", \"message\": \"...\"}`，前端按 code 处理。\n\n## 错误码\n\n| 错误码 | HTTP 状态 | 默认提示 |\n|---|---|---|\n| VALIDATION_ERROR | 422 | 请求参数不正确 |\n| NOT_FOUND | 404 | 资源不存在 |\n| CONFLICT | 409 | 数据已存在 |\n| METHOD_NOT_ALLOWED | 405 | 不支持这种请求方式 |\n| RATE_LIMITED | 429 | 操作太频繁，请稍后再试 |\n| IDEMPOTENCY_CONFLICT | 409 | 同一个请求正在处理或参数不一致 |\n| INTERNAL_ERROR | 500 | 服务开小差了，请稍后再试 |\n| DB_UNAVAILABLE | 503 | 数据库暂时不可用，请稍后再试 |\n| AUTH_REQUIRED | 401 | 请先登录 |\n| AUTH_INVALID | 401 | 登录已失效，请重新登录 |\n| WECHAT_LOGIN_FAILED | 400 | 微信登录失败，请重试 |\n| ACCOUNT_DISABLED | 403 | 账号已被停用 |\n| PHONE_ALREADY_BOUND | 409 | 这个手机号已绑定其他账号，请联系客服 |\n| ADMIN_LOGIN_FAILED | 401 | 账号或密码错误 |\n| PERMISSION_DENIED | 403 | 没有这个操作的权限 |\n| SPEC_NOT_FOUND | 404 | 规格不存在 |\n| PHOTO_NOT_FOUND | 404 | 照片不存在 |\n| PHOTO_ACCESS_EXPIRED | 403 | 照片保管期已过，续费后可继续下载和换规格 |\n| PHOTO_NOT_READY | 409 | 照片还在处理中 |\n| UPLOAD_NOT_FOUND | 404 | 上传的文件不存在或已过期 |\n| UPLOAD_INVALID | 422 | 上传的文件格式或大小不符合要求 |\n| SPEC_CHANGE_NOT_ALLOWED | 403 | 当前权益不支持更换规格 |\n| PLAN_NOT_AVAILABLE | 409 | 这个套餐暂不可购买 |\n| ORDER_NOT_FOUND | 404 | 订单不存在 |\n| ORDER_NOT_PAYABLE | 409 | 订单当前不能支付 |\n| ORDER_NOT_CANCELLABLE | 409 | 订单当前不能取消 |\n| PAYMENT_SIGNATURE_INVALID | 401 | 支付通知签名不正确 |\n| REFUND_NOT_ALLOWED | 409 | 订单当前不能退款 |\n| ENTITLEMENT_NOT_FOUND | 404 | 权益不存在 |\n| ENTITLEMENT_EXPIRED | 403 | 权益已过期 |\n| QUOTA_EXHAUSTED | 409 | 回执次数已用完 |\n| ONE_PERSON_MISMATCH | 403 | 该权益仅限本人使用 |\n| RECEIPT_NOT_SUPPORTED | 409 | 这个规格暂不支持办理回执 |\n| APPLICATION_NOT_FOUND | 404 | 回执申请不存在 |\n| APPLICATION_NOT_RESUBMITTABLE | 409 | 当前状态不能重新提交 |\n| RESUBMIT_LIMIT_REACHED | 409 | 重新提交次数已用完 |\n| RECEIPT_NOT_READY | 409 | 回执还没有出来 |\n| PROVIDER_UNAVAILABLE | 503 | 回执通道暂时不可用，请稍后再试 |\n| CALLBACK_SIGNATURE_INVALID | 401 | 回调签名不正确 |\n",
     "version": "0.2.0"
   },
   "paths": {
@@ -1629,7 +1629,7 @@
           "回调"
         ],
         "summary": "微信支付结果通知",
-        "description": "由微信支付服务器调用，前端不要调用。不需要登录，靠签名验证来源：签名不对返回 PAYMENT_SIGNATURE_INVALID。处理是幂等的，重复通知不会重复发放权益。处理成功返回 {code: SUCCESS, message: 成功}。联调（fake）模式下，签名放在 X-Fake-Signature 请求头，请求体是 JSON。",
+        "description": "由微信支付服务器调用，前端不要调用。不需要登录，靠签名验证来源：签名不对返回 PAYMENT_SIGNATURE_INVALID。处理是幂等的，重复通知不会重复发放权益。处理成功返回 {code: SUCCESS, message: 成功}。订单已关闭时自动发起全额退款，保留系统退款记录，不发放权益。联调（fake）模式下，签名放在 X-Fake-Signature 请求头，请求体是 JSON。",
         "operationId": "callbacks_wxpay",
         "responses": {
           "200": {
@@ -2887,7 +2887,7 @@
           "后台"
         ],
         "summary": "用户列表",
-        "description": "按注册时间从新到旧列出用户，游标分页，条件之间是“并且”。权限点 user:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。手机号只返回打码后的；按手机号查询时传明文完整手机号，服务端用哈希匹配。",
+        "description": "按注册时间从新到旧列出用户，游标分页，条件之间是“并且”。权限点 user:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。手机号只返回打码后的；按手机号筛选请调用 POST /api/v1/admin/users/search。",
         "operationId": "admin_users_list",
         "security": [
           {
@@ -2916,29 +2916,6 @@
               "title": "User Id"
             },
             "description": "按用户 ID 精确查找"
-          },
-          {
-            "name": "phone",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "minLength": 5,
-                  "maxLength": 20
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "按完整手机号精确查找（明文）",
-              "examples": [
-                "13800001234"
-              ],
-              "title": "Phone"
-            },
-            "description": "按完整手机号精确查找（明文）"
           },
           {
             "name": "status",
@@ -3016,6 +2993,93 @@
         "responses": {
           "200": {
             "description": "用户分页列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/users/search": {
+      "post": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "按条件查询用户",
+        "description": "按注册时间从新到旧查询用户，游标分页，条件之间是“并且”。权限点 user:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。请求头需带登录时返回的 X-CSRF-Token。按手机号筛选时在请求体传完整手机号，服务端用哈希匹配，响应仅返回打码后的手机号。",
+        "operationId": "admin_users_search",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminUserSearchIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "符合条件的用户分页列表",
             "content": {
               "application/json": {
                 "schema": {
@@ -3485,7 +3549,7 @@
           "后台"
         ],
         "summary": "订单退款",
-        "description": "对已支付或部分退款的订单发起退款，原路退回。权限点 refund:create。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。退款金额必须大于 0 且不超过可退余额（已付 - 已退 - 处理中的退款），否则 REFUND_NOT_ALLOWED。退完（全额）后订单变 refunded，并撤销该订单发放的权益（用户不能再下载、换规格）；未退完变 part_refunded，权益保留。没有幂等键，请不要重复点击；重复提交会按剩余可退余额再退一次。",
+        "description": "对已支付或部分退款的订单发起退款，原路退回。权限点 refund:create。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。退款金额必须大于 0 且不超过可退余额（已付 - 已退 - 处理中的退款），否则 REFUND_NOT_ALLOWED。渠道返回处理中时占用可退余额，等待渠道确认。退款成功后更新订单金额；全额退完时撤销订单及附属加购权益，并取消未办结的回执申请。重试时复用 request_id：相同订单和金额返回原退款记录，订单或金额不同返回 IDEMPOTENCY_CONFLICT。",
         "operationId": "admin_orders_refund",
         "security": [
           {
@@ -3588,7 +3652,7 @@
             }
           },
           "409": {
-            "description": "错误码：REFUND_NOT_ALLOWED（订单当前不能退款）",
+            "description": "错误码：REFUND_NOT_ALLOWED（订单当前不能退款）、IDEMPOTENCY_CONFLICT（同一个请求正在处理或参数不一致）",
             "content": {
               "application/json": {
                 "schema": {
@@ -4094,7 +4158,7 @@
           "后台"
         ],
         "summary": "创建套餐",
-        "description": "创建一个套餐及其权益。权限点 plan:write（仅 owner）。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。权益类型必须是系统支持的类型，套餐编码不能重复，否则返回 VALIDATION_ERROR。",
+        "description": "创建一个套餐及其权益。权限点 plan:write（仅 owner）。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。套餐编码重复返回 CONFLICT，权益类型必须是系统支持的类型。",
         "operationId": "admin_plans_create",
         "security": [
           {
@@ -4164,6 +4228,16 @@
           },
           "403": {
             "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：CONFLICT（数据已存在）",
             "content": {
               "application/json": {
                 "schema": {
@@ -4399,7 +4473,7 @@
           "后台"
         ],
         "summary": "创建规格",
-        "description": "创建一个证件照规格。权限点 spec:write。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。规格编码不能重复，父规格必须已存在，否则返回 VALIDATION_ERROR。",
+        "description": "创建一个证件照规格。权限点 spec:write。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。规格编码重复返回 CONFLICT，父规格必须已存在，否则返回 VALIDATION_ERROR。",
         "operationId": "admin_specs_create",
         "security": [
           {
@@ -4469,6 +4543,16 @@
           },
           "403": {
             "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "错误码：CONFLICT（数据已存在）",
             "content": {
               "application/json": {
                 "schema": {
@@ -6788,12 +6872,21 @@
       },
       "AdminRefundIn": {
         "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Request Id",
+            "description": "退款请求 UUID 字符串。前端每次打开退款弹窗时生成，重试同一笔退款时复用",
+            "examples": [
+              "99c238a2-4de7-4d98-a2df-b79f7538cb7e"
+            ]
+          },
           "amount_fen": {
             "type": "integer",
             "maximum": 100000000.0,
             "exclusiveMinimum": 0.0,
             "title": "Amount Fen",
-            "description": "退款金额，单位：分，必须大于 0 且不超过订单可退余额（已付 - 已退）",
+            "description": "退款金额，单位：分，必须大于 0 且不超过订单可退余额（已付 - 已退 - 处理中退款）",
             "examples": [
               3990
             ]
@@ -6803,7 +6896,7 @@
             "maxLength": 200,
             "minLength": 1,
             "title": "Reason",
-            "description": "退款原因，1～200 字，会记入退款记录和审计日志。不要填手机号、身份证号",
+            "description": "退款原因，1～200 字，会记入退款记录。不要填手机号、身份证号",
             "examples": [
               "用户重复购买"
             ]
@@ -6811,6 +6904,7 @@
         },
         "type": "object",
         "required": [
+          "request_id",
           "amount_fen",
           "reason"
         ],
@@ -8235,6 +8329,92 @@
         ],
         "title": "AdminUserPage",
         "description": "分页列表：用户摘要（后台列表用）。手机号只返回打码后的。"
+      },
+      "AdminUserSearchIn": {
+        "properties": {
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20,
+                "minLength": 5
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone",
+            "description": "按完整手机号精确查找。传明文手机号，服务端用哈希匹配；不传则不按手机号筛选",
+            "examples": [
+              "13800001234"
+            ]
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id",
+            "description": "按用户 ID 精确查找",
+            "examples": [
+              1024
+            ]
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "disabled",
+                  "cancelled"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status",
+            "description": "按账号状态筛选：active = 正常；disabled = 已停用；cancelled = 已注销",
+            "examples": [
+              "active"
+            ]
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor",
+            "description": "翻页游标。第一页不传，之后传上一页返回的 next_cursor",
+            "examples": [
+              "eyJpIjoxMDI0fQ"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "description": "每页条数，1～100，默认 20",
+            "default": 20,
+            "examples": [
+              20
+            ]
+          }
+        },
+        "type": "object",
+        "title": "AdminUserSearchIn",
+        "description": "后台用户查询条件和分页参数。"
       },
       "ApplicationOut": {
         "properties": {

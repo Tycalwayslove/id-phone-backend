@@ -20,6 +20,8 @@ function RefundDialog({ order, limit, onClose }: { order: Order; limit: number; 
   const cache = useQueryClient()
   const [confirmation, setConfirmation] = useState<Refund>()
   const inFlight = useRef(false)
+  // 每次打开退款弹窗生成一次，重试同一次退款时服务端按它去重
+  const [requestId] = useState(() => crypto.randomUUID())
   const mutation = useMutation({
     mutationKey: ['refund', order.order_no],
     mutationFn: (body: Refund) => adminApi.refund(order.order_no, body),
@@ -77,7 +79,7 @@ function RefundDialog({ order, limit, onClose }: { order: Order; limit: number; 
         form={form} layout="vertical" hidden={!!confirmation}
         onFinish={(values) => {
           const amount = yuanToFen(values.yuan ?? '')
-          if (amount !== null) setConfirmation({ amount_fen: amount, reason: values.reason.trim() })
+          if (amount !== null) setConfirmation({ request_id: requestId, amount_fen: amount, reason: values.reason.trim() })
         }}
       >
         <Alert className="detail-note" type="info" message={`当前可退 ${money(limit)}`} />
