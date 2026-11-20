@@ -509,7 +509,7 @@
           "规格"
         ],
         "summary": "规格列表",
-        "description": "分页列出可用的证件照规格，按后台设置的顺序排列。不需要登录。只返回已启用的规格；可按分类筛选、按名称关键字搜索。",
+        "description": "分页列出可用的证件照规格，按后台设置的顺序排列。不需要登录。只返回已上架的规格；可按分类、名称关键字和地区筛选。",
         "operationId": "specs_list",
         "parameters": [
           {
@@ -561,6 +561,28 @@
             "description": "按规格名称模糊搜索，不区分大小写；不传不过滤"
           },
           {
+            "name": "region_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9]{6}$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "6 位省或市行政区划码。选市返回全国通用、该省和该市规格。选省返回全国通用和该省规格。不传返回全部地区。",
+              "examples": [
+                "440100"
+              ],
+              "title": "Region Code"
+            },
+            "description": "6 位省或市行政区划码。选市返回全国通用、该省和该市规格。选省返回全国通用和该省规格。不传返回全部地区。"
+          },
+          {
             "name": "cursor",
             "in": "query",
             "required": false,
@@ -606,6 +628,42 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SpecPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/spec-regions": {
+      "get": {
+        "tags": [
+          "规格"
+        ],
+        "summary": "规格地区列表",
+        "description": "按省汇总有已上架地区专属规格的省、市及规格数，供选择地区。不需要登录。忽略全国通用规格和未收录的区划码，省和市各按区划码排序。",
+        "operationId": "spec_regions_list",
+        "responses": {
+          "200": {
+            "description": "有地区专属规格的省及其市列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SpecRegionProvince"
+                  },
+                  "type": "array",
+                  "title": "Response Spec Regions List"
                 }
               }
             }
@@ -5012,7 +5070,7 @@
           "后台"
         ],
         "summary": "规格列表",
-        "description": "列出全部规格（含已下架），按创建时间从新到旧，游标分页，条件之间是“并且”。权限点 spec:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。从服务商同步进来的新规格默认下架，可用 status=inactive 筛出来逐个审核后上架。",
+        "description": "列出全部规格（含已下架），按创建时间从新到旧，游标分页，条件之间是“并且”。权限点 spec:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。可按名称、状态、分类和精确的地区码筛选。",
         "operationId": "admin_specs_list",
         "security": [
           {
@@ -5092,6 +5150,29 @@
               "title": "Category"
             },
             "description": "按分类筛选：receipt = 回执类；normal = 普通证件照；exam = 考试报名照"
+          },
+          {
+            "name": "region_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 12
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按规格保存的地区码精确匹配",
+              "examples": [
+                "440100"
+              ],
+              "title": "Region Code"
+            },
+            "description": "按规格保存的地区码精确匹配"
           },
           {
             "name": "cursor",
@@ -5278,6 +5359,98 @@
           },
           "409": {
             "description": "错误码：CONFLICT（数据已存在）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/spec-regions/{region_code}": {
+      "get": {
+        "tags": [
+          "后台"
+        ],
+        "summary": "查询规格地区名",
+        "description": "查询省或市行政区划全称，供规格编辑时预览。权限点 spec:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。",
+        "operationId": "admin_spec_regions_detail",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "region_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{6}$",
+              "description": "6 位省或市行政区划码",
+              "examples": [
+                "440100"
+              ],
+              "title": "Region Code"
+            },
+            "description": "6 位省或市行政区划码"
+          },
+          {
+            "name": "x-csrf-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造",
+              "title": "X-Csrf-Token"
+            },
+            "description": "修改类请求必须带上登录时返回的 csrf_token，防止跨站请求伪造"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "区划全称查询结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSpecRegionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "错误码：VALIDATION_ERROR（请求参数不正确）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "错误码：AUTH_REQUIRED（请先登录）、AUTH_INVALID（登录已失效，请重新登录）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "错误码：PERMISSION_DENIED（没有这个操作的权限）",
             "content": {
               "application/json": {
                 "schema": {
@@ -5598,7 +5771,7 @@
           "后台"
         ],
         "summary": "同步服务商规格目录",
-        "description": "读取服务商的全量规格目录。权限点 provider:write（仅 owner）。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。已有规格仅更新制照参数。新规格默认下架，且服务商映射默认停用。目录移除的条目会停用映射。读取目录或详情失败时，同步不会写入规格变更。",
+        "description": "读取服务商的全量规格目录。权限点 provider:write（仅 owner）。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。修改类请求必须带请求头 X-CSRF-Token（登录时返回的 csrf_token），缺少或错误返回 PERMISSION_DENIED。操作会写入审计日志。按上游编号或名称和像素尺寸合并目录。默认上架新规格、启用新映射并创建默认路由规则。已有规格仅更新制照参数，目录移除的条目会停用映射。目录读取失败时不写入规格变更。",
         "operationId": "admin_providers_sync_specs",
         "security": [
           {
@@ -5619,6 +5792,21 @@
               "title": "Code"
             },
             "description": "服务商编码"
+          },
+          {
+            "name": "auto_publish",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "是否上架新规格、启用新映射并创建默认路由规则。回执类规格且服务商未标记为不可办理时启用规则。false 时新规格下架、新映射停用且不创建规则。",
+              "examples": [
+                true
+              ],
+              "default": true,
+              "title": "Auto Publish"
+            },
+            "description": "是否上架新规格、启用新映射并创建默认路由规则。回执类规格且服务商未标记为不可办理时启用规则。false 时新规格下架、新映射停用且不创建规则。"
           },
           {
             "name": "x-csrf-token",
@@ -11242,6 +11430,31 @@
         "title": "AdminSpecPage",
         "description": "分页列表：规格（含已下架）。"
       },
+      "AdminSpecRegionOut": {
+        "properties": {
+          "region_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Name",
+            "description": "区划全称。区划码未收录时为空。",
+            "examples": [
+              "广州市"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "region_name"
+        ],
+        "title": "AdminSpecRegionOut",
+        "description": "规格编辑时的区划码查询结果。"
+      },
       "AdminSpecUpdateIn": {
         "properties": {
           "name": {
@@ -13678,7 +13891,7 @@
             "title": "Spec Code",
             "description": "本地规格编码",
             "examples": [
-              "zy_713"
+              "cat_zheying_713"
             ]
           },
           "spec_name": {
@@ -13717,6 +13930,20 @@
               ],
               []
             ]
+          },
+          "unknown_receipt_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unknown Receipt Fields",
+            "description": "未预定义显示名的服务商回执字段标识，表单中使用原字段名。没有时为空列表。",
+            "examples": [
+              [
+                "text_unit"
+              ],
+              []
+            ]
           }
         },
         "type": "object",
@@ -13735,7 +13962,7 @@
           "created": {
             "type": "integer",
             "title": "Created",
-            "description": "新建的规格和映射数量",
+            "description": "新建的映射数量，含关联到已有规格的映射",
             "examples": [
               1
             ]
@@ -14281,6 +14508,22 @@
             "examples": [
               90
             ]
+          },
+          "region_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Name",
+            "description": "行政区划全称。全国通用或区划码未知时为空。",
+            "readOnly": true,
+            "examples": [
+              "广州市"
+            ]
           }
         },
         "type": "object",
@@ -14295,7 +14538,8 @@
           "bg_colors",
           "beauty_max",
           "form_schema",
-          "supports_receipt"
+          "supports_receipt",
+          "region_name"
         ],
         "title": "SpecDetail",
         "description": "规格详情：在摘要基础上增加底色、文件大小、美颜上限、回执表单等。"
@@ -14436,6 +14680,22 @@
             "examples": [
               32
             ]
+          },
+          "region_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Name",
+            "description": "行政区划全称。全国通用或区划码未知时为空。",
+            "readOnly": true,
+            "examples": [
+              "广州市"
+            ]
           }
         },
         "type": "object",
@@ -14445,7 +14705,8 @@
           "category",
           "cert_type",
           "width_px",
-          "height_px"
+          "height_px",
+          "region_name"
         ],
         "title": "SpecOut",
         "description": "规格摘要：列表里每一项。"
@@ -14479,6 +14740,99 @@
         ],
         "title": "SpecPage",
         "description": "分页列表：规格摘要：列表里每一项。"
+      },
+      "SpecRegionCity": {
+        "properties": {
+          "region_code": {
+            "type": "string",
+            "title": "Region Code",
+            "description": "地级行政区划码，供筛选规格使用",
+            "examples": [
+              "440100"
+            ]
+          },
+          "region_name": {
+            "type": "string",
+            "title": "Region Name",
+            "description": "地级行政区划全称",
+            "examples": [
+              "广州市"
+            ]
+          },
+          "spec_count": {
+            "type": "integer",
+            "title": "Spec Count",
+            "description": "仅适用于该市的已上架规格数",
+            "examples": [
+              12
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "region_code",
+          "region_name",
+          "spec_count"
+        ],
+        "title": "SpecRegionCity",
+        "description": "有已上架地区专属规格的地级市。"
+      },
+      "SpecRegionProvince": {
+        "properties": {
+          "region_code": {
+            "type": "string",
+            "title": "Region Code",
+            "description": "省级行政区划码，供筛选规格使用",
+            "examples": [
+              "440000"
+            ]
+          },
+          "region_name": {
+            "type": "string",
+            "title": "Region Name",
+            "description": "省级行政区划全称",
+            "examples": [
+              "广东省"
+            ]
+          },
+          "spec_count": {
+            "type": "integer",
+            "title": "Spec Count",
+            "description": "省级与所列市级已上架专属规格总数",
+            "examples": [
+              15
+            ]
+          },
+          "province_spec_count": {
+            "type": "integer",
+            "title": "Province Spec Count",
+            "description": "适用于全省的已上架专属规格数",
+            "examples": [
+              3
+            ]
+          },
+          "cities": {
+            "items": {
+              "$ref": "#/components/schemas/SpecRegionCity"
+            },
+            "type": "array",
+            "title": "Cities",
+            "description": "有已上架专属规格的市，按区划码排序。直辖市的专属规格计入省级，城市列表为空。",
+            "examples": [
+              []
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "region_code",
+          "region_name",
+          "spec_count",
+          "province_spec_count",
+          "cities"
+        ],
+        "title": "SpecRegionProvince",
+        "description": "一个省级行政区及其有专属规格的城市。"
       },
       "SubscriptionQuota": {
         "properties": {

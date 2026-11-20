@@ -249,6 +249,7 @@ def list_specs(
     keyword: str | None,
     status: str | None,
     category: str | None,
+    region_code: str | None,
     before_id: int | None,
     limit: int,
 ) -> list[Spec]:
@@ -260,6 +261,8 @@ def list_specs(
         stmt = stmt.where(Spec.status == status)
     if category:
         stmt = stmt.where(Spec.category == category)
+    if region_code:
+        stmt = stmt.where(Spec.region_code == region_code)
     if before_id is not None:
         stmt = stmt.where(Spec.id < before_id)
     return list(db.scalars(stmt.order_by(Spec.id.desc()).limit(limit)))

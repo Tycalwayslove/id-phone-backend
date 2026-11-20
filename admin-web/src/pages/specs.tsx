@@ -40,6 +40,14 @@ function specFields(values: SpecBody): Omit<SpecBody, 'code' | 'parent_code'> {
 function SpecEditor({ spec, onClose }: { spec: Spec | null; onClose: () => void }) {
   const [form] = Form.useForm<SpecBody>()
   const editor = useEditorSave('specs', onClose)
+  const regionCode: string = Form.useWatch('region_code', form)?.trim() ?? ''
+  const lookupRegion = /^[0-9]{6}$/.test(regionCode)
+  const region = useQuery({
+    queryKey: ['spec-region', regionCode],
+    queryFn: ({ signal }) => adminApi.specRegion(regionCode, signal),
+    enabled: lookupRegion,
+    staleTime: Infinity,
+  })
   const initial = spec ? { ...specFields(spec), code: spec.code, parent_code: spec.parent_code } : {
     category: 'normal', status: 'active', dpi: 300, beauty_max: 0, sort: 0,
     bg_colors: ['#FFFFFF'], form_schema: [],
@@ -89,7 +97,10 @@ function SpecEditor({ spec, onClose }: { spec: Spec | null; onClose: () => void 
           <Form.Item label="证件类型标识" name="cert_type" rules={[{ required: true, whitespace: true, max: 32, message: '请输入 1～32 字的证件类型标识' }]}>
             <Input maxLength={32} placeholder="例如 idcard" />
           </Form.Item>
-          <Form.Item label="地区码" name="region_code"><Input placeholder="不限地区留空" maxLength={12} /></Form.Item>
+          <Form.Item label="地区码" name="region_code" extra={lookupRegion && region.data
+            ? (region.data.region_name ?? '未识别该地区码') : undefined}>
+            <Input placeholder="不限地区留空" maxLength={12} />
+          </Form.Item>
           <IntegerField name="width_px" label="成品宽度（像素）" min={1} max={10_000} required />
           <IntegerField name="height_px" label="成品高度（像素）" min={1} max={10_000} required />
           <IntegerField name="width_mm" label="成品宽度（毫米）" min={1} max={1_000} />
@@ -208,8 +219,11 @@ export default function Specs() {
           {canWrite && <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditing(null)}>新建规格</Button>}
         </Space>
       )} />
-      <FilterForm<Filters> onFinish={(values) => search.apply({ ...values, keyword: values.keyword?.trim() || undefined })}>
+      <FilterForm<Filters> onFinish={(values) => search.apply({
+        ...values, keyword: values.keyword?.trim() || undefined, region_code: values.region_code?.trim() || undefined,
+      })}>
         <TextFilter name="keyword" label="名称或编码" maxLength={64} />
+        <TextFilter name="region_code" label="地区码" maxLength={12} />
         <Form.Item label="状态" name="status">
           <Select className="filter-select" allowClear options={enumOptions(specStatus)} placeholder="全部" />
         </Form.Item>
