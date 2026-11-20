@@ -1,3 +1,4 @@
+from cryptography.exceptions import InvalidTag
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -7,6 +8,21 @@ from app.integrations.wechat import get_wechat
 from app.models import User
 from app.modules.users import repo
 from app.modules.users.schemas import MeOut, UpdateMeRequest
+
+
+def is_active_user(db: Session, user_id: int) -> bool:
+    return repo.get_active_user(db, user_id) is not None
+
+
+def get_notification_phone(db: Session, user_id: int) -> str | None:
+    """为短信通知读取启用账户的已绑定手机号。"""
+    user = repo.get_active_user(db, user_id)
+    if user is None or not user.phone_enc:
+        return None
+    try:
+        return security.decrypt(user.phone_enc, "phone")
+    except InvalidTag, ValueError:
+        return None
 
 
 def to_me_out(user: User) -> MeOut:

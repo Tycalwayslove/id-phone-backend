@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, Json, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,7 +10,9 @@ class Settings(BaseSettings):
     外部服务（微信、支付、存储、回执服务商）都有 fake 模式：没有正式账号时也能把整条链路跑通。
     """
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore", hide_input_in_errors=True
+    )
 
     # 运行环境：dev 本机开发，test 自动化测试，prod 服务器
     app_env: Literal["dev", "test", "prod"] = "dev"
@@ -66,6 +68,21 @@ class Settings(BaseSettings):
     clipimg_api_base: str = "https://www.qwyun.top"
     clipimg_app_key: str = ""
     clipimg_app_secret: str = ""
+
+    # 通知渠道与按事件配置的服务商模板
+    notify_channels: str = "mini_subscribe"
+    mini_subscribe_mode: Literal["fake", "real"] = "fake"
+    mp_template_mode: Literal["fake", "real"] = "fake"
+    wecom_mode: Literal["fake", "real"] = "fake"
+    sms_mode: Literal["fake", "real"] = "fake"
+    wx_mp_app_id: str = ""
+    wx_mp_app_secret: str = ""
+    mini_subscribe_templates: Json[dict[str, dict]] = Field(default="{}")
+    mp_template_templates: Json[dict[str, dict]] = Field(default="{}")
+    sms_access_key_id: str = ""
+    sms_access_key_secret: str = ""
+    sms_sign_name: str = ""
+    sms_templates: Json[dict[str, dict]] = Field(default="{}")
 
     # 生产环境默认禁止 fake 模式和默认密钥；临时演示环境可显式设为 true
     allow_fake_in_prod: bool = False
