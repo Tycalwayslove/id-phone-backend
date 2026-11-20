@@ -14,8 +14,9 @@
     "typecheck": "tsc --noEmit",
     "build": "taro build --type weapp",
     "build:h5": "taro build --type h5",
-    "dev": "taro build --type weapp --watch",
-    "dev:h5": "taro build --type h5 --watch"
+    "dev": "rm -f .env.development.local && taro build --type weapp --watch",
+    "dev:h5": "taro build --type h5 --watch",
+    "dev:device": "echo \"TARO_APP_API_BASE=http://$(ipconfig getifaddr en0):8000\" > .env.development.local && taro build --type weapp --watch"
   },
   "browserslist": [
     "last 3 versions",
