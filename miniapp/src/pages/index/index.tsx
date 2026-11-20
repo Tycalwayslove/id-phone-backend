@@ -6,6 +6,8 @@ import { listPlans } from '../../api/plans'
 import { listSpecs } from '../../api/specs'
 import PageContainer from '../../components/PageContainer'
 import PlanCard from '../../components/PlanCard'
+import PrivacyPopup from '../../components/PrivacyPopup'
+import PrivateDomainCard from '../../components/PrivateDomainCard'
 import SearchBox from '../../components/SearchBox'
 import SpecCard from '../../components/SpecCard'
 import { describeError } from '../../utils/errors'
@@ -103,6 +105,8 @@ export default function Index() {
           </View>
         </>
       ) : null}
+      <PrivateDomainCard />
+      <PrivacyPopup page={PAGES.index} />
     </PageContainer>
   )
 }

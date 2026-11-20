@@ -1,0 +1,46 @@
+.private-domain {
+  margin-top: var(--gap);
+
+  &__channel + &__channel {
+    margin-top: var(--gap);
+    padding-top: var(--gap);
+    border-top: 1px solid var(--c-line);
+  }
+
+  &__title,
+  &__copy,
+  .hint {
+    display: block;
+  }
+
+  &__title {
+    font-size: var(--fs-title);
+    font-weight: 600;
+  }
+
+  &__copy {
+    margin: 8px 0;
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-top: 20px;
+  }
+
+  &__button {
+    margin: 0;
+    padding: 12px 24px;
+    border: none;
+    border-radius: 999px;
+    background: rgba(43, 107, 255, 0.1);
+    color: var(--c-primary);
+    font-size: var(--fs-small);
+    line-height: 1.5;
+
+    &::after {
+      border: none;
+    }
+  }
+}

@@ -4,9 +4,13 @@ import Taro, { useDidShow } from '@tarojs/taro'
 import { resolveUrl } from '../../api/client'
 import { cancelAccount } from '../../api/me'
 import PageContainer from '../../components/PageContainer'
+import PrivacyPopup from '../../components/PrivacyPopup'
+import PrivateDomainCard from '../../components/PrivateDomainCard'
 import { useUserStore } from '../../stores/user'
 import { handleError } from '../../utils/errors'
 import { PAGES, navigate } from '../../utils/nav'
+import { LEGAL_PAGES } from '../legal/routes'
+import ReminderSettings from './ReminderSettings'
 import './index.scss'
 
 interface MenuItem {
@@ -17,7 +21,9 @@ interface MenuItem {
 const MENUS: MenuItem[] = [
   { label: '我的订单', path: PAGES.orders },
   { label: '我的权益', path: PAGES.entitlements },
-  { label: '我的回执', path: PAGES.receipts }
+  { label: '我的回执', path: PAGES.receipts },
+  { label: '用户协议', path: LEGAL_PAGES.agreement },
+  { label: '隐私政策', path: LEGAL_PAGES.privacy }
 ]
 
 export default function Me() {
@@ -102,6 +108,7 @@ export default function Me() {
             <Text className='cell__arrow'>&gt;</Text>
           </View>
         ))}
+        <ReminderSettings />
         <Button className='cell cell-btn' openType='contact'>
           <Text>联系客服</Text>
           <Text className='cell__arrow'>&gt;</Text>
@@ -112,9 +119,11 @@ export default function Me() {
         </View>
       </View>
 
+      <PrivateDomainCard />
       <View className='me-cancel' onClick={onCancelAccount}>
         注销账号
       </View>
+      <PrivacyPopup page={PAGES.me} />
     </PageContainer>
   )
 }
