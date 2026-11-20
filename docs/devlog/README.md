@@ -65,3 +65,4 @@
 | 0029 | [后台需人工核对处理（T018）](0029-admin-manual-review.md) | 已完成 |
 | 0030 | [服务商规格目录同步（T019）与小程序 WXSS 修复](0030-provider-spec-sync-and-miniapp-wxss.md) | 已完成，真实目录待密钥 |
 | 0031 | [分页统一复用、规格页同步入口](0031-pagination-and-spec-sync-entry.md) | 已完成 |
+| 0032 | [小程序界面 v2：先拍好看，再谈付费（T020）](0032-miniapp-ux-v2.md) | 已完成，待真机验证 |
