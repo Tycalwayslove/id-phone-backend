@@ -82,6 +82,7 @@ class Photo(TimestampMixin, Base):
     )
     beauty_params: Mapped[dict] = mapped_column(JSONB, server_default="{}")
     check_result: Mapped[dict | None] = mapped_column(JSONB)
+    quality: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True))
     # 冗余：覆盖这张照片的权益中最晚的 ends_at；未付费为空
     access_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # access_until + 180 天，过了就删 OSS 文件
@@ -90,7 +91,7 @@ class Photo(TimestampMixin, Base):
 
 
 class PhotoRender(TimestampMixin, Base):
-    """导出图：同一张底片按某个规格、底色、美化档位导出的结果。参数相同就复用。"""
+    """导出图。同一张底片的规格、底色、美颜档位、祛痘位置与水印相同则复用。"""
 
     __tablename__ = "photo_renders"
     __table_args__ = (
@@ -100,6 +101,7 @@ class PhotoRender(TimestampMixin, Base):
             "bg_color",
             "beauty_level",
             "watermarked",
+            "variant_key",
             name="uq_photo_renders_variant",
         ),
         CheckConstraint("beauty_level BETWEEN 0 AND 5", name="beauty_level_range"),
@@ -114,6 +116,8 @@ class PhotoRender(TimestampMixin, Base):
     bg_color: Mapped[str] = mapped_column(Text)
     beauty_level: Mapped[int] = mapped_column(SmallInteger, server_default="0")
     watermarked: Mapped[bool] = mapped_column(Boolean)
+    # 空串保留给旧导出图。新变体标识记录流水线版本和点位摘要。
+    variant_key: Mapped[str] = mapped_column(Text, server_default="")
 
 
 class ShareLink(TimestampMixin, Base):

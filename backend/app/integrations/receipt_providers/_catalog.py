@@ -3,21 +3,12 @@
 import json
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
+# 保留旧数据修复脚本使用的导入路径。
+from app.core.colors import _COLORS as _COLORS
+from app.core.colors import normalize_bg_color
 from app.core.errors import AppError, ErrorCode
 from app.integrations.receipt_providers.base import ProviderItem
 
-_COLORS = {
-    "white": "#FFFFFF",
-    "blue": "#438EDB",
-    "red": "#FF0000",
-    "dark_blue": "#1A3B8C",
-    "grey": "#BFBFBF",
-    "tint": "#EAF1FB",
-    "gradient": "#438EDB",
-    "sky_blue": "#87CEEB",  # 近似值
-    "gray": "#BFBFBF",  # 近似值
-    "dark_red": "#8B0000",  # 近似值
-}
 _CATALOG_FIELDS = (
     "item_id",
     "id",
@@ -51,7 +42,7 @@ def _colors(value: object) -> tuple[list[str], int]:
         name = name.strip().lower()
         if name.startswith("pose_"):
             continue
-        color = _COLORS.get(name)
+        color = normalize_bg_color(name)
         if color is None:
             unknown += 1
         elif color not in colors:

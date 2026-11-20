@@ -1,6 +1,7 @@
 # T024 自建照片处理流水线（抠图、人脸定位裁剪、精修、拍后检测、过检评估）
 
-- 状态：进行中
+- 状态：已完成，待 PostgreSQL 和授权照片验证
+- 实现与验证：[开发日志 0035](../devlog/0035-in-house-photo-pipeline.md)
 - 决策：先读 `docs/adr/0007-in-house-photo-pipeline.md`；拍后检测的用户侧要求见 `docs/design/shoot-flow.md` 第 4 节。
 - 已由 Claude 准备好：依赖 `onnxruntime`、`opencv-python-headless`、`numpy`（已加进 pyproject/uv.lock）；模型在 `backend/models/`（`scripts/download_models.py`，不进 Git），本机 CPU 实测 MODNet 512px 约 0.22 秒、YuNet 可加载。
 

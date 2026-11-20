@@ -6,13 +6,16 @@
 
 import hashlib
 import hmac
+import json
 import logging
 import uuid
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.colors import normalize_bg_color, require_bg_color
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.pagination import PageParams
@@ -22,6 +25,9 @@ from app.integrations.matting import get_matting
 from app.integrations.storage import build_key, get_storage
 from app.models import File, Photo, PhotoRender, Spec
 from app.modules.photos import imaging, repo
+from app.modules.photos.pipeline import face as face_detection
+from app.modules.photos.pipeline.face import Point
+from app.modules.photos.pipeline.quality import assess_quality
 from app.modules.photos.schemas import (
     AccessOut,
     DownloadOut,
@@ -39,6 +45,7 @@ from app.modules.specs import service as spec_service
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 DOWNLOAD_URL_SECONDS = 600
 MEDIA_CHECK_URL_SECONDS = 30 * 60
+RENDER_PIPELINE_VERSION = "2"
 # 没有绑定照片的上传文件放在这个目录下（文件 ID 还没有照片 ID 可用）
 UPLOAD_OWNER = "uploads"
 log = logging.getLogger(__name__)
@@ -131,29 +138,54 @@ def render(
     bg_color: str,
     beauty_level: int,
     watermarked: bool,
+    blemishes: Sequence[Point] = (),
 ) -> PhotoRender:
     """生成导出图；同参数已有就直接复用。不 commit。"""
     photo = get_photo_for_user(db, user_id, photo_id)
     _require_passed_check(photo)
-    existing = repo.find_render(
-        db,
-        user_id,
-        photo.id,
+    bg_color = require_bg_color(bg_color)
+    points = sorted({(x + 0.0, y + 0.0) for x, y in blemishes})
+    # 旧成品仍可下载。新导出使用新流水线，按实际点位去重。
+    variant_key = RENDER_PIPELINE_VERSION
+    if points:
+        variant_key += ":" + hashlib.sha256(json.dumps(points, separators=(",", ":")).encode()).hexdigest()
+    variant = dict(
         spec_id=spec.id,
         bg_color=bg_color,
         beauty_level=beauty_level,
         watermarked=watermarked,
+        variant_key=variant_key,
     )
+    existing = repo.find_render(db, user_id, photo.id, **variant)
     if existing is not None:
         return existing
 
     # 底片：有抠图用抠图，否则用原图
     base_id = photo.matting_file_id or photo.original_file_id
-    base = repo.get_files(db, user_id, [base_id]).get(base_id)
+    files = repo.get_files(db, user_id, {base_id, photo.original_file_id})
+    base = files.get(base_id)
     if base is None or base.status != "active":
         raise AppError(ErrorCode.PHOTO_NOT_READY)
+    storage = get_storage()
+    try:
+        base_data = storage.get(base.storage_key)
+    except FileNotFoundError as exc:
+        raise AppError(ErrorCode.PHOTO_NOT_READY) from exc
+    original = files.get(photo.original_file_id)
+    original_data = base_data
+    if original is not None and original.id != base_id and original.status == "active":
+        try:
+            original_data = storage.get(original.storage_key)
+        except FileNotFoundError:
+            log.warning("原图文件缺失，使用抠图定位人脸")
+    try:
+        with imaging.decode_photo(original_data) as original_image:
+            faces = face_detection.detect_faces(original_image)
+    except FileNotFoundError as exc:
+        log.warning("%s，使用居中裁剪", exc)
+        faces = []
     out = imaging.make_render(
-        get_storage().get(base.storage_key),
+        base_data,
         width_px=spec.width_px,
         height_px=spec.height_px,
         bg_color=bg_color,
@@ -161,41 +193,36 @@ def render(
         max_kb=spec.file_size_max_kb,
         watermarked=watermarked,
         beauty_level=beauty_level,
+        face=faces[0] if faces else None,
+        blemishes=points,
     )
-    f = save_file(
-        db,
-        user_id=user_id,
-        kind="preview" if watermarked else "render",
-        data=out,
-        mime="image/jpeg",
-        ext="jpg",
-        owner=f"p{photo.id}",
-        spec_code=spec.code,
-        bg=bg_color,
-        beauty=beauty_level,
-    )
-    row = PhotoRender(
-        photo_id=photo.id,
-        spec_id=spec.id,
-        file_id=f.id,
-        bg_color=bg_color,
-        beauty_level=beauty_level,
-        watermarked=watermarked,
-    )
+    f = None
     try:
         with db.begin_nested():
+            f = save_file(
+                db,
+                user_id=user_id,
+                kind="preview" if watermarked else "render",
+                data=out,
+                mime="image/jpeg",
+                ext="jpg",
+                owner=f"p{photo.id}",
+                spec_code=spec.code,
+                bg=bg_color,
+                beauty=beauty_level,
+            )
+            row = PhotoRender(photo_id=photo.id, file_id=f.id, **variant)
             db.add(row)
-    except IntegrityError:
+    except Exception as exc:
+        if f is not None:
+            try:
+                storage.delete(f.storage_key)
+            except OSError:
+                log.warning("清理未完成导出的文件失败")
+        if not isinstance(exc, IntegrityError):
+            raise
         # 并发请求抢先生成了同参数的导出图：用对方的
-        again = repo.find_render(
-            db,
-            user_id,
-            photo.id,
-            spec_id=spec.id,
-            bg_color=bg_color,
-            beauty_level=beauty_level,
-            watermarked=watermarked,
-        )
+        again = repo.find_render(db, user_id, photo.id, **variant)
         if again is None:
             raise
         return again
@@ -250,6 +277,7 @@ def _photo_out(photo: Photo, original: File, access: AccessOut) -> PhotoOut:
         created_at=photo.created_at,
         original_url=file_url(original) if _check_status(photo) == "passed" else "",
         access=access,
+        quality=photo.quality,
     )
 
 
@@ -326,9 +354,12 @@ def upload_original(
     return UploadOut(file_id=f.id, width=width, height=height)
 
 
-def _attach_matting(db: Session, photo: Photo, original: File) -> None:
+def _attach_matting(db: Session, photo: Photo, original_data: bytes) -> None:
     try:
-        data = get_matting().matte(get_storage().get(original.storage_key))
+        data = get_matting().matte(original_data)
+    except FileNotFoundError as exc:
+        log.error("%s", exc)
+        raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, "本地抠图模型未安装，请联系管理员") from exc
     except TimeoutError:
         log.warning("抠图超时，使用原图")
         return
@@ -355,6 +386,10 @@ def create_photo(db: Session, *, user_id: int, body: PhotoCreate, open_id: str |
     original = repo.get_unused_upload(db, user_id, body.file_id)
     if original is None:
         raise AppError(ErrorCode.UPLOAD_NOT_FOUND)
+    try:
+        original_data = get_storage().get(original.storage_key)
+    except FileNotFoundError as exc:
+        raise AppError(ErrorCode.UPLOAD_NOT_FOUND) from exc
     photo = repo.get_upload_draft(db, user_id, original.id)
     if photo is None:
         # 发布前上传但尚未绑定照片的原图，仍可以创建并补交审核。
@@ -366,7 +401,18 @@ def create_photo(db: Session, *, user_id: int, body: PhotoCreate, open_id: str |
         )
         db.add(photo)
         db.flush()
-    _attach_matting(db, photo, original)
+    with imaging.decode_photo(original_data) as original_image:
+        try:
+            faces = face_detection.detect_faces(original_image)
+        except FileNotFoundError as exc:
+            if settings.matting_mode == "local":
+                log.error("%s", exc)
+                raise AppError(
+                    ErrorCode.PROVIDER_UNAVAILABLE, "本地人脸检测模型未安装，请联系管理员"
+                ) from exc
+        else:
+            photo.quality = assess_quality(original_image, faces).model_dump(mode="json")
+    _attach_matting(db, photo, original_data)
     photo.source = body.source
     photo.status = "active"
     db.flush()
@@ -435,8 +481,8 @@ def render_for_user(db: Session, *, user_id: int, photo_id: int, body: RenderCre
     if body.bg_color is None:
         bg = colors[0]
     else:
-        bg = next((c for c in colors if c.upper() == body.bg_color.upper()), None)
-        if bg is None:
+        bg = require_bg_color(body.bg_color)
+        if all(normalize_bg_color(color) != bg for color in colors):
             raise AppError(ErrorCode.VALIDATION_ERROR, "底色不在该规格支持的范围内")
     if body.beauty_level > spec.beauty_max:
         raise AppError(ErrorCode.VALIDATION_ERROR, f"该规格美颜档位最高为 {spec.beauty_max}")
@@ -458,6 +504,7 @@ def render_for_user(db: Session, *, user_id: int, photo_id: int, body: RenderCre
         bg_color=bg,
         beauty_level=body.beauty_level,
         watermarked=watermarked,
+        blemishes=[(point.x, point.y) for point in body.blemishes],
     )
     found = repo.get_render(db, user_id, photo.id, row.id)
     assert found is not None

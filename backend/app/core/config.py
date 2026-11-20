@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, Json, model_validator
@@ -58,8 +59,11 @@ class Settings(BaseSettings):
     # 地域 ID，如 cn-hangzhou；留空时从标准 Endpoint 推出
     oss_region: str = ""
 
-    # 抠图与美颜：fake 时直接用原图
-    matting_mode: Literal["fake", "zheying"] = "fake"
+    # 本地抠图与人脸检测。自动化测试默认用纯色背景抠除。
+    matting_mode: Literal["local", "fake", "zheying"] = Field(
+        default_factory=lambda data: "fake" if data["app_env"] == "test" else "local"
+    )
+    photo_models_dir: Path = Path(__file__).resolve().parents[2] / "models"
     matting_timeout_seconds: float = 5
     preview_spec_code: str = ""
 

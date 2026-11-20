@@ -43,6 +43,44 @@ class AccessOut(Schema):
     )
 
 
+QualityCode = Literal[
+    "no_face",
+    "multiple_faces",
+    "face_too_small",
+    "face_off_center",
+    "too_dark",
+    "too_bright",
+    "not_frontal",
+    "uneven_light",
+]
+
+
+class QualityIssue(Schema):
+    """拍后检测发现的一项问题。"""
+
+    code: QualityCode = Field(
+        description=(
+            "问题编码。no_face = 未检测到人脸，multiple_faces = 检测到多张人脸，"
+            "face_too_small = 脸太小，face_off_center = 脸偏离轮廓框，too_dark = 脸太暗，"
+            "too_bright = 脸太亮，not_frontal = 没正对镜头，uneven_light = 左右脸光照不均。"
+        ),
+        examples=["face_too_small"],
+    )
+    message: str = Field(
+        description="可直接提示用户的中文问题和重拍建议", examples=["脸有点小，请靠近一点再拍"]
+    )
+
+
+class PhotoQuality(Schema):
+    """本地拍后快速检测结果，用于提示用户调整照片。"""
+
+    level: Literal["ok", "warn", "fail"] = Field(
+        description="检测等级。ok = 合格，无需提示。warn = 有建议，可继续制作。fail = 建议重拍，用户仍可继续。",
+        examples=["warn"],
+    )
+    issues: list[QualityIssue] = Field(description="检测发现的问题，合格时为空列表")
+
+
 class PhotoOut(Schema):
     """一张照片（底片）。"""
 
@@ -63,6 +101,10 @@ class PhotoOut(Schema):
         examples=["https://api.example.com/files/..."],
     )
     access: AccessOut = Field(description="权益状态，决定能否下载、能否换规格")
+    quality: PhotoQuality | None = Field(
+        default=None,
+        description="创建时的本地拍后检测结果。缺少检测结果时为空，例如这项功能上线前创建的照片。",
+    )
 
 
 PhotoPage = page_model(PhotoOut, "PhotoPage")
@@ -75,7 +117,7 @@ class RenderOut(Schema):
     spec_code: str = Field(description="规格编码", examples=["gd_idcard"])
     spec_name: str = Field(description="规格名称", examples=["广东省身份证"])
     bg_color: str = Field(description="底色，十六进制颜色值", examples=["#FFFFFF"])
-    beauty_level: int = Field(description="美颜档位，0 表示不美颜", examples=[0])
+    beauty_level: int = Field(description="美颜档位，0 表示只自动校正光影", examples=[0])
     watermarked: bool = Field(
         description="是否带水印。true 为预览图，不能下载；false 为正式图，权益有效期内可下载", examples=[True]
     )
@@ -96,6 +138,17 @@ class PhotoDetail(PhotoOut):
     )
 
 
+class BlemishPoint(Schema):
+    """用户在成品图上点选的一处痘印。"""
+
+    x: float = Field(
+        ge=0, le=1, strict=True, description="成品图横坐标，从左到右归一化至 0～1", examples=[0.34]
+    )
+    y: float = Field(
+        ge=0, le=1, strict=True, description="成品图纵坐标，从上到下归一化至 0～1", examples=[0.52]
+    )
+
+
 class RenderCreate(Schema):
     """生成导出图的请求。"""
 
@@ -110,8 +163,14 @@ class RenderCreate(Schema):
         default=0,
         ge=0,
         le=5,
-        description="美颜档位，0 表示不美颜；不能超过该规格的 beauty_max",
+        description="美颜档位，0 表示只自动校正光影。最高为该规格的 beauty_max。",
         examples=[0],
+    )
+    blemishes: list[BlemishPoint] = Field(
+        default_factory=list,
+        max_length=10,
+        description="用户在当前规格成品图上点选的祛痘位置，最多 10 个。省略或空数组表示不祛痘。",
+        examples=[[{"x": 0.34, "y": 0.52}]],
     )
 
 

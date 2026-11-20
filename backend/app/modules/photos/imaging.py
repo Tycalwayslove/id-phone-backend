@@ -1,17 +1,21 @@
 """图片处理（Pillow）：校验上传图片、按规格生成导出图。纯函数，不碰数据库和存储。"""
 
 import io
+from collections.abc import Sequence
 
 from PIL import (
     Image,
     ImageColor,
     ImageDraw,
-    ImageEnhance,
-    ImageFilter,
     ImageFont,
     ImageOps,
     UnidentifiedImageError,
 )
+
+from app.core.colors import require_bg_color
+from app.modules.photos.pipeline.crop import crop_portrait
+from app.modules.photos.pipeline.face import Face, Point
+from app.modules.photos.pipeline.retouch import retouch
 
 # 上传允许的格式：Pillow 识别出的格式 → (mime, 扩展名)
 ALLOWED_FORMATS = {"JPEG": ("image/jpeg", "jpg"), "PNG": ("image/png", "png")}
@@ -47,16 +51,12 @@ def inspect_image(data: bytes) -> tuple[str, int, int]:
     return fmt, w, h
 
 
-def _center_crop(img: Image.Image, ratio: float) -> Image.Image:
-    """按宽高比 ratio（宽/高）居中裁剪。"""
-    w, h = img.size
-    if w / h > ratio:
-        new_w = max(1, round(h * ratio))
-        left = (w - new_w) // 2
-        return img.crop((left, 0, left + new_w, h))
-    new_h = max(1, round(w / ratio))
-    top = (h - new_h) // 2
-    return img.crop((0, top, w, top + new_h))
+def decode_photo(data: bytes) -> Image.Image:
+    """按 EXIF 纠正方向，并保留透明通道供抠图、裁剪和铺底色使用。"""
+    with Image.open(io.BytesIO(data)) as src:
+        ImageOps.exif_transpose(src, in_place=True)
+        has_alpha = src.mode in ("RGBA", "LA") or "transparency" in src.info
+        return src.convert("RGBA" if has_alpha else "RGB")
 
 
 def _apply_watermark(img: Image.Image) -> Image.Image:
@@ -75,22 +75,6 @@ def _apply_watermark(img: Image.Image) -> Image.Image:
     return Image.alpha_composite(img.convert("RGBA"), layer).convert("RGB")
 
 
-def _apply_beauty(img: Image.Image, level: int) -> Image.Image:
-    """提高档位时增加平滑图的混合权重，并略微提亮。"""
-    alpha = img.getchannel("A") if img.mode == "RGBA" else None
-    # 预乘透明度再做模糊，避免透明像素原有的颜色渗入主体边缘。
-    blur_source = img.convert("RGBa") if alpha is not None else img
-    blurred = blur_source.filter(ImageFilter.GaussianBlur(radius=1.5))
-    if alpha is not None:
-        blurred = blurred.convert("RGBA").convert("RGB")
-        img = img.convert("RGB")
-    blended = Image.blend(img, blurred, 0.06 * level)
-    result = ImageEnhance.Brightness(blended).enhance(1 + 0.012 * level)
-    if alpha is not None:
-        result.putalpha(alpha)
-    return result
-
-
 def make_render(
     data: bytes,
     *,
@@ -101,20 +85,25 @@ def make_render(
     max_kb: int | None,
     watermarked: bool,
     beauty_level: int = 0,
+    face: Face | None = None,
+    blemishes: Sequence[Point] = (),
 ) -> bytes:
     """把底片（抠图或原图）导出成规格要求的 JPEG 字节。
 
-    步骤：纠正方向 → 居中裁剪 → 缩放 → 按档位美颜 → 透明区域铺底色 → （预览）加水印 → 压缩。
+    步骤：纠正方向、按人脸裁剪、校正光影并精修、铺底色、加预览水印、压缩。
     """
-    with Image.open(io.BytesIO(data)) as src:
-        img = ImageOps.exif_transpose(src)
-        has_alpha = img.mode in ("RGBA", "LA") or "transparency" in img.info
-        img = img.convert("RGBA" if has_alpha else "RGB")
-    img = _center_crop(img, width_px / height_px)
-    img = img.resize((width_px, height_px), Image.Resampling.LANCZOS)
-    if beauty_level > 0:
-        img = _apply_beauty(img, beauty_level)
-    if has_alpha:
+    bg_color = require_bg_color(bg_color)
+    with decode_photo(data) as source:
+        has_foreground_mask = source.mode == "RGBA"
+        img, fitted_face = crop_portrait(source, (width_px, height_px), face)
+    img = retouch(
+        img,
+        fitted_face,
+        beauty_level=beauty_level,
+        blemishes=blemishes,
+        has_foreground_mask=has_foreground_mask,
+    )
+    if img.mode == "RGBA":
         canvas = Image.new("RGB", img.size, ImageColor.getrgb(bg_color))
         canvas.paste(img, mask=img.getchannel("A"))
         img = canvas

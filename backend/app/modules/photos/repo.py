@@ -129,8 +129,9 @@ def find_render(
     bg_color: str,
     beauty_level: int,
     watermarked: bool,
+    variant_key: str,
 ) -> PhotoRender | None:
-    """同参数（规格、底色、美颜档位、是否水印）已有的导出图，用于复用。"""
+    """查找规格、底色、美颜档位、祛痘位置和水印均相同的可复用导出图。"""
     return db.scalar(
         select(PhotoRender)
         .join(Photo, Photo.id == PhotoRender.photo_id)
@@ -142,6 +143,7 @@ def find_render(
             PhotoRender.bg_color == bg_color,
             PhotoRender.beauty_level == beauty_level,
             PhotoRender.watermarked == watermarked,
+            PhotoRender.variant_key == variant_key,
             File.status == "active",
         )
     )
