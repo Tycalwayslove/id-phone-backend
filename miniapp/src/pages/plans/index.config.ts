@@ -1,3 +1,3 @@
 export default definePageConfig({
-  navigationBarTitleText: '套餐'
+  navigationBarTitleText: '价格说明'
 })
