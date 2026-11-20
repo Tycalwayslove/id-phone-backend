@@ -16,3 +16,6 @@ backend/models/*.part
 
 # 本地照片评估输入和报告
 /backend/eval/
+
+# 本地文件存储（STORAGE_MODE=local）：用户照片等，绝不进 Git
+backend/storage/
