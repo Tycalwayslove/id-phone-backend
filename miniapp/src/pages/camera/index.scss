@@ -312,3 +312,16 @@
     font-weight: 600;
   }
 }
+
+.camera-review__note {
+  position: absolute;
+  right: 24px;
+  bottom: 16px;
+  left: 24px;
+  padding: 8px 16px;
+  border-radius: 12px;
+  background: rgba(23, 35, 59, 0.72);
+  text-align: center;
+  font-size: var(--fs-small);
+  color: #fff;
+}

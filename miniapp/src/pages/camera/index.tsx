@@ -31,6 +31,8 @@ interface Draft {
   path: string
   source: PhotoSource
   photo?: PhotoOut
+  /** 前置摄像头拍的：取景是镜像，照片按真实方向保存，确认页要说明为什么“左右反了” */
+  front?: boolean
 }
 
 function takePhoto(): Promise<string> {
@@ -247,7 +249,7 @@ export default function CameraPage() {
       }
       if (alive.current && captureVersion.current === version) {
         setReady(false)
-        setDraft({ path, source: 'camera' })
+        setDraft({ path, source: 'camera', front: devicePosition === 'front' })
       }
     })
   }
@@ -324,6 +326,9 @@ export default function CameraPage() {
       <View className='camera-page camera-review'>
         <View className='camera-review__preview'>
           <Image className='camera-review__image' src={draft.path} mode='aspectFit' ariaLabel='待确认的照片' />
+          {draft.front ? (
+            <Text className='camera-review__note'>取景时像照镜子，照片按真实方向保存，所以左右看起来是反的</Text>
+          ) : null}
         </View>
         <View className='camera-review__panel'>
           {failed ? (

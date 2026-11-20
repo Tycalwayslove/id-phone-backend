@@ -209,7 +209,16 @@ async function sendUpload(filePath: string): Promise<UploadOut> {
       name: 'file',
       header: authHeader()
     })
-  } catch {
+  } catch (e) {
+    // 保留微信给的真实原因，便于真机排查（原来一律显示“网络不太好”）
+    const errMsg = String((e as { errMsg?: string })?.errMsg ?? e ?? '')
+    console.warn('[上传] uploadFile 失败', errMsg)
+    if (/exceed max limit|80051/i.test(errMsg)) {
+      throw new ApiError(0, 'UPLOAD_TOO_LARGE', '照片太大，请重新拍一张或换一张照片')
+    }
+    if (process.env.TARO_APP_FAKE_PAY === '1') {
+      throw new ApiError(0, 'NETWORK_ERROR', `上传失败：${errMsg || '网络错误'}`)
+    }
     throw networkError()
   }
   let data: unknown = res.data

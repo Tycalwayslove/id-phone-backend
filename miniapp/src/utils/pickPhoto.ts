@@ -30,11 +30,21 @@ const HARD_LIMIT_BYTES = 2 * 1024 * 1024
 const QUALITY_STEPS = [80, 60, 40]
 
 function fileSize(path: string): Promise<number | null> {
+  const fs = Taro.getFileSystemManager()
   return new Promise((resolve) => {
-    Taro.getFileSystemManager().getFileInfo({
+    fs.getFileInfo({
       filePath: path,
       success: (res) => resolve(res.size),
-      fail: () => resolve(null)
+      fail: () => {
+        // 部分环境下临时文件 getFileInfo 会失败，改用 stat 再试一次
+        try {
+          const stat = fs.statSync(path) as unknown as { size?: number }
+          resolve(typeof stat?.size === 'number' ? stat.size : null)
+        } catch {
+          console.warn('[上传压缩] 读取文件大小失败', path)
+          resolve(null)
+        }
+      }
     })
   })
 }
