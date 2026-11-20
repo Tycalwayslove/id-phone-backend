@@ -200,3 +200,13 @@ if body["code"] != 0: raise ProviderError(body["code"], body["msg"])
 15. `pic_id` 50 分钟有效，是否可重复用于多次 submit？
 16. `cancel` 在“审核中(status=2)”是否可用？“待处理”的准确定义？
 17. 是否支持直接上传已制作好的照片跳过检测/制作（我们本地已按规格导出）？
+
+## 15. 实现说明
+
+- 真实模式按 `providers.adapter` 的 `zheying`、`clipimg` 选通道，分别使用当前配置的 `ZHEYING_API_BASE`、`ZHEYING_APP_KEY` 和 `CLIPIMG_API_BASE`、`CLIPIMG_APP_KEY`。部署黔微云时将 `CLIPIMG_API_BASE` 设为 `https://api.qwyun.top`。回调地址由 `PUBLIC_BASE_URL` 和服务商记录的 code 拼成，默认每次提交生成随机 nonce。
+- 提交以表单串行调用 make、submit，请求凭据为 `key`。图片发送裸 Base64，按编码后不超过 5 MB 处理，由 make 检查分辨率。连接超时 5 秒，读写超时 30 秒。每阶段只调用一次。返回明确的非零 `code` 时抛 `PROVIDER_UNAVAILABLE`，异常使用固定说明以免回显 `msg` 中的凭据或办理材料。任一阶段超时，或 submit 的响应无法确认单号和结果时，抛出 `TimeoutError`。
+- `param` 的键名按规格变化。业务层需按 `ProviderSpec.param_mapping` 映射表单，再传入 `SubmitRequest.form`。适配器将传入的非空表单转成 JSON，并省略打印邮寄参数。
+- `build_callback_url(url)` 返回带 nonce 的 URL 和 nonce。接入时，receipts 在发单前持久化 nonce 摘要并绑定 attempt，将对应 nonce 通过 `get_provider(..., callback_nonce=nonce)` 传给此 attempt 的适配器。回调入口需读取 URL 参数，在落库前校验摘要、服务商和订单归属，并按单号与原始状态去重。同步保存提交返回的 `order_no`。若 submit 超时，可在验签和 nonce 校验通过后，将回调单号绑定到尚无单号的同一 attempt。应用状态只允许合法迁移，完成后的物流通知单独补存。处理成功后返回第 6 节的 JSON 响应。接入时同步处理应用服务器与反向代理访问日志中的 nonce 脱敏。
+- 回调使用常量时间比较验证小写 MD5 签名。状态 3 的 `raw["image_receipt"]` 提供下载地址，由 receipts 在校验归属后排队下载并转存，下载失败由后台任务补偿。图像号和官方有效期保留为空。状态 4 的 `raw["logistics_info"]` 提供承运商和运单号。物流的表单编码未说明，适配器接受 JSON 数组、单个 JSON 对象及方括号字段。
+- 查询恒返回 `processing`。poller 需对真实通道的 `submitted`、`processing`、`unknown` 设置人工核对截止时间，可从 `submitted_at`（缺失时从 `created_at`）起算 2 小时。到期后标记后台待核对并清空 `next_poll_at`，仍允许处理已验证的迟到回调。
+- 服务商仍需确认沙箱、限流、回调重推策略及来源 IP、幂等与外部单号、完整错误码与余额不足行为、异常和重提的计费及订单号、`pic_id` 复用、办理时段外 SLA、图片链接有效期与鉴权。实现采用单次提交、驳回状态统一映射、按原始事件去重的处理方式。回调 IP 白名单及单独的回调地址和超时配置可在业务接入时补充。
