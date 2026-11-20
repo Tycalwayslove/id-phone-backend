@@ -4,19 +4,20 @@
 - 接口入口函数（create_order、cancel_order、handle_wxpay_notify、simulate_paid 等）负责提交事务。
 """
 
-import json
 import logging
 import secrets
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.idempotency import run_idempotent
 from app.core.utils import decode_cursor, encode_cursor, new_no, utcnow
-from app.integrations.payment import get_payment
+from app.integrations.payment import PaymentGateway, PayNotify, RefundResult, RefundStatus, get_payment
 from app.models import Order, OrderItem, Payment, Plan, Refund
 from app.modules.entitlements import service as entitlement_service
 from app.modules.orders import repo
@@ -28,7 +29,6 @@ from app.modules.orders.schemas import (
     OrderPage,
     PlanBenefitsOut,
     PlanOut,
-    WxpayAck,
 )
 
 ORDER_TTL = timedelta(minutes=30)
@@ -203,6 +203,7 @@ def _do_create_order(db: Session, user_id: int, payload: OrderCreateIn) -> Order
         amount_fen=payment.amount_fen,
         description=plan.name,
         openid=repo.wx_mini_openid(db, user_id),
+        expire_at=order.expire_at,
     )
     db.refresh(order)  # 取数据库生成的 created_at
     return OrderCreatedOut(**_order_fields(order, [item]), pay_params=pay_params)
@@ -229,6 +230,18 @@ def get_order(db: Session, user_id: int, order_no: str) -> OrderOut:
     order = repo.get_order_for_user(db, user_id, order_no)
     if order is None:
         raise AppError(ErrorCode.ORDER_NOT_FOUND)
+    if settings.pay_mode == "wechat" and order.status == "pending":
+        payment = repo.latest_payment(db, order.id)
+        if payment is not None:
+            result = get_payment().query_order(payment.out_trade_no)
+            if result.payment is not None:
+                order = _record_payment(db, result.payment)
+                db.commit()
+            elif result.trade_state == "CLOSED":
+                order = repo.lock_order(db, order.id)
+                if order.status == "pending":
+                    _mark_closed(db, order)
+                db.commit()
     _close_expired(db, [order])
     return _orders_out(db, [order])[0]
 
@@ -239,11 +252,17 @@ def cancel_order(db: Session, user_id: int, order_no: str) -> OrderOut:
         raise AppError(ErrorCode.ORDER_NOT_FOUND)
     if order.status != "pending":
         raise AppError(ErrorCode.ORDER_NOT_CANCELLABLE)
+    gateway = get_payment()
+    for out_trade_no in repo.pending_payment_nos(db, order.id):
+        gateway.close_order(out_trade_no)
+    _mark_closed(db, order)
+    db.commit()
+    return _orders_out(db, [order])[0]
+
+
+def _mark_closed(db: Session, order: Order) -> None:
     order.status = "closed"
     repo.close_pending_payments(db, [order.id])
-    db.commit()
-    # TODO: 真实微信支付需要同时调用微信“关闭订单”接口，防止用户稍后仍能付款
-    return _orders_out(db, [order])[0]
 
 
 # ---------- 支付 ----------
@@ -268,6 +287,8 @@ def mark_paid(
     if payment.amount_fen != amount_fen:
         raise AppError(ErrorCode.ORDER_NOT_PAYABLE, "支付金额与订单金额不一致")
     if payment.status == "success":
+        if settings.pay_mode == "wechat" and payment.transaction_id != transaction_id:
+            raise AppError(ErrorCode.ORDER_NOT_PAYABLE, "微信支付单号与已入账记录不一致")
         return order
     if order.status != "pending" and not (order.status == "closed" and refund_closed):
         raise AppError(ErrorCode.ORDER_NOT_PAYABLE)
@@ -307,30 +328,83 @@ class RefundSubmission:
     before: dict[str, str | int] | None = None
 
 
-def _submit_refund(db: Session, order: Order, payment: Payment, refund: Refund) -> None:
-    """应用渠道受理结果。处理中占用可退余额，收到成功结果才更新订单和权益。"""
-    result = get_payment().refund(
-        out_trade_no=payment.out_trade_no,
-        out_refund_no=refund.out_refund_no,
-        refund_fen=refund.amount_fen,
-        total_fen=payment.amount_fen,
-        reason=refund.reason,
-    )
-    if result == "success":
+def _apply_refund_status(db: Session, order: Order, refund: Refund, status: RefundStatus) -> None:
+    """持有订单锁时更新退款。已终结的流水不因重发或乱序通知回退。"""
+    if refund.status != "pending" or status == "pending":
+        return
+    if status == "success":
         from app.modules.receipts import service as receipt_service
 
-        refund.status = "success"
-        refund.finished_at = utcnow()
         order.refunded_fen += refund.amount_fen
         order.status = "refunded" if order.refunded_fen == order.paid_fen else "part_refunded"
         if order.status == "refunded":
             entitlement_ids = entitlement_service.revoke_for_order(db, order.id)
             if entitlement_ids:
                 receipt_service.cancel_for_refund(db, entitlement_ids)
-    elif result == "failed":
-        refund.status = "failed"
-        refund.finished_at = utcnow()
+    refund.status = status
+    refund.finished_at = utcnow()
     db.flush()
+
+
+def _submit_refund(
+    db: Session, order: Order, payment: Payment, refund: Refund, gateway: PaymentGateway
+) -> None:
+    status = gateway.refund(
+        out_trade_no=payment.out_trade_no,
+        out_refund_no=refund.out_refund_no,
+        refund_fen=refund.amount_fen,
+        total_fen=payment.amount_fen,
+        reason=refund.reason,
+    )
+    _apply_refund_status(db, order, refund, status)
+
+
+def _apply_refund_result(
+    db: Session, order: Order, payment: Payment, refund: Refund, result: RefundResult
+) -> None:
+    if (
+        payment.status != "success"
+        or result.out_refund_no != refund.out_refund_no
+        or result.out_trade_no != payment.out_trade_no
+        or result.transaction_id != payment.transaction_id
+        or result.refund_fen != refund.amount_fen
+        or result.total_fen != payment.amount_fen
+    ):
+        raise AppError(ErrorCode.REFUND_NOT_ALLOWED, "微信退款结果与本地流水不一致")
+    _apply_refund_status(db, order, refund, result.status)
+
+
+def _refresh_refund(db: Session, order: Order, refund: Refund, gateway: PaymentGateway) -> None:
+    result = gateway.query_refund(refund.out_refund_no)
+    payment = repo.lock_payment(db, refund.payment_id)
+    if result is None:
+        # 超时后确认微信尚未受理，使用同一个编号及原始参数重试。
+        _submit_refund(db, order, payment, refund, gateway)
+    else:
+        _apply_refund_result(db, order, payment, refund, result)
+
+
+def poll_pending_refunds(db: Session, limit: int = 10) -> int:
+    """查单补偿未送达的退款通知。每笔单独提交，回调和查单共用订单锁。"""
+    if settings.pay_mode != "wechat":
+        return 0
+    gateway = get_payment()
+    before = utcnow() - timedelta(minutes=1)
+    candidates = [(refund.id, refund.order_id) for refund in repo.due_pending_refunds(db, before, limit)]
+    finished = 0
+    for refund_id, order_id in candidates:
+        order = repo.lock_order(db, order_id)
+        refund = db.get(Refund, refund_id, populate_existing=True)
+        if refund is not None and refund.status == "pending" and refund.updated_at <= before:
+            try:
+                with db.begin_nested():
+                    _refresh_refund(db, order, refund, gateway)
+            except AppError as exc:
+                log.warning("微信退款查单失败 refund_id=%s code=%s", refund_id, exc.code)
+            refund.updated_at = utcnow()
+            finished += refund.status != "pending"
+        db.commit()
+    return finished
 
 
 def _refund_closed_payment(db: Session, order: Order, payment: Payment) -> None:
@@ -344,7 +418,7 @@ def _refund_closed_payment(db: Session, order: Order, payment: Payment) -> None:
     )
     if refund is None:
         return
-    _submit_refund(db, order, payment, refund)
+    _submit_refund(db, order, payment, refund, get_payment())
     # audit_logs 要求管理员外键；系统操作由退款流水持久记录，同时输出结构化字段。
     log.warning(
         "refund.auto_closed_order order_no=%s out_refund_no=%s amount_fen=%s status=%s",
@@ -355,9 +429,11 @@ def _refund_closed_payment(db: Session, order: Order, payment: Payment) -> None:
     )
 
 
-def _replay_refund(refund: Refund, order: Order, amount_fen: int) -> RefundSubmission:
+def _replay_refund(db: Session, refund: Refund, order: Order, amount_fen: int) -> RefundSubmission:
     if refund.order_id != order.id or refund.amount_fen != amount_fen:
         raise AppError(ErrorCode.IDEMPOTENCY_CONFLICT)
+    if refund.status == "pending" and settings.pay_mode == "wechat":
+        _refresh_refund(db, order, refund, get_payment())
     return RefundSubmission(refund, order)
 
 
@@ -374,7 +450,7 @@ def refund_order(
     order = repo.lock_order(db, order_id)
     existing = repo.refund_by_no(db, out_refund_no)
     if existing is not None:
-        return _replay_refund(existing, order, amount_fen)
+        return _replay_refund(db, existing, order, amount_fen)
     if order.status not in ("paid", "part_refunded"):
         raise AppError(ErrorCode.REFUND_NOT_ALLOWED, "只有已支付或部分退款的订单可以退款")
     payment_id = repo.successful_payment_id(db, order.id)
@@ -395,35 +471,52 @@ def refund_order(
         # 不同订单可并发使用同一个 UUID；唯一商户退款单号决定哪个请求先创建。
         existing = repo.refund_by_no(db, out_refund_no)
         assert existing is not None
-        return _replay_refund(existing, order, amount_fen)
+        return _replay_refund(db, existing, order, amount_fen)
     before = {"status": order.status, "refunded_fen": order.refunded_fen}
-    _submit_refund(db, order, payment, refund)
+    _submit_refund(db, order, payment, refund, get_payment())
     return RefundSubmission(refund, order, before)
 
 
 # ---------- 支付回调与联调 ----------
 
 
-def handle_wxpay_notify(db: Session, headers: dict[str, str], body: bytes) -> WxpayAck:
+def _record_payment(db: Session, notify: PayNotify) -> Order:
+    return mark_paid(
+        db,
+        out_trade_no=notify.out_trade_no,
+        transaction_id=notify.transaction_id,
+        amount_fen=notify.amount_fen,
+        raw=notify.raw,
+    )
+
+
+def handle_wxpay_notify(db: Session, headers: Mapping[str, str], body: bytes) -> None:
     """处理微信支付通知：验签、入账、提交。签名错误 → PAYMENT_SIGNATURE_INVALID。"""
     try:
         notify = get_payment().parse_notify(headers, body)
     except (KeyError, TypeError, ValueError) as e:
         raise AppError(ErrorCode.VALIDATION_ERROR, "支付通知内容格式不正确") from e
     if notify.success:
-        mark_paid(
-            db,
-            out_trade_no=notify.out_trade_no,
-            transaction_id=notify.transaction_id,
-            amount_fen=notify.amount_fen,
-            raw=json.loads(json.dumps(notify.raw, default=str)),
-        )
+        _record_payment(db, notify)
         db.commit()
-    return WxpayAck(code="SUCCESS", message="成功")
+
+
+def handle_wxpay_refund_notify(db: Session, headers: Mapping[str, str], body: bytes) -> None:
+    result = get_payment().parse_refund_notify(headers, body)
+    refund = repo.refund_by_no(db, result.out_refund_no)
+    if refund is None:
+        raise AppError(ErrorCode.NOT_FOUND, "退款单不存在")
+    order = repo.lock_order(db, refund.order_id)
+    db.refresh(refund)
+    payment = repo.lock_payment(db, refund.payment_id)
+    _apply_refund_result(db, order, payment, refund, result)
+    db.commit()
 
 
 def simulate_paid(db: Session, user_id: int, order_no: str) -> OrderOut:
     """联调用：等价于收到一笔成功的支付通知。"""
+    if settings.pay_mode != "fake":
+        raise AppError(ErrorCode.ORDER_NOT_PAYABLE, "仅联调支付模式支持模拟付款")
     order = repo.get_order_for_user(db, user_id, order_no)
     if order is None:
         raise AppError(ErrorCode.ORDER_NOT_FOUND)

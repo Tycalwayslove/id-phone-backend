@@ -125,8 +125,8 @@ class OrderCreatedOut(OrderOut):
 OrderPage = page_model(OrderOut, "OrderPage")
 
 
-class WxpayAck(Schema):
-    """给微信支付的应答。微信要求支付通知处理成功时返回这个格式，否则会反复重发。"""
+class WxpayFailure(Schema):
+    """微信支付通知处理失败时的应答。"""
 
-    code: str = Field(description="固定为 SUCCESS，表示通知已处理", examples=["SUCCESS"])
-    message: str = Field(description="固定为 成功", examples=["成功"])
+    code: Literal["FAIL"] = Field(description="固定为 FAIL，表示通知处理失败", examples=["FAIL"])
+    message: str = Field(description="通知处理失败的原因", examples=["支付通知签名不正确"])

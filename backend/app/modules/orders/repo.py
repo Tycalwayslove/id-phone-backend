@@ -56,7 +56,7 @@ def benefits_by_plan(db: Session, plan_ids: list[int]) -> dict[int, dict[str, in
 def get_order_for_user(db: Session, user_id: int, order_no: str, *, for_update: bool = False) -> Order | None:
     stmt = select(Order).where(Order.order_no == order_no, Order.user_id == user_id)
     if for_update:
-        stmt = stmt.with_for_update()
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
     return db.scalar(stmt)
 
 
@@ -124,6 +124,16 @@ def latest_payment(db: Session, order_id: int) -> Payment | None:
     return db.scalar(select(Payment).where(Payment.order_id == order_id).order_by(Payment.id.desc()).limit(1))
 
 
+def pending_payment_nos(db: Session, order_id: int) -> list[str]:
+    return list(
+        db.scalars(
+            select(Payment.out_trade_no)
+            .where(Payment.order_id == order_id, Payment.status == "pending")
+            .order_by(Payment.id)
+        )
+    )
+
+
 def payment_by_out_trade_no(db: Session, out_trade_no: str) -> Payment | None:
     return db.scalar(select(Payment).where(Payment.out_trade_no == out_trade_no))
 
@@ -170,6 +180,16 @@ def pending_refund_fen(db: Session, order_id: int) -> int:
 
 def refund_by_no(db: Session, out_refund_no: str) -> Refund | None:
     return db.scalar(select(Refund).where(Refund.out_refund_no == out_refund_no))
+
+
+def due_pending_refunds(db: Session, before: datetime, limit: int) -> list[Refund]:
+    stmt = (
+        select(Refund)
+        .where(Refund.status == "pending", Refund.updated_at <= before)
+        .order_by(Refund.updated_at, Refund.id)
+        .limit(limit)
+    )
+    return list(db.scalars(stmt))
 
 
 def insert_refund(

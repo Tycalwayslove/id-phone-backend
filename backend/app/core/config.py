@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     wxpay_cert_serial: str = ""
     wxpay_private_key_path: str = ""
     wxpay_platform_cert_path: str = ""
+    wxpay_public_key_path: str = ""
+    wxpay_public_key_id: str = ""
+    wxpay_notify_url: str = ""
+    wxpay_refund_notify_url: str = ""
 
     # 文件存储：local 存在本机目录，oss 存阿里云 OSS
     storage_mode: Literal["local", "oss"] = "local"
