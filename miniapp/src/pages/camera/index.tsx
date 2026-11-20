@@ -3,14 +3,18 @@ import { Button, Camera, Image, Text, View } from '@tarojs/components'
 import Taro, { useDidHide, useDidShow, useReady, useRouter, useUnload } from '@tarojs/taro'
 import type { components } from '../../api/schema'
 import { handleError } from '../../utils/errors'
+import { GUIDE_HINT, GUIDE_LIMITS, stabilizeGuide, type GuideHint, type GuideStability } from '../../utils/faceGuide'
 import { PAGES, goBack, redirect } from '../../utils/nav'
 import { getPhotoQualityFeedback } from '../../utils/photoQuality'
 import { createPhotoFromFile, pickPhotoFile, type PhotoSource } from '../../utils/pickPhoto'
 import useFrontFillLight from './useFrontFillLight'
+import useLiveFaceGuide from './useLiveFaceGuide'
 import './index.scss'
 
 type PhotoOut = components['schemas']['PhotoOut']
 type CameraState = 'loading' | 'allowed' | 'denied' | 'unavailable'
+type CountdownMode = 'manual' | 'auto'
+const AUTO_CAPTURE_KEY = 'camera_auto_capture'
 
 interface Draft {
   path: string
@@ -28,6 +32,14 @@ function takePhoto(): Promise<string> {
   })
 }
 
+function readAutoCapture(): boolean {
+  try {
+    return Taro.getStorageSync(AUTO_CAPTURE_KEY) !== false
+  } catch {
+    return true
+  }
+}
+
 export default function CameraPage() {
   const { params } = useRouter()
   const weapp = Taro.getEnv() === Taro.ENV_TYPE.WEAPP
@@ -37,8 +49,10 @@ export default function CameraPage() {
   const [ready, setReady] = useState(false)
   const [devicePosition, setDevicePosition] = useState<'front' | 'back'>('front')
   const [timerEnabled, setTimerEnabled] = useState(true)
+  const [autoEnabled, setAutoEnabled] = useState(readAutoCapture)
   const [fillLight, setFillLight] = useState(false)
   const [countdown, setCountdown] = useState(0)
+  const [guideHint, setGuideHint] = useState<GuideHint | null>(null)
   const [busy, setBusy] = useState(false)
   const [pickingAlbum, setPickingAlbum] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -47,20 +61,54 @@ export default function CameraPage() {
   const focused = useRef(true)
   const captureVersion = useRef(0)
   const timeout = useRef<ReturnType<typeof setTimeout>>()
+  const countdownMode = useRef<CountdownMode>()
+  const guideStability = useRef<GuideStability | null>(null)
+  const goodSince = useRef<number>()
+  const lastGood = useRef<number>()
 
   const live = weapp && !albumOnly && cameraState === 'allowed' && !draft
   const showFeed = live && visible && !pickingAlbum
   const frontFill = live && fillLight && devicePosition === 'front'
   useFrontFillLight(frontFill && showFeed)
+  // 手动倒计时停止取帧。自动倒计时继续校验姿态，界面暂停更新提示。
+  const stopGuide = useLiveFaceGuide(showFeed && ready && !busy && countdownMode.current !== 'manual',
+    devicePosition === 'front', onGuideSample)
 
-  function clearTimer(): void {
+  function clearCountdown(): void {
     clearTimeout(timeout.current)
     timeout.current = undefined
+    countdownMode.current = undefined
+    goodSince.current = undefined
+    lastGood.current = undefined
   }
 
   function cancelCountdown(): void {
-    clearTimer()
+    clearCountdown()
     setCountdown(0)
+  }
+
+  function resetGuide(): void {
+    guideStability.current = null
+    goodSince.current = undefined
+    lastGood.current = undefined
+    setGuideHint(null)
+  }
+
+  function stopLiveGuide(): void {
+    stopGuide()
+    resetGuide()
+  }
+
+  function toggleAutoCapture(): void {
+    const next = !autoEnabled
+    goodSince.current = undefined
+    lastGood.current = undefined
+    setAutoEnabled(next)
+    try {
+      Taro.setStorageSync(AUTO_CAPTURE_KEY, next)
+    } catch {
+      // 本地存储不可用时，本次切换仍然生效。
+    }
   }
 
   useDidShow(() => {
@@ -71,12 +119,13 @@ export default function CameraPage() {
     focused.current = false
     captureVersion.current++
     cancelCountdown()
+    resetGuide()
     setReady(false)
     setVisible(false)
   })
   useUnload(() => {
     alive.current = false
-    clearTimer()
+    clearCountdown()
   })
 
   const requestPermission = useCallback(async () => {
@@ -110,6 +159,7 @@ export default function CameraPage() {
   async function openAlbum(backOnCancel = false): Promise<void> {
     await run(async () => {
       cancelCountdown()
+      stopLiveGuide()
       setReady(false)
       setPickingAlbum(true)
       try {
@@ -136,6 +186,7 @@ export default function CameraPage() {
 
   async function onCameraError(): Promise<void> {
     cancelCountdown()
+    stopLiveGuide()
     setReady(false)
     const setting = await Taro.getSetting().catch(() => undefined)
     if (alive.current) {
@@ -145,13 +196,15 @@ export default function CameraPage() {
 
   function stopCamera(): void {
     cancelCountdown()
+    stopLiveGuide()
     setReady(false)
     if (focused.current && !locked.current) setCameraState('unavailable')
   }
 
   async function capture(): Promise<void> {
-    if (!focused.current) return
-    setCountdown(0)
+    if (!focused.current || locked.current) return
+    cancelCountdown()
+    resetGuide()
     const version = captureVersion.current
     await run(async () => {
       let path: string
@@ -170,21 +223,57 @@ export default function CameraPage() {
     })
   }
 
-  function startCapture(): void {
-    if (!ready || locked.current || timeout.current !== undefined) return
-    if (!timerEnabled) {
-      void capture()
-      return
-    }
+  function beginCountdown(mode: CountdownMode): void {
+    countdownMode.current = mode
+    if (mode === 'manual') stopLiveGuide()
     function tick(seconds: number): void {
       setCountdown(seconds)
       timeout.current = setTimeout(() => {
-        timeout.current = undefined
-        if (seconds > 1) tick(seconds - 1)
+        if (mode === 'auto' && Date.now() - (lastGood.current ?? -Infinity) > GUIDE_LIMITS.maxSampleAge) {
+          cancelCountdown()
+          resetGuide()
+        } else if (seconds > 1) tick(seconds - 1)
         else void capture()
       }, 1000)
     }
     tick(3)
+  }
+
+  function startCapture(): void {
+    if (!ready || !focused.current || locked.current) return
+    if (countdownMode.current || !timerEnabled) void capture()
+    else beginCountdown('manual')
+  }
+
+  function onGuideSample(hint: GuideHint | null, at: number): void {
+    const mode = countdownMode.current
+    if (!alive.current || !focused.current || locked.current || mode === 'manual') return
+    const previousGood = lastGood.current
+    const good = hint === 'good' && Date.now() - at <= GUIDE_LIMITS.maxSampleAge
+    if (good) {
+      if (previousGood === undefined || at - previousGood > GUIDE_LIMITS.maxSampleAge) goodSince.current = at
+      lastGood.current = at
+    } else {
+      goodSince.current = undefined
+      lastGood.current = undefined
+    }
+
+    if (mode === 'auto') {
+      if (good && previousGood !== undefined && at - previousGood <= GUIDE_LIMITS.maxSampleAge) return
+      cancelCountdown()
+      resetGuide()
+    }
+    if (hint === null || (hint === 'good' && !good)) {
+      resetGuide()
+      return
+    }
+    const previous = guideStability.current
+    const next = stabilizeGuide(previous, hint, at)
+    guideStability.current = next
+    if (next.shown !== previous?.shown) setGuideHint(next.shown)
+    if (autoEnabled && goodSince.current !== undefined && at - goodSince.current >= GUIDE_LIMITS.autoDelay) {
+      beginCountdown('auto')
+    }
   }
 
   async function usePhoto(current: Draft, acceptFailed = false): Promise<void> {
@@ -281,6 +370,7 @@ export default function CameraPage() {
           key={devicePosition}
           className='camera-live__feed'
           devicePosition={devicePosition}
+          frameSize='small'
           flash={devicePosition === 'back' && fillLight ? 'on' : 'off'}
           onInitDone={() => setReady(true)}
           onStop={stopCamera}
@@ -293,6 +383,7 @@ export default function CameraPage() {
             className='camera-live__control'
             disabled={!ready || controlsDisabled}
             onClick={() => {
+              stopLiveGuide()
               setReady(false)
               setDevicePosition(devicePosition === 'front' ? 'back' : 'front')
             }}
@@ -313,11 +404,22 @@ export default function CameraPage() {
           >
             补光 {fillLight ? '开' : '关'}
           </Button>
+          <Button
+            className='camera-live__control'
+            disabled={controlsDisabled}
+            onClick={toggleAutoCapture}
+          >
+            自动拍 {autoEnabled ? '开' : '关'}
+          </Button>
         </View>
         <View className='camera-live__center'>
-          <Text className='camera-live__hint'>{ready ? '手机举到眼睛高度，把脸和肩膀都放进框里' : '正在打开相机'}</Text>
+          <View className='camera-live__hint-slot'>
+            <Text className='camera-live__hint'>
+              {ready ? (guideHint ? GUIDE_HINT[guideHint] : '手机举到眼睛高度，把脸和肩膀都放进框里') : '正在打开相机'}
+            </Text>
+          </View>
           <View className='camera-live__target'>
-            <View className={`camera-target${frontFill ? ' camera-target--lit' : ''}`}>
+            <View className={`camera-target${frontFill ? ' camera-target--lit' : ''}${guideHint === 'good' ? ' camera-target--good' : ''}`}>
               <View className='camera-target__head' />
               <View className='camera-target__shoulders' />
               <View className='camera-target__line camera-target__line--top'><Text>头顶线</Text></View>
@@ -329,7 +431,7 @@ export default function CameraPage() {
           <Button className='camera-live__control camera-live__album' disabled={controlsDisabled} onClick={() => void openAlbum()}>
             相册
           </Button>
-          <Button className='camera-live__shutter' disabled={!ready || controlsDisabled} ariaLabel='拍照' onClick={startCapture} />
+          <Button className='camera-live__shutter' disabled={!ready || busy} ariaLabel='拍照' onClick={startCapture} />
         </View>
       </View>
       {countdown > 0 ? (
