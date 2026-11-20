@@ -12,6 +12,11 @@ export const providerStatus = { enabled: '启用', disabled: '停用', circuit_o
 export const specCategory = { receipt: '回执类', normal: '普通证件照', exam: '考试报名照' } satisfies Record<Schema['AdminSpecOut']['category'], string>
 export const orderItem = { plan: '套餐', addon: '加购项', renew: '续费' } satisfies Record<Schema['OrderItemOut']['item_type'], string>
 export const adminRole = { owner: '所有者', operator: '运营', finance: '财务' } satisfies Record<Schema['AdminMeOut']['role'], string>
+export const adminAccountStatus = { active: '正常', disabled: '已停用' } satisfies Record<Schema['AdminAccountOut']['status'], string>
+type NotifyTask = Schema['AdminNotifyTaskOut']
+export const notifyStatus = { pending: '待发送', sent: '已发送', failed: '发送失败', skipped: '已跳过', cancelled: '已取消' } satisfies Record<NotifyTask['status'], string>
+export const notifyEvent = { receipt_rejected: '回执驳回', receipt_completed: '回执办理完成', entitlement_expiring: '权益即将到期', receipt_expiring: '回执即将到期' } satisfies Record<NotifyTask['event'], string>
+export const notifyChannel = { mini_subscribe: '小程序订阅消息', mp_template: '公众号模板消息', wecom: '企业微信', sms: '短信', voice: '语音', manual_call: '人工电话' } satisfies Record<NotifyTask['channel'], string>
 export const identitySources: Record<string, string> = { wx_mini: '微信小程序', wx_mp: '微信公众号', alipay_mini: '支付宝小程序', douyin_mini: '抖音小程序', h5: '网页' }
 export const paymentChannels: Record<string, string> = { wxpay: '微信支付', alipay: '支付宝', douyin_pay: '抖音支付' }
 

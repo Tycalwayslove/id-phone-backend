@@ -7,8 +7,13 @@ export function PageHeading({ title, action }: { title: string; action?: ReactNo
   return <div className="page-heading"><h1>{title}</h1>{action}</div>
 }
 
-export function Section({ title, children }: { title: string; children: ReactNode }) {
-  return <section className="detail-section"><h3>{title}</h3>{children}</section>
+export function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="detail-section">
+      <div className="detail-section-heading"><h3>{title}</h3>{action}</div>
+      {children}
+    </section>
+  )
 }
 
 export function Problem({ error, retry }: { error: unknown; retry?: () => void }) {
@@ -28,7 +33,7 @@ export function Loading() {
 
 const statusColors: Record<string, string> = {
   active: 'green', enabled: 'green', on_sale: 'green', paid: 'green', completed: 'green',
-  success: 'green', processing: 'blue', submitted: 'blue', pending: 'gold', unknown: 'gold',
+  success: 'green', sent: 'green', processing: 'blue', submitted: 'blue', pending: 'gold', unknown: 'gold',
   rejected: 'volcano', failed: 'red', circuit_open: 'red', part_refunded: 'purple', refunded: 'purple',
 }
 
@@ -73,10 +78,12 @@ export function useCursorList<Row>(
   resource: string,
   fetchPage: (cursor: string | null, signal: AbortSignal) => Promise<Page<Row>>,
   filterVersion = 0,
+  enabled = true,
 ) {
   const instance = useId()
   const query = useInfiniteQuery({
     queryKey: [resource, instance, filterVersion],
+    enabled,
     queryFn: ({ pageParam, signal }) => fetchPage(pageParam, signal),
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.next_cursor ?? undefined,
