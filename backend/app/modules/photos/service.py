@@ -6,7 +6,7 @@
 
 import hashlib
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -186,6 +186,14 @@ def _purge_files(db: Session, files: list[File]) -> None:
     db.flush()
 
 
+def purge_orphan_uploads(db: Session, older_than: datetime) -> int:
+    """清理指定时间之前、未被照片引用的原图，返回清理数量。不 commit。"""
+    files = repo.lock_orphan_uploads(db, older_than)
+    if files:
+        _purge_files(db, files)
+    return len(files)
+
+
 def purge_all_for_user(db: Session, user_id: int) -> int:
     """注销账号用：删除该用户全部存储文件，files 和 photos 标记 purged。返回删除的文件数。不 commit。"""
     files = repo.active_files_of_user(db, user_id)
@@ -203,19 +211,17 @@ def _access_out(db: Session, user_id: int, photo_id: int) -> AccessOut:
     from app.modules.entitlements import service as ent_service
 
     a = ent_service.photo_access(db, user_id, photo_id)
-    return AccessOut(active=a.active, access_until=a.access_until, spec_change=a.spec_change)
+    return AccessOut.model_validate(a)
 
 
-def _photo_out(db: Session, user_id: int, photo: Photo, original: File | None = None) -> PhotoOut:
-    if original is None:
-        original = repo.get_files(db, user_id, [photo.original_file_id])[photo.original_file_id]
+def _photo_out(photo: Photo, original: File, access: AccessOut) -> PhotoOut:
     return PhotoOut(
         id=photo.id,
         source=photo.source,
         status=photo.status,
         created_at=photo.created_at,
         original_url=file_url(original),
-        access=_access_out(db, user_id, photo.id),
+        access=access,
     )
 
 
@@ -271,25 +277,29 @@ def create_photo(db: Session, *, user_id: int, body: PhotoCreate) -> PhotoOut:
         # 并发创建：同一个文件已被另一张照片占用
         raise AppError(ErrorCode.UPLOAD_NOT_FOUND) from e
     db.refresh(photo)  # 取回数据库默认值（created_at）
-    out = _photo_out(db, user_id, photo, original)
+    out = _photo_out(photo, original, _access_out(db, user_id, photo.id))
     db.commit()
     return out
 
 
 def list_photos(db: Session, *, user_id: int, page: PageParams) -> PhotoPage:
+    from app.modules.entitlements import service as ent_service
+
     cur = decode_cursor(page.cursor)
     before = cur.get("id") if cur and isinstance(cur.get("id"), int) else None
     rows = repo.list_photos(db, user_id, before_id=before, limit=page.limit + 1)
     has_more = len(rows) > page.limit
     rows = rows[: page.limit]
     files = repo.get_files(db, user_id, [p.original_file_id for p in rows])
-    items = [_photo_out(db, user_id, p, files[p.original_file_id]) for p in rows]
+    access = ent_service.photo_access_many(db, user_id, [p.id for p in rows])
+    items = [_photo_out(p, files[p.original_file_id], AccessOut.model_validate(access[p.id])) for p in rows]
     return PhotoPage(items=items, next_cursor=encode_cursor({"id": rows[-1].id}) if has_more else None)
 
 
 def get_photo_detail(db: Session, *, user_id: int, photo_id: int) -> PhotoDetail:
     photo = get_photo_for_user(db, user_id, photo_id)
-    base = _photo_out(db, user_id, photo)
+    original = repo.get_files(db, user_id, [photo.original_file_id])[photo.original_file_id]
+    base = _photo_out(photo, original, _access_out(db, user_id, photo.id))
     renders = repo.list_renders(db, user_id, photo.id)
     # 保管期外不再展示无水印的正式图，避免泄露可直接使用的链接
     if not base.access.active:

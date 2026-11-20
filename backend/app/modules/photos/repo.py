@@ -1,8 +1,9 @@
 """照片与文件查询。第一个参数是当前用户 ID，查不到返回 None / 空（service 转成 404）。"""
 
 from collections.abc import Iterable
+from datetime import datetime
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import File, Photo, PhotoRender, Spec
@@ -31,16 +32,31 @@ def get_files(db: Session, user_id: int, file_ids: Iterable[int]) -> dict[int, F
 
 
 def get_unused_upload(db: Session, user_id: int, file_id: int) -> File | None:
-    """本人上传的、有效的、还没被任何照片用作原图的 original 文件。"""
-    return db.scalar(
-        select(File).where(
-            File.id == file_id,
-            File.user_id == user_id,
-            File.kind == "original",
-            File.status == "active",
-            ~exists().where(Photo.original_file_id == File.id),
+    """锁定本人上传的、有效且还没被照片引用的原图。"""
+    return db.scalar(_unused_originals().where(File.id == file_id, File.user_id == user_id).with_for_update())
+
+
+def _unused_originals():
+    return select(File).where(
+        File.kind == "original",
+        File.status == "active",
+        ~exists().where(or_(Photo.original_file_id == File.id, Photo.matting_file_id == File.id)),
+    )
+
+
+def lock_orphan_uploads(db: Session, older_than: datetime) -> list[File]:
+    candidates = list(
+        db.scalars(
+            _unused_originals()
+            .where(File.created_at < older_than)
+            .order_by(File.id)
+            .with_for_update(skip_locked=True)
         )
     )
+    if not candidates:
+        return []
+    # 取锁前若有创建照片的事务刚提交，重新检查引用才可安全删除。
+    return list(db.scalars(_unused_originals().where(File.id.in_([f.id for f in candidates]))))
 
 
 def _render_query(user_id: int, photo_id: int):

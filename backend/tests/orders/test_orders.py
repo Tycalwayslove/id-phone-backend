@@ -1,11 +1,12 @@
 import json
 from datetime import timedelta
 
+import pytest
 from sqlalchemy import func, select
 
 from app.core.utils import utcnow
-from app.integrations.payment import sign_fake_notify
-from app.models import Entitlement, Order, Payment
+from app.integrations.payment import FakePay, sign_fake_notify
+from app.models import Entitlement, Order, Payment, Refund
 from tests.conftest import login
 from tests.factories import make_plan, make_standard_plans
 from tests.orders.helpers import latest_user_id, make_photo
@@ -214,6 +215,44 @@ def test_wxpay_callback_marks_paid_and_is_idempotent(client, db):
         assert r.json() == {"code": "SUCCESS", "message": "成功"}
     assert client.get(f"{API}/orders/{order_no}", headers=h).json()["status"] == "paid"
     assert len(client.get(f"{API}/entitlements", headers=h).json()) == 1
+
+
+@pytest.mark.parametrize(("refund_status", "order_status"), [("success", "refunded"), ("pending", "closed")])
+def test_wxpay_callback_for_closed_order_refunds_once(
+    client, db, monkeypatch, caplog, refund_status, order_status
+):
+    h, _ = _setup(client, db)
+    order = _buy(client, h, "unlimited_99")
+    order_no = order["order_no"]
+    cancelled = client.post(f"{API}/orders/{order_no}/cancel", headers=h)
+    assert cancelled.json()["status"] == "closed"
+    calls = []
+
+    def refund(self, **kwargs):
+        calls.append(kwargs)
+        return refund_status
+
+    monkeypatch.setattr(FakePay, "refund", refund)
+    body = _notify_body(db, order_no, amount_fen=9900)
+    headers = {"X-Fake-Signature": sign_fake_notify(body)}
+    for _ in range(2):
+        r = client.post(f"{API}/callbacks/wxpay", content=body, headers=headers)
+        assert r.status_code == 200, r.text
+        assert r.json()["code"] == "SUCCESS"
+
+    detail = client.get(f"{API}/orders/{order_no}", headers=h).json()
+    assert detail["status"] == order_status and detail["paid_fen"] == 9900
+    assert detail["refunded_fen"] == (9900 if refund_status == "success" else 0)
+    assert client.get(f"{API}/entitlements", headers=h).json() == []
+    payment = db.scalars(select(Payment)).one()
+    assert payment.status == "success" and payment.transaction_id == "WX123"
+    record = db.scalars(select(Refund)).one()
+    assert (record.operator, record.status, record.amount_fen) == ("system", refund_status, 9900)
+    assert len(calls) == 1
+    assert calls[0]["out_refund_no"] == record.out_refund_no
+    assert calls[0]["refund_fen"] == calls[0]["total_fen"] == 9900
+    events = [r for r in caplog.records if r.name == "app.orders" and "refund.auto_closed_order" in r.message]
+    assert len(events) == 1 and record.out_refund_no in events[0].message
 
 
 def test_wxpay_callback_amount_mismatch(client, db):

@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Cookie, Depends, Path, Query, Request, Response
 
 from app.core.config import settings
-from app.core.deps import DB, Admin, CurrentAdmin, Page, require
+from app.core.deps import DB, Admin, CurrentAdmin, Page, PageParams, require
 from app.core.errors import ErrorCode, errors_doc
 from app.core.schemas import OkResponse
 from app.modules.admin import service
@@ -30,6 +30,7 @@ from app.modules.admin.schemas import (
     AdminSpecUpdateIn,
     AdminUserDetail,
     AdminUserPage,
+    AdminUserSearchIn,
 )
 
 admin_router = APIRouter(tags=["后台"])
@@ -147,23 +148,17 @@ def get_me(admin: Admin):
     summary="用户列表",
     description=(
         f"按注册时间从新到旧列出用户，游标分页，条件之间是“并且”。权限点 user:read。{_LOGIN_NOTE}"
-        "手机号只返回打码后的；按手机号查询时传明文完整手机号，服务端用哈希匹配。"
+        "手机号只返回打码后的；按手机号筛选请调用 POST /api/v1/admin/users/search。"
     ),
     response_model=AdminUserPage,
     response_description="用户分页列表",
-    responses=errors_doc(*_AUTH),
+    responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR),
 )
 def list_users(
     _: UserRead,
     db: DB,
     page: Page,
     user_id: Annotated[int | None, Query(ge=1, description="按用户 ID 精确查找", examples=[1024])] = None,
-    phone: Annotated[
-        str | None,
-        Query(
-            min_length=5, max_length=20, description="按完整手机号精确查找（明文）", examples=["13800001234"]
-        ),
-    ] = None,
     status: Annotated[
         str | None,
         Query(
@@ -173,7 +168,30 @@ def list_users(
         ),
     ] = None,
 ):
-    return service.list_users(db, user_id=user_id, phone=phone, status=status, page=page)
+    return service.list_users(db, user_id=user_id, status=status, page=page)
+
+
+@admin_router.post(
+    "/users/search",
+    operation_id="admin_users_search",
+    summary="按条件查询用户",
+    description=(
+        f"按注册时间从新到旧查询用户，游标分页，条件之间是“并且”。权限点 user:read。{_LOGIN_NOTE}"
+        "请求头需带登录时返回的 X-CSRF-Token。按手机号筛选时在请求体传完整手机号，"
+        "服务端用哈希匹配，响应仅返回打码后的手机号。"
+    ),
+    response_model=AdminUserPage,
+    response_description="符合条件的用户分页列表",
+    responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR),
+)
+def search_users(body: AdminUserSearchIn, _: UserRead, db: DB):
+    return service.list_users(
+        db,
+        user_id=body.user_id,
+        status=body.status,
+        page=PageParams(body.cursor, body.limit),
+        phone=body.phone,
+    )
 
 
 @admin_router.get(
@@ -257,12 +275,18 @@ def get_order(order_no: OrderNoPath, _: OrderRead, db: DB):
     description=(
         f"对已支付或部分退款的订单发起退款，原路退回。权限点 refund:create。{_LOGIN_NOTE}{_WRITE_NOTE}"
         "退款金额必须大于 0 且不超过可退余额（已付 - 已退 - 处理中的退款），否则 REFUND_NOT_ALLOWED。"
-        "退完（全额）后订单变 refunded，并撤销该订单发放的权益（用户不能再下载、换规格）；未退完变 part_refunded，权益保留。"
-        "没有幂等键，请不要重复点击；重复提交会按剩余可退余额再退一次。"
+        "渠道返回处理中时占用可退余额，等待渠道确认。退款成功后更新订单金额；全额退完时撤销订单及附属加购权益，并取消未办结的回执申请。"
+        "重试时复用 request_id：相同订单和金额返回原退款记录，订单或金额不同返回 IDEMPOTENCY_CONFLICT。"
     ),
     response_model=AdminRefundResultOut,
     response_description="退款记录和退款后的订单状态",
-    responses=errors_doc(*_AUTH, ErrorCode.ORDER_NOT_FOUND, ErrorCode.REFUND_NOT_ALLOWED),
+    responses=errors_doc(
+        *_AUTH,
+        ErrorCode.VALIDATION_ERROR,
+        ErrorCode.ORDER_NOT_FOUND,
+        ErrorCode.REFUND_NOT_ALLOWED,
+        ErrorCode.IDEMPOTENCY_CONFLICT,
+    ),
 )
 def refund_order(order_no: OrderNoPath, body: AdminRefundIn, admin: RefundCreate, db: DB):
     return service.refund_order(db, admin, order_no, body)
@@ -359,11 +383,11 @@ def list_plans(_: PlanRead, db: DB):
     summary="创建套餐",
     description=(
         f"创建一个套餐及其权益。权限点 plan:write（仅 owner）。{_LOGIN_NOTE}{_WRITE_NOTE}"
-        "权益类型必须是系统支持的类型，套餐编码不能重复，否则返回 VALIDATION_ERROR。"
+        "套餐编码重复返回 CONFLICT，权益类型必须是系统支持的类型。"
     ),
     response_model=AdminPlanOut,
     response_description="创建后的套餐",
-    responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR),
+    responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR, ErrorCode.CONFLICT),
 )
 def create_plan(body: AdminPlanCreateIn, admin: PlanWrite, db: DB):
     return service.create_plan(db, admin, body)
@@ -407,11 +431,11 @@ def list_specs(_: SpecRead, db: DB, page: Page):
     summary="创建规格",
     description=(
         f"创建一个证件照规格。权限点 spec:write。{_LOGIN_NOTE}{_WRITE_NOTE}"
-        "规格编码不能重复，父规格必须已存在，否则返回 VALIDATION_ERROR。"
+        "规格编码重复返回 CONFLICT，父规格必须已存在，否则返回 VALIDATION_ERROR。"
     ),
     response_model=AdminSpecOut,
     response_description="创建后的规格",
-    responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR),
+    responses=errors_doc(*_AUTH, ErrorCode.VALIDATION_ERROR, ErrorCode.CONFLICT),
 )
 def create_spec(body: AdminSpecCreateIn, admin: SpecWrite, db: DB):
     return service.create_spec(db, admin, body)

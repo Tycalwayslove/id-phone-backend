@@ -8,7 +8,7 @@ from datetime import datetime
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
-from app.models import Entitlement, EntitlementLedger, EntitlementQuota, Photo, Plan
+from app.models import Entitlement, EntitlementLedger, EntitlementQuota, OrderItem, Photo, Plan
 
 RECEIPT_QUOTA = "receipt_quota"
 
@@ -23,19 +23,53 @@ def list_for_user(db: Session, user_id: int, *, status: str, now: datetime, limi
     return list(db.scalars(stmt))
 
 
-def get_for_user(db: Session, user_id: int, entitlement_id: int) -> Entitlement | None:
-    return db.scalar(
-        select(Entitlement).where(Entitlement.id == entitlement_id, Entitlement.user_id == user_id)
-    )
+def get_for_user(
+    db: Session, user_id: int, entitlement_id: int, *, for_update: bool = False
+) -> Entitlement | None:
+    stmt = select(Entitlement).where(Entitlement.id == entitlement_id, Entitlement.user_id == user_id)
+    if for_update:
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+    return db.scalar(stmt)
 
 
-def active_covering_photo(db: Session, user_id: int, photo_id: int, now: datetime) -> list[Entitlement]:
-    """有效且覆盖这张照片的权益（photo_id 相同，或 photo_id 为空覆盖全部）。"""
+def active_covering_photos(
+    db: Session, user_id: int, photo_ids: list[int], now: datetime, *, for_update: bool = False
+) -> list[Entitlement]:
+    """查有效的指定照片权益和全照片权益。"""
     stmt = select(Entitlement).where(
         Entitlement.user_id == user_id,
         Entitlement.status == "active",
         Entitlement.ends_at > now,
-        or_(Entitlement.photo_id == photo_id, Entitlement.photo_id.is_(None)),
+        or_(Entitlement.photo_id.in_(photo_ids), Entitlement.photo_id.is_(None)),
+    )
+    if for_update:
+        stmt = stmt.order_by(Entitlement.id).with_for_update().execution_options(populate_existing=True)
+    return list(db.scalars(stmt))
+
+
+def lock_order_entitlements(db: Session, order_id: int) -> list[Entitlement]:
+    stmt = (
+        select(Entitlement)
+        .join(OrderItem, OrderItem.id == Entitlement.order_item_id)
+        .where(OrderItem.order_id == order_id)
+        .order_by(Entitlement.id)
+        .with_for_update(of=Entitlement)
+        .execution_options(populate_existing=True)
+    )
+    return list(db.scalars(stmt))
+
+
+def lock_attached_entitlements(db: Session, parent_ids: set[int]) -> list[Entitlement]:
+    stmt = (
+        select(Entitlement)
+        .join(OrderItem, OrderItem.id == Entitlement.order_item_id)
+        .where(
+            OrderItem.item_type == "addon",
+            OrderItem.snapshot["parent_entitlement_id"].astext.in_([str(i) for i in parent_ids]),
+        )
+        .order_by(Entitlement.id)
+        .with_for_update(of=Entitlement)
+        .execution_options(populate_existing=True)
     )
     return list(db.scalars(stmt))
 

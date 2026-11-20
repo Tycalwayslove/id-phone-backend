@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from typing import Annotated, Any, Literal
+from uuid import UUID
 
 from pydantic import Field, StringConstraints
 
@@ -69,6 +70,30 @@ class AdminMeOut(Schema):
 
 
 # ---------- 用户 ----------
+
+
+class AdminUserSearchIn(Schema):
+    """后台用户查询条件和分页参数。"""
+
+    phone: str | None = Field(
+        default=None,
+        min_length=5,
+        max_length=20,
+        description="按完整手机号精确查找。传明文手机号，服务端用哈希匹配；不传则不按手机号筛选",
+        examples=["13800001234"],
+    )
+    user_id: int | None = Field(default=None, ge=1, description="按用户 ID 精确查找", examples=[1024])
+    status: UserStatus | None = Field(
+        default=None,
+        description="按账号状态筛选：active = 正常；disabled = 已停用；cancelled = 已注销",
+        examples=["active"],
+    )
+    cursor: str | None = Field(
+        default=None,
+        description="翻页游标。第一页不传，之后传上一页返回的 next_cursor",
+        examples=["eyJpIjoxMDI0fQ"],
+    )
+    limit: int = Field(default=20, ge=1, le=100, description="每页条数，1～100，默认 20", examples=[20])
 
 
 class AdminUserOut(Schema):
@@ -195,14 +220,18 @@ AdminOrderPage = page_model(AdminOrderOut, "AdminOrderPage")
 class AdminRefundIn(Schema):
     """发起退款的请求。"""
 
+    request_id: UUID = Field(
+        description="退款请求 UUID 字符串。前端每次打开退款弹窗时生成，重试同一笔退款时复用",
+        examples=["99c238a2-4de7-4d98-a2df-b79f7538cb7e"],
+    )
     amount_fen: int = Field(
         gt=0,
         le=100_000_000,
-        description="退款金额，单位：分，必须大于 0 且不超过订单可退余额（已付 - 已退）",
+        description="退款金额，单位：分，必须大于 0 且不超过订单可退余额（已付 - 已退 - 处理中退款）",
         examples=[3990],
     )
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)] = Field(
-        description="退款原因，1～200 字，会记入退款记录和审计日志。不要填手机号、身份证号",
+        description="退款原因，1～200 字，会记入退款记录。不要填手机号、身份证号",
         examples=["用户重复购买"],
     )
 

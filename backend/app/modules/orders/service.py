@@ -5,17 +5,19 @@
 """
 
 import json
+import logging
 import secrets
+from dataclasses import dataclass
 from datetime import timedelta
+from uuid import UUID
 
-from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError, ErrorCode
 from app.core.idempotency import run_idempotent
 from app.core.utils import decode_cursor, encode_cursor, new_no, utcnow
 from app.integrations.payment import get_payment
-from app.models import Entitlement, Order, OrderItem, Payment, Plan, Refund
+from app.models import Order, OrderItem, Payment, Plan, Refund
 from app.modules.entitlements import service as entitlement_service
 from app.modules.orders import repo
 from app.modules.orders.schemas import (
@@ -30,6 +32,7 @@ from app.modules.orders.schemas import (
 )
 
 ORDER_TTL = timedelta(minutes=30)
+log = logging.getLogger("app.orders")
 
 
 # ---------- 套餐 ----------
@@ -246,20 +249,27 @@ def cancel_order(db: Session, user_id: int, order_no: str) -> OrderOut:
 # ---------- 支付 ----------
 
 
-def mark_paid(db: Session, *, out_trade_no: str, transaction_id: str, amount_fen: int, raw: dict) -> Order:
-    """支付成功入账：幂等。订单变 paid，并为每个订单项发放权益。不 commit。"""
+def mark_paid(
+    db: Session,
+    *,
+    out_trade_no: str,
+    transaction_id: str,
+    amount_fen: int,
+    raw: dict,
+    refund_closed: bool = True,
+) -> Order:
+    """支付成功入账。待支付订单发放权益，已关闭订单自动退款。幂等，不 commit。"""
     payment = repo.payment_by_out_trade_no(db, out_trade_no)
     if payment is None:
         raise AppError(ErrorCode.ORDER_NOT_FOUND)
     order = repo.lock_order(db, payment.order_id)
     payment = repo.lock_payment(db, payment.id)
 
-    if payment.status == "success":
-        return order
     if payment.amount_fen != amount_fen:
         raise AppError(ErrorCode.ORDER_NOT_PAYABLE, "支付金额与订单金额不一致")
-    if order.status != "pending":
-        # TODO: 订单已关闭/已处理却收到支付，需要自动退款
+    if payment.status == "success":
+        return order
+    if order.status != "pending" and not (order.status == "closed" and refund_closed):
         raise AppError(ErrorCode.ORDER_NOT_PAYABLE)
 
     now = utcnow()
@@ -267,9 +277,14 @@ def mark_paid(db: Session, *, out_trade_no: str, transaction_id: str, amount_fen
     payment.transaction_id = transaction_id
     payment.paid_at = now
     payment.raw = raw
-    order.status = "paid"
     order.paid_fen = payment.amount_fen
     order.paid_at = now
+    if order.status == "closed":
+        db.flush()
+        _refund_closed_payment(db, order, payment)
+        return order
+
+    order.status = "paid"
     db.flush()
 
     for item in repo.items_by_order(db, [order.id])[order.id]:
@@ -278,6 +293,115 @@ def mark_paid(db: Session, *, out_trade_no: str, transaction_id: str, amount_fen
             continue
         entitlement_service.grant_for_order_item(db, user_id=order.user_id, item=item, plan=plan, paid_at=now)
     return order
+
+
+# ---------- 退款 ----------
+
+
+@dataclass(frozen=True)
+class RefundSubmission:
+    """后台退款结果；重试已有退款时没有新的审计快照。"""
+
+    refund: Refund
+    order: Order
+    before: dict[str, str | int] | None = None
+
+
+def _submit_refund(db: Session, order: Order, payment: Payment, refund: Refund) -> None:
+    """应用渠道受理结果。处理中占用可退余额，收到成功结果才更新订单和权益。"""
+    result = get_payment().refund(
+        out_trade_no=payment.out_trade_no,
+        out_refund_no=refund.out_refund_no,
+        refund_fen=refund.amount_fen,
+        total_fen=payment.amount_fen,
+        reason=refund.reason,
+    )
+    if result == "success":
+        from app.modules.receipts import service as receipt_service
+
+        refund.status = "success"
+        refund.finished_at = utcnow()
+        order.refunded_fen += refund.amount_fen
+        order.status = "refunded" if order.refunded_fen == order.paid_fen else "part_refunded"
+        if order.status == "refunded":
+            entitlement_ids = entitlement_service.revoke_for_order(db, order.id)
+            if entitlement_ids:
+                receipt_service.cancel_for_refund(db, entitlement_ids)
+    elif result == "failed":
+        refund.status = "failed"
+        refund.finished_at = utcnow()
+    db.flush()
+
+
+def _refund_closed_payment(db: Session, order: Order, payment: Payment) -> None:
+    refund = repo.insert_refund(
+        db,
+        payment,
+        out_refund_no=f"RL{payment.out_trade_no}",
+        amount_fen=payment.amount_fen,
+        reason="订单关闭后收到支付成功通知",
+        operator="system",
+    )
+    if refund is None:
+        return
+    _submit_refund(db, order, payment, refund)
+    # audit_logs 要求管理员外键；系统操作由退款流水持久记录，同时输出结构化字段。
+    log.warning(
+        "refund.auto_closed_order order_no=%s out_refund_no=%s amount_fen=%s status=%s",
+        order.order_no,
+        refund.out_refund_no,
+        refund.amount_fen,
+        refund.status,
+    )
+
+
+def _replay_refund(refund: Refund, order: Order, amount_fen: int) -> RefundSubmission:
+    if refund.order_id != order.id or refund.amount_fen != amount_fen:
+        raise AppError(ErrorCode.IDEMPOTENCY_CONFLICT)
+    return RefundSubmission(refund, order)
+
+
+def refund_order(
+    db: Session, *, order_no: str, request_id: UUID, amount_fen: int, reason: str, operator: str
+) -> RefundSubmission:
+    """发起退款或返回已有记录。由后台调用方提交事务。"""
+    out_refund_no = f"RA{request_id.hex}"
+    order_id = repo.order_id_by_no(db, order_no)
+    if order_id is None:
+        if repo.refund_by_no(db, out_refund_no) is not None:
+            raise AppError(ErrorCode.IDEMPOTENCY_CONFLICT)
+        raise AppError(ErrorCode.ORDER_NOT_FOUND)
+    order = repo.lock_order(db, order_id)
+    existing = repo.refund_by_no(db, out_refund_no)
+    if existing is not None:
+        return _replay_refund(existing, order, amount_fen)
+    if order.status not in ("paid", "part_refunded"):
+        raise AppError(ErrorCode.REFUND_NOT_ALLOWED, "只有已支付或部分退款的订单可以退款")
+    payment_id = repo.successful_payment_id(db, order.id)
+    if payment_id is None:
+        raise AppError(ErrorCode.REFUND_NOT_ALLOWED, "订单没有支付成功的流水")
+    payment = repo.lock_payment(db, payment_id)
+
+    refundable = order.paid_fen - order.refunded_fen - repo.pending_refund_fen(db, order.id)
+    if amount_fen <= 0 or amount_fen > refundable:
+        raise AppError(
+            ErrorCode.REFUND_NOT_ALLOWED, f"退款金额必须大于 0 且不超过可退余额（{refundable} 分）"
+        )
+
+    refund = repo.insert_refund(
+        db, payment, out_refund_no=out_refund_no, amount_fen=amount_fen, reason=reason, operator=operator
+    )
+    if refund is None:
+        # 不同订单可并发使用同一个 UUID；唯一商户退款单号决定哪个请求先创建。
+        existing = repo.refund_by_no(db, out_refund_no)
+        assert existing is not None
+        return _replay_refund(existing, order, amount_fen)
+    before = {"status": order.status, "refunded_fen": order.refunded_fen}
+    _submit_refund(db, order, payment, refund)
+    return RefundSubmission(refund, order, before)
+
+
+# ---------- 支付回调与联调 ----------
 
 
 def handle_wxpay_notify(db: Session, headers: dict[str, str], body: bytes) -> WxpayAck:
@@ -312,86 +436,7 @@ def simulate_paid(db: Session, user_id: int, order_no: str) -> OrderOut:
         transaction_id="FAKE" + secrets.token_hex(8).upper(),
         amount_fen=payment.amount_fen,
         raw={"mode": "fake", "simulated": True},
+        refund_closed=False,
     )
     db.commit()
     return _orders_out(db, [order])[0]
-
-
-# ---------- 后台退款 ----------
-
-
-def refund_order(db: Session, *, order_no: str, amount_fen: int, reason: str, operator: str) -> Refund:
-    """后台退款（跨模块约定，给 admin 用）。只 flush，不 commit，由调用方统一提交。
-
-    - 订单必须是 paid 或 part_refunded；0 < amount_fen <= 已付 - 已退 - 处理中的退款，否则 REFUND_NOT_ALLOWED。
-    - 渠道返回 success：退款成功，累加 order.refunded_fen；退完变 refunded，否则 part_refunded。
-    - 全额退款时，该订单各订单项生成的权益置为 revoked。
-    - 渠道返回 failed：退款记为 failed，订单不变；返回其他值：保持 pending（占用可退额度），
-      TODO: 真实微信支付需要等退款结果通知后再入账。
-    """
-    order_id = db.scalar(select(Order.id).where(Order.order_no == order_no))
-    if order_id is None:
-        raise AppError(ErrorCode.ORDER_NOT_FOUND)
-    order = repo.lock_order(db, order_id)  # 先订单、后支付流水，和 mark_paid 的加锁顺序一致
-    if order.status not in ("paid", "part_refunded"):
-        raise AppError(ErrorCode.REFUND_NOT_ALLOWED, "只有已支付或部分退款的订单可以退款")
-    payment_id = db.scalar(
-        select(Payment.id)
-        .where(Payment.order_id == order.id, Payment.status == "success")
-        .order_by(Payment.id.desc())
-        .limit(1)
-    )
-    if payment_id is None:
-        raise AppError(ErrorCode.REFUND_NOT_ALLOWED, "订单没有支付成功的流水")
-    payment = repo.lock_payment(db, payment_id)
-
-    in_flight = db.scalar(
-        select(func.coalesce(func.sum(Refund.amount_fen), 0)).where(
-            Refund.order_id == order.id, Refund.status == "pending"
-        )
-    )
-    refundable = order.paid_fen - order.refunded_fen - int(in_flight or 0)
-    if amount_fen <= 0 or amount_fen > refundable:
-        raise AppError(
-            ErrorCode.REFUND_NOT_ALLOWED, f"退款金额必须大于 0 且不超过可退余额（{refundable} 分）"
-        )
-
-    refund = Refund(
-        payment_id=payment.id,
-        order_id=order.id,
-        out_refund_no=new_no("F"),
-        amount_fen=amount_fen,
-        reason=reason,
-        status="pending",
-        operator=operator,
-    )
-    db.add(refund)
-    db.flush()
-
-    result = get_payment().refund(
-        out_trade_no=payment.out_trade_no,
-        out_refund_no=refund.out_refund_no,
-        refund_fen=amount_fen,
-        total_fen=payment.amount_fen,
-        reason=reason,
-    )
-    now = utcnow()
-    if result == "success":
-        refund.status = "success"
-        refund.finished_at = now
-        order.refunded_fen += amount_fen
-        order.status = "refunded" if order.refunded_fen >= order.paid_fen else "part_refunded"
-        if order.status == "refunded":
-            item_ids = select(OrderItem.id).where(OrderItem.order_id == order.id)
-            db.execute(
-                update(Entitlement)
-                .where(Entitlement.order_item_id.in_(item_ids), Entitlement.status != "revoked")
-                .values(status="revoked")
-                .execution_options(synchronize_session=False)
-            )
-    elif result == "failed":
-        refund.status = "failed"
-        refund.finished_at = now
-    db.flush()
-    db.refresh(refund)
-    return refund

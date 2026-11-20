@@ -124,6 +124,7 @@ async def _raw_body(request: Request) -> bytes:
     description=(
         "由微信支付服务器调用，前端不要调用。不需要登录，靠签名验证来源：签名不对返回 PAYMENT_SIGNATURE_INVALID。"
         "处理是幂等的，重复通知不会重复发放权益。处理成功返回 {code: SUCCESS, message: 成功}。"
+        "订单已关闭时自动发起全额退款，保留系统退款记录，不发放权益。"
         "联调（fake）模式下，签名放在 X-Fake-Signature 请求头，请求体是 JSON。"
     ),
     response_model=WxpayAck,

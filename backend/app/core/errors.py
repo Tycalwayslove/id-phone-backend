@@ -19,6 +19,7 @@ class ErrorCode(StrEnum):
     # 通用
     VALIDATION_ERROR = "VALIDATION_ERROR"
     NOT_FOUND = "NOT_FOUND"
+    CONFLICT = "CONFLICT"
     METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
     RATE_LIMITED = "RATE_LIMITED"
     IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_CONFLICT"
@@ -66,6 +67,7 @@ class ErrorCode(StrEnum):
 _META: dict[ErrorCode, tuple[int, str]] = {
     ErrorCode.VALIDATION_ERROR: (422, "请求参数不正确"),
     ErrorCode.NOT_FOUND: (404, "资源不存在"),
+    ErrorCode.CONFLICT: (409, "数据已存在"),
     ErrorCode.METHOD_NOT_ALLOWED: (405, "不支持这种请求方式"),
     ErrorCode.RATE_LIMITED: (429, "操作太频繁，请稍后再试"),
     ErrorCode.IDEMPOTENCY_CONFLICT: (409, "同一个请求正在处理或参数不一致"),
