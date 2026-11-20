@@ -35,12 +35,16 @@ interface Draft {
 
 function takePhoto(): Promise<string> {
   return new Promise((resolve, reject) => {
-    Taro.createCameraContext().takePhoto({
+    // selfieMirror 是微信基础库 2.22.0 起的参数，Taro 类型里还没有
+    const options: Taro.CameraContext.TakePhotoOption & { selfieMirror?: boolean } = {
       // 证件照成品只有几百像素宽，普通画质足够，文件也小，上传更稳
       quality: 'normal',
+      // 前置摄像头默认输出镜像照片，证件照必须是真实方向（痣、发旋等不对称特征左右颠倒会影响人脸比对）
+      selfieMirror: false,
       success: ({ tempImagePath }) => resolve(tempImagePath),
       fail: reject
-    })
+    }
+    Taro.createCameraContext().takePhoto(options)
   })
 }
 
