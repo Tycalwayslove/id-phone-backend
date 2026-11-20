@@ -1,6 +1,6 @@
 # T018 后台“需人工核对”处理
 
-- 状态：进行中（Codex，Wave 4）
+- 状态：已完成（PR #8）
 - 依赖：T016（超时标记 `manual_review_required`）、T010
 
 ## 目标
