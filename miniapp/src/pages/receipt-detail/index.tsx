@@ -9,6 +9,7 @@ import Loading from '../../components/Loading'
 import PageContainer from '../../components/PageContainer'
 import StatusTag from '../../components/StatusTag'
 import { handleError } from '../../utils/errors'
+import type { ErrorContext } from '../../utils/errors'
 import { formatDate, formatDateTime } from '../../utils/format'
 import { createKeyKeeper } from '../../utils/idempotency'
 import { PAGES, navigate } from '../../utils/nav'
@@ -28,6 +29,7 @@ export default function ReceiptDetail() {
   const appNo = params.app_no ?? ''
   const [app, setApp] = useState<ApplicationOut | null>(null)
   const [busy, setBusy] = useState(false)
+  const [replacementId, setReplacementId] = useState<number>()
   const keeper = useRef(createKeyKeeper())
 
   const load = useCallback(async () => {
@@ -56,7 +58,7 @@ export default function ReceiptDetail() {
     return () => clearInterval(timer)
   }, [status, appNo])
 
-  async function run(fn: () => Promise<ApplicationOut>): Promise<void> {
+  async function run(fn: () => Promise<ApplicationOut>, ctx: ErrorContext = {}): Promise<void> {
     if (busy) return
     setBusy(true)
     try {
@@ -65,7 +67,7 @@ export default function ReceiptDetail() {
       if (e instanceof ApiError && e.status >= 400 && e.status < 500 && e.code !== 'IDEMPOTENCY_CONFLICT') {
         keeper.current.release()
       }
-      await handleError(e, { photoId: app?.photo_id })
+      await handleError(e, { photoId: app?.photo_id, ...ctx })
     } finally {
       setBusy(false)
     }
@@ -73,17 +75,26 @@ export default function ReceiptDetail() {
 
   async function resubmit(): Promise<void> {
     if (!app || busy) return
-    const sheet = await Taro.showActionSheet({ itemList: ['使用原照片重新提交', '换一张照片（拍照）', '换一张照片（相册）'] }).catch(
-      () => null
-    )
-    if (!sheet) return
-    let photoId: number | undefined
-    if (sheet.tapIndex > 0) {
-      const source: PhotoSource = sheet.tapIndex === 1 ? 'camera' : 'upload'
+    const choices: { label: string; photoId?: number; source?: PhotoSource }[] = [
+      { label: '使用原照片重新提交' },
+      { label: '换一张照片（拍照）', source: 'camera' },
+      { label: '换一张照片（相册）', source: 'upload' }
+    ]
+    if (replacementId !== undefined) {
+      choices.unshift({ label: '使用已更换的照片重新提交', photoId: replacementId })
+    }
+    const sheet = await Taro.showActionSheet({
+      itemList: choices.map(({ label }) => label)
+    }).catch(() => null)
+    const choice = sheet && choices[sheet.tapIndex]
+    if (!choice) return
+    let photoId = choice.photoId
+    if (choice.source) {
       try {
-        const photo = await pickAndCreatePhoto(source)
+        const photo = await pickAndCreatePhoto(choice.source)
         if (!photo) return
         photoId = photo.id
+        setReplacementId(photoId)
       } catch (e) {
         await handleError(e)
         return
@@ -93,7 +104,14 @@ export default function ReceiptDetail() {
     await run(async () => {
       const r = await resubmitReceipt(app.app_no, { photo_id: photoId }, key)
       keeper.current.release()
+      setReplacementId(undefined)
       return r
+    }, {
+      photoId: photoId ?? app.photo_id,
+      onRetake: async () => {
+        const photo = await pickAndCreatePhoto('camera')
+        if (photo) setReplacementId(photo.id)
+      }
     })
   }
 
@@ -212,10 +230,10 @@ export default function ReceiptDetail() {
           <Text className='hint'>开发：模拟结果</Text>
           <View className='rd-dev__btns'>
             <Text className='rd-dev__btn' onClick={() => run(() => devSimulateReceipt(app.app_no, { result: 'completed' }))}>
-              completed
+              模拟完成
             </Text>
             <Text className='rd-dev__btn' onClick={() => run(() => devSimulateReceipt(app.app_no, { result: 'rejected' }))}>
-              rejected
+              模拟驳回
             </Text>
           </View>
         </View>

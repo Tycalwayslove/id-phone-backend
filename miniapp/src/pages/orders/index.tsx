@@ -9,6 +9,8 @@ import StatusTag from '../../components/StatusTag'
 import { usePagedList } from '../../hooks/usePagedList'
 import { describeError, handleError } from '../../utils/errors'
 import { formatDateTime } from '../../utils/format'
+import { PAGES, navigate } from '../../utils/nav'
+import { ORDER_ITEM_TYPE_TEXT } from '../../utils/status'
 import './index.scss'
 
 export default function Orders() {
@@ -47,11 +49,11 @@ export default function Orders() {
           <View key={o.order_no} className='card order-item'>
             <View className='order-item__head'>
               <Text className='hint'>{o.order_no}</Text>
-              <StatusTag kind='order' status={o.status} />
+              <StatusTag kind='order' order={o} />
             </View>
             {o.items.map((it, i) => (
               <View key={`${o.order_no}-${i}`} className='order-item__row'>
-                <Text>{it.plan_name ?? '套餐'}</Text>
+                <Text>{it.plan_name ?? ORDER_ITEM_TYPE_TEXT[it.item_type]}</Text>
                 <PriceText fen={it.amount_fen} size='small' />
               </View>
             ))}
@@ -62,13 +64,19 @@ export default function Orders() {
                 <PriceText fen={o.total_fen} />
               </View>
             </View>
-            {o.status === 'pending' ? (
-              <View className='order-item__actions'>
+            <View className='order-item__actions'>
+              <Text
+                className='order-item__btn'
+                onClick={() => navigate(PAGES.orderDetail, { order_no: o.order_no })}
+              >
+                查看详情
+              </Text>
+              {o.status === 'pending' ? (
                 <Text className='order-item__btn' onClick={() => cancel(o.order_no)}>
                   取消订单
                 </Text>
-              </View>
-            ) : null}
+              ) : null}
+            </View>
           </View>
         ))}
       </View>

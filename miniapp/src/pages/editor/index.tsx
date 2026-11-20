@@ -9,7 +9,8 @@ import { getSpec } from '../../api/specs'
 import Loading from '../../components/Loading'
 import PageContainer from '../../components/PageContainer'
 import { handleError } from '../../utils/errors'
-import { PAGES, navigate, toInt } from '../../utils/nav'
+import { PAGES, navigate, redirect, toInt } from '../../utils/nav'
+import { pickAndCreatePhoto } from '../../utils/pickPhoto'
 import { saveRenderToAlbum } from '../../utils/saveImage'
 import './index.scss'
 
@@ -29,11 +30,15 @@ export default function Editor() {
   const [beauty, setBeauty] = useState(0)
   const [render, setRender] = useState<RenderOut | null>(null)
   const [rendering, setRendering] = useState(false)
+  const [renderFailed, setRenderFailed] = useState(false)
   const [saving, setSaving] = useState(false)
   const seqRef = useRef(0)
   const loadedRef = useRef(false)
 
-  const ctx = { photoId }
+  const retake = useCallback(async () => {
+    const photo = await pickAndCreatePhoto('camera')
+    if (photo) await redirect(PAGES.editor, { photo_id: photo.id, spec_code: specCode })
+  }, [specCode])
 
   // 规格 + 权益
   useEffect(() => {
@@ -63,16 +68,20 @@ export default function Editor() {
     if (!photoId || !spec || !bgColor) return
     const seq = ++seqRef.current
     setRendering(true)
+    setRenderFailed(false)
     try {
       const r = await createRender(photoId, { spec_code: spec.code, bg_color: bgColor, beauty_level: beauty })
       if (seq === seqRef.current) setRender(r)
     } catch (e) {
-      if (seq === seqRef.current) await handleError(e, ctx)
+      if (seq === seqRef.current) {
+        setRender(null)
+        setRenderFailed(true)
+        await handleError(e, { photoId, onRetake: retake })
+      }
     } finally {
       if (seq === seqRef.current) setRendering(false)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [photoId, spec, bgColor, beauty, active])
+  }, [photoId, spec, bgColor, beauty, active, retake])
 
   useEffect(() => {
     void doRender()
@@ -84,7 +93,7 @@ export default function Editor() {
     try {
       await saveRenderToAlbum(photoId, render.id)
     } catch (e) {
-      await handleError(e, ctx)
+      await handleError(e, { photoId, onRetake: retake })
     } finally {
       setSaving(false)
     }
@@ -125,6 +134,9 @@ export default function Editor() {
           {spec.name} · {spec.width_px}×{spec.height_px}px
         </Text>
         {render?.watermarked ? <Text className='editor-preview__tip'>购买后去除水印</Text> : null}
+        {renderFailed && !rendering ? (
+          <Button block type='default' onClick={doRender}>重新生成</Button>
+        ) : null}
       </View>
 
       <View className='card'>

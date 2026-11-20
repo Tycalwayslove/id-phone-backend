@@ -10,8 +10,10 @@ import Loading from '../../components/Loading'
 import PageContainer from '../../components/PageContainer'
 import { handleError } from '../../utils/errors'
 import { formatDate } from '../../utils/format'
-import { PAGES, goBack, navigate, toInt } from '../../utils/nav'
+import { PAGES, goBack, navigate, redirect, toInt } from '../../utils/nav'
+import { pickAndCreatePhoto } from '../../utils/pickPhoto'
 import { saveRenderToAlbum } from '../../utils/saveImage'
+import { PHOTO_SOURCE_TEXT } from '../../utils/status'
 import './index.scss'
 
 type PhotoDetail = components['schemas']['PhotoDetail']
@@ -40,7 +42,13 @@ export default function PhotoDetailPage() {
     try {
       await saveRenderToAlbum(photoId, renderId)
     } catch (e) {
-      await handleError(e, { photoId })
+      await handleError(e, {
+        photoId,
+        onRetake: async () => {
+          const replacement = await pickAndCreatePhoto('camera')
+          if (replacement) await redirect(PAGES.photoDetail, { id: replacement.id })
+        }
+      })
     }
   }
 
@@ -83,17 +91,16 @@ export default function PhotoDetailPage() {
   return (
     <PageContainer withBottomBar>
       <View className='card pd-head'>
-        <Image className='pd-head__img' src={resolveUrl(photo.original_url)} mode='aspectFill' />
+        {photo.original_url ? (
+          <Image className='pd-head__img' src={resolveUrl(photo.original_url)} mode='aspectFill' />
+        ) : (
+          <View className='pd-head__img pd-head__placeholder hint'>暂无法预览</View>
+        )}
         <View className='pd-head__info'>
           <Text className='pd-head__status'>
             {access.active ? `保管至 ${formatDate(access.access_until)}` : expired ? '保管期已过' : '未购买'}
           </Text>
-          <Text className='hint'>{photo.source === 'camera' ? '拍照' : '相册'} · {formatDate(photo.created_at)}</Text>
-          {expired ? (
-            <Text className='pd-head__renew' onClick={() => navigate(PAGES.plans, { photo_id: photo.id })}>
-              续费 &gt;
-            </Text>
-          ) : null}
+          <Text className='hint'>{PHOTO_SOURCE_TEXT[photo.source]} · {formatDate(photo.created_at)}</Text>
         </View>
       </View>
 
@@ -145,8 +152,8 @@ export default function PhotoDetailPage() {
           删除
         </Button>
         {expired ? (
-          <Button block type='primary' onClick={() => navigate(PAGES.plans, { photo_id: photo.id })}>
-            续费
+          <Button block type='primary' onClick={() => navigate(PAGES.entitlements)}>
+            查看权益
           </Button>
         ) : null}
         <Button block type={expired ? 'default' : 'primary'} onClick={() => navigate(PAGES.specs, { photo_id: photo.id })}>

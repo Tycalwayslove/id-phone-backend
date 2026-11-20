@@ -9,6 +9,7 @@ type Benefits = components['schemas']['PlanBenefitsOut']
 interface Props {
   plan: PlanOut
   selected?: boolean
+  renewal?: boolean
   onClick?: () => void
 }
 
@@ -36,10 +37,12 @@ function benefitPoints(b: Benefits): string[] {
 }
 
 /** 套餐卡片：名称、价格、卖点、角标 */
-export default function PlanCard({ plan, selected = false, onClick }: Props) {
-  const badge = displayBadge(plan.display)
+export default function PlanCard({ plan, selected = false, renewal = false, onClick }: Props) {
+  const badge = renewal ? '' : displayBadge(plan.display)
   const configured = displayPoints(plan.display)
-  const points = configured.length ? configured : benefitPoints(plan.benefits)
+  const points = renewal
+    ? [`延长保管期 ${plan.benefits.storage_days} 天`]
+    : configured.length ? configured : benefitPoints(plan.benefits)
   return (
     <View className={`plan-card${selected ? ' plan-card--selected' : ''}`} onClick={onClick}>
       {badge ? <Text className='plan-card__badge'>{badge}</Text> : null}
