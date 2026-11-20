@@ -604,6 +604,24 @@ def test_providers_list_and_update(client: TestClient, db: Session):
     assert log["before"] == {"status": "enabled"} and log["after"] == {"status": "circuit_open"}
 
 
+def test_provider_sync_writes_audit_and_returns_details(client: TestClient, db: Session):
+    provider = make_provider_for(db, make_spec(db, "prov_spec"), "zheying")
+    csrf = admin_login(client, db)
+    path = f"{API}/providers/{provider.code}/sync-specs"
+    response = client.post(path, headers=csrf)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["created"] >= 9 and result["updated"] == 1
+    assert any(item["spec_code"] == "zy_1001" and item["change"] == "created" for item in result["items"])
+    (log,) = _audit(client, action="provider.sync_specs")
+    assert log["target_type"] == "provider" and log["target_id"] == provider.id
+    assert log["after"]["created"] == result["created"]
+    assert {item["spec_code"] for item in log["after"]["items"]} == {
+        item["spec_code"] for item in result["items"]
+    }
+    assert client.get(f"{API}/specs").json()["items"][0]["status"] == "inactive"
+
+
 def test_audit_logs_filters(client: TestClient, db: Session):
     csrf = admin_login(client, db)
     client.post(f"{API}/plans", json=NEW_PLAN, headers=csrf)
@@ -623,7 +641,11 @@ def test_admin_api_docs_complete():
         if path.startswith("/api/v1/admin")
         for op in ops.values()
     ]
-    assert len(ids) == 35 and len(ids) == len(set(ids)) and all(i.startswith("admin_") for i in ids)
+    assert len(ids) == 36 and len(ids) == len(set(ids)) and all(i.startswith("admin_") for i in ids)
+    assert (
+        spec["paths"][f"{API}/providers/{{code}}/sync-specs"]["post"]["operationId"]
+        == "admin_providers_sync_specs"
+    )
     users_list = spec["paths"][f"{API}/users"]["get"]
     assert "phone" not in {p["name"] for p in users_list["parameters"]}
     users_search = spec["paths"][f"{API}/users/search"]["post"]

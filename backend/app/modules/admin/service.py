@@ -86,6 +86,8 @@ from app.modules.admin.schemas import (
 from app.modules.orders import service as order_service
 from app.modules.orders.schemas import OrderItemOut
 from app.modules.receipts import service as receipt_service
+from app.modules.specs import service as spec_service
+from app.modules.specs.schemas import ProviderSyncResult
 
 # ---------- 登录失败限流 ----------
 # 单进程内存实现：同一 username 在窗口内失败达到上限就拒绝登录。
@@ -1003,6 +1005,28 @@ def update_provider(
         db.commit()
         db.refresh(provider)
     return next(p for p in list_providers(db) if p.code == code)
+
+
+def sync_provider_specs(db: Session, admin: CurrentAdmin, code: str) -> ProviderSyncResult:
+    try:
+        result = spec_service.sync_provider_specs(db, code)
+        provider = repo.get_provider_by_code(db, code)
+        _audit(
+            db,
+            admin.id,
+            "provider.sync_specs",
+            "provider",
+            provider.id if provider else None,
+            after={
+                "provider_code": code,
+                **result.model_dump(exclude={"items": {"__all__": {"spec_name"}}}),
+            },
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return result
 
 
 # ---------- 服务商规格与路由规则 ----------

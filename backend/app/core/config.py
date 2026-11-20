@@ -70,9 +70,8 @@ class Settings(BaseSettings):
     zheying_api_base: str = "https://api.zjzapi.com"
     zheying_app_key: str = ""
     zheying_app_secret: str = ""
-    clipimg_api_base: str = "https://www.qwyun.top"
-    clipimg_app_key: str = ""
-    clipimg_app_secret: str = ""
+    qianweiyun_api_base: str = "https://api.qwyun.top"
+    qianweiyun_app_key: str = ""
     # 真实回执回调的来源 IP 或 CIDR，逗号分隔，留空则不限
     receipt_callback_ip_allowlist: str = ""
 

@@ -42,6 +42,7 @@ export const auditActions: Record<string, string> = {
   'spec.create': '新建规格',
   'spec.update': '修改规格',
   'provider.update': '修改服务商状态',
+  'provider.sync_specs': '同步服务商规格',
 }
 export const auditTargets: Record<string, string> = {
   order: '订单', plan: '套餐', spec: '规格', provider: '服务商', receipt_application: '回执申请', admin_session: '后台会话',

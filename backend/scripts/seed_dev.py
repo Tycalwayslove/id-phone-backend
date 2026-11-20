@@ -308,16 +308,14 @@ def seed() -> None:
             db.add(child)
             specs[code] = child
 
-        zheying = Provider(
-            code="zheying", name="鹧应证件照", adapter="ZheyingAdapter", upstream_group="zheying"
-        )
+        zheying = Provider(code="zheying", name="鹧应证件照", adapter="zheying", upstream_group="zheying")
         qianweiyun = Provider(
-            code="qianweiyun", name="黔微云证件照", adapter="ZheyingAdapter", upstream_group="zheying"
+            code="qianweiyun", name="黔微云证件照", adapter="qianweiyun", upstream_group="zheying"
         )
         clipimg = Provider(
             code="clipimg",
             name="可立图",
-            adapter="ClipimgAdapter",
+            adapter="clipimg",
             upstream_group="clipimg",
             status="disabled",
         )

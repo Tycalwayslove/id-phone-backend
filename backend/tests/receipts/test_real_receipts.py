@@ -94,7 +94,7 @@ def _callback(client, nonce, state, *, order_no=_ORDER_NO, code=PROVIDER_CODE, s
     )
 
 
-@pytest.mark.parametrize("adapter", ["zheying", "clipimg"])
+@pytest.mark.parametrize("adapter", ["zheying", "qianweiyun"])
 def test_submit_binds_digest_and_order_and_replays_idempotently(client, db, real_channel, adapter):
     world, calls = real_channel(adapter=adapter)
     headers = {**world.headers, "Idempotency-Key": "real-submit"}

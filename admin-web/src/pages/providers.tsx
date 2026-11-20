@@ -1,6 +1,6 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { Button, Space } from 'antd'
-import { useQuery } from '@tanstack/react-query'
+import { Alert, Button, Descriptions, Modal, Space } from 'antd'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { adminApi } from '../api/admin'
 import type { Schema } from '../api/client'
@@ -13,6 +13,7 @@ import { ProviderSpecEditor, RouteRuleEditor } from './provider-editors'
 type Provider = Schema['AdminProviderOut']
 type ProviderSpec = Schema['AdminProviderSpecOut']
 type RouteRule = Schema['AdminRouteRuleOut']
+type SyncResult = Schema['ProviderSyncResult']
 type Edit =
   | { type: 'spec'; providerCode: string; entry: ProviderSpec | null }
   | { type: 'rule'; providerCode: string; rule: RouteRule | null }
@@ -89,10 +90,30 @@ function ProviderDetails({ provider, edit, busy }: { provider: Provider; edit?: 
 export default function Providers() {
   const canWrite = usePermission('provider:write')
   const confirm = useConfirmChange('providers')
+  const cache = useQueryClient()
   const [editing, setEditing] = useState<Edit>()
+  const [syncing, setSyncing] = useState<string>()
+  const [syncReport, setSyncReport] = useState<{ providerName: string; result: SyncResult }>()
   const query = useQuery({ queryKey: ['providers'], queryFn: ({ signal }) => adminApi.providers(signal) })
   const providerOptions = (query.data ?? []).map(({ code, name }) => ({ value: code, label: `${name}（${code}）` }))
   const closeEditor = () => setEditing(undefined)
+
+  function syncSpecs(provider: Provider) {
+    confirm({
+      title: '同步规格',
+      content: `从「${provider.name}」同步规格目录？同步会更新制照参数，并停用目录中已移除的规格映射。`,
+      okText: '确认同步',
+    }, async () => {
+      setSyncing(provider.code)
+      try {
+        const result = await adminApi.syncProviderSpecs(provider.code)
+        setSyncReport({ providerName: provider.name, result })
+        void cache.invalidateQueries({ queryKey: ['specs'] })
+      } finally {
+        setSyncing(undefined)
+      }
+    }, '规格已同步')
+  }
 
   return (
     <>
@@ -101,7 +122,7 @@ export default function Providers() {
         {query.isError && <Problem error={query.error} retry={() => { void query.refetch() }} />}
         <DataTable<Provider> rowKey="code" loading={query.isPending} dataSource={query.data} expandable={{
           expandedRowRender: (provider) => (
-            <ProviderDetails provider={provider} edit={canWrite ? setEditing : undefined} busy={query.isFetching} />
+            <ProviderDetails provider={provider} edit={canWrite ? setEditing : undefined} busy={query.isFetching || syncing !== undefined} />
           ),
         }} columns={[
           { title: '服务商', dataIndex: 'name' },
@@ -115,8 +136,10 @@ export default function Providers() {
             title: '操作',
             render: (_: unknown, row: Provider) => (
               <Space>
+                <Button size="small" loading={syncing === row.code} disabled={query.isFetching || syncing !== undefined}
+                  onClick={() => syncSpecs(row)}>同步规格</Button>
                 {stateChanges.filter((change) => change.value !== row.status).map(({ value, label }) => (
-                  <Button key={value} size="small" danger={value !== 'enabled'} disabled={query.isFetching}
+                  <Button key={value} size="small" danger={value !== 'enabled'} disabled={query.isFetching || syncing !== undefined}
                     onClick={() => confirm({
                       title: `${label}服务商`,
                       content: value === 'enabled'
@@ -137,6 +160,30 @@ export default function Providers() {
       )}
       {canWrite && editing?.type === 'rule' && (
         <RouteRuleEditor providerCode={editing.providerCode} providerOptions={providerOptions} rule={editing.rule} onClose={closeEditor} />
+      )}
+      {canWrite && syncReport && (
+        <Modal open title={`${syncReport.providerName}规格同步结果`} width={620}
+          onCancel={() => setSyncReport(undefined)}
+          footer={<Button type="primary" onClick={() => setSyncReport(undefined)}>关闭</Button>}>
+          <Descriptions size="small" column={2} items={[
+            { key: 'created', label: '新增', children: syncReport.result.created },
+            { key: 'updated', label: '更新', children: syncReport.result.updated },
+            { key: 'unchanged', label: '未变', children: syncReport.result.unchanged },
+            { key: 'disabled', label: '停用', children: syncReport.result.disabled },
+          ]} />
+          <Alert className="detail-note" type="info" showIcon message="新规格默认下架，请在规格页审核后上架" />
+          {syncReport.result.created > 0 && (
+            <DataTable<Schema['ProviderSyncItem']>
+              rowKey="spec_code"
+              dataSource={syncReport.result.items.filter(({ change }) => change === 'created')}
+              columns={[
+                { title: '新增规格', dataIndex: 'spec_name' },
+                { title: '规格编码', dataIndex: 'spec_code' },
+              ]}
+              scroll={{ y: 320 }}
+            />
+          )}
+        </Modal>
       )}
     </>
   )

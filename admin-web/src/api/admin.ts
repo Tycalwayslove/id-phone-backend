@@ -59,6 +59,8 @@ export const adminApi = {
     result(await client.GET('/api/v1/admin/providers', { signal })),
   updateProvider: async (code: string, body: Schema['AdminProviderUpdateIn']) =>
     result(await client.PATCH('/api/v1/admin/providers/{code}', { params: { path: { code } }, body })),
+  syncProviderSpecs: async (code: string) =>
+    result(await client.POST('/api/v1/admin/providers/{code}/sync-specs', { params: { path: { code } } })),
   createProviderSpec: async (body: Schema['AdminProviderSpecCreateIn']) =>
     result(await client.POST('/api/v1/admin/provider-specs', { body })),
   updateProviderSpec: async (entry_id: number, body: Schema['AdminProviderSpecUpdateIn']) =>
