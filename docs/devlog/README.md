@@ -71,3 +71,4 @@
 | 0035 | [自建照片处理流水线（T024）](0035-in-house-photo-pipeline.md) | 已完成，待 PostgreSQL 和授权照片验证 |
 | 0036 | [精细抠图（T028）](0036-fine-matting.md) | 已完成，待 PostgreSQL 和小程序真机验证 |
 | 0037 | [后台照片与用户来源应用（T029）](0037-admin-photos-and-app-source.md) | 已完成，待 PostgreSQL 联调 |
+| 0038 | [真机调试问题集中修复（2026-11-20）](0038-device-debug-fixes.md) | 已完成，待真机复测 |
