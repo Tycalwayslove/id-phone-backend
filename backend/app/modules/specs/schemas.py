@@ -8,8 +8,8 @@ from app.core.regions import region_name
 from app.core.schemas import Schema, page_model
 
 
-class SpecOut(Schema):
-    """规格摘要：列表里每一项。"""
+class SpecFields(Schema):
+    """列表和详情共用的规格目录字段。"""
 
     code: str = Field(description="规格编码，唯一，接口里用它指定规格", examples=["gd_idcard"])
     name: str = Field(description="规格名称，直接展示给用户", examples=["广东省身份证"])
@@ -39,6 +39,15 @@ class SpecOut(Schema):
     @property
     def region_name(self) -> str | None:
         return region_name(self.region_code)
+
+
+class SpecOut(SpecFields):
+    """规格摘要：列表里每一项。"""
+
+    supports_receipt: bool = Field(
+        description="当前是否能办理该规格的官方回执；须同时有启用的服务商、规格映射和路由规则。",
+        examples=[True, False],
+    )
 
 
 SpecPage = page_model(SpecOut, "SpecPage", "按排序值从小到大，排序值相同按 ID")
@@ -94,10 +103,6 @@ class SpecDetail(SpecOut):
     )
     form_schema: list[SpecFormField] = Field(
         description="办理回执时要用户填写的字段列表；不支持回执的规格通常为空列表"
-    )
-    supports_receipt: bool = Field(
-        description="当前是否能办理该规格的官方回执（有启用的服务商通道）；false 时不要展示办理入口",
-        examples=[True],
     )
     official_valid_days: int | None = Field(
         default=None, description="官方回执的有效天数；无明确期限时为空", examples=[90]

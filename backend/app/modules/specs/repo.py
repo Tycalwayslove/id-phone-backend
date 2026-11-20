@@ -1,6 +1,6 @@
 """规格查询。规格是公开数据，不区分用户。"""
 
-from sqlalchemy import exists, func, or_, select, tuple_
+from sqlalchemy import and_, func, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -13,7 +13,7 @@ def list_active(
     *,
     category: str | None,
     keyword: str | None,
-    region_codes: set[str],
+    region_codes: set[str] | None,
     after: tuple[int, int] | None,
     limit: int,
 ) -> list[Spec]:
@@ -23,7 +23,7 @@ def list_active(
         q = q.where(Spec.category == category)
     if keyword:
         q = q.where(Spec.name.ilike(contains_pattern(keyword), escape="\\"))
-    if region_codes:
+    if region_codes is not None:
         q = q.where(or_(Spec.region_code.is_(None), Spec.region_code.in_(region_codes | {""})))
     if after is not None:
         q = q.where(tuple_(Spec.sort, Spec.id) > tuple_(after[0], after[1]))
@@ -44,22 +44,28 @@ def get_active_by_code(db: Session, code: str) -> Spec | None:
     return db.scalar(select(Spec).where(Spec.code == code, Spec.status == "active"))
 
 
-def supports_receipt(db: Session, spec_id: int) -> bool:
-    """有启用的路由规则 + 启用的服务商规格 + 未停用的服务商，才算能办回执。"""
-    q = select(
-        exists()
-        .where(
-            RouteRule.spec_id == spec_id,
-            RouteRule.is_enabled.is_(True),
-            ProviderSpec.spec_id == RouteRule.spec_id,
-            ProviderSpec.provider_id == RouteRule.provider_id,
-            ProviderSpec.is_enabled.is_(True),
-            Provider.id == RouteRule.provider_id,
-            Provider.status != "disabled",
+def receipt_spec_ids(db: Session, spec_ids: list[int]) -> set[int]:
+    """一次查询取出具有启用服务商、规格映射和路由规则的规格。"""
+    if not spec_ids:
+        return set()
+    stmt = (
+        select(RouteRule.spec_id)
+        .join(
+            ProviderSpec,
+            and_(
+                ProviderSpec.spec_id == RouteRule.spec_id, ProviderSpec.provider_id == RouteRule.provider_id
+            ),
         )
-        .correlate()
+        .join(Provider, Provider.id == RouteRule.provider_id)
+        .where(
+            RouteRule.spec_id.in_(spec_ids),
+            RouteRule.is_enabled.is_(True),
+            ProviderSpec.is_enabled.is_(True),
+            Provider.status == "enabled",
+        )
+        .distinct()
     )
-    return bool(db.scalar(q))
+    return set(db.scalars(stmt))
 
 
 def lock_catalog_provider(db: Session, code: str) -> Provider | None:
