@@ -69,3 +69,51 @@ def test_detail_not_found(client, db):
     s.status = "inactive"
     db.flush()
     assert client.get("/api/v1/specs/det_off").json()["code"] == "SPEC_NOT_FOUND"
+
+
+def test_list_by_city_and_province(client, db):
+    for code, region in [
+        ("area_all", None),
+        ("area_gd", "440000"),
+        ("area_gz", "440100"),
+        ("area_sz", "440300"),
+        ("area_bj", "110000"),
+    ]:
+        make_spec(db, code).region_code = region
+    db.flush()
+
+    def areas(**params):
+        r = client.get("/api/v1/specs", params={"keyword": "area_", **params})
+        assert r.status_code == 200
+        return [(row["code"], row["region_name"]) for row in r.json()["items"]]
+
+    assert areas(region_code="440100") == [("area_all", None), ("area_gd", "广东省"), ("area_gz", "广州市")]
+    assert areas(region_code="440000") == [("area_all", None), ("area_gd", "广东省")]
+    assert len(areas()) == 5
+    assert client.get("/api/v1/specs", params={"region_code": "foo"}).status_code == 422
+    assert client.get("/api/v1/specs/area_gz").json()["region_name"] == "广州市"
+
+
+def test_spec_regions_lists_only_active_regional_specs(client, db):
+    for index, code in enumerate(["440000", "440100", "440100", "510100", "110000", None, "999999"]):
+        make_spec(db, f"region_{index}").region_code = code
+    disabled = make_spec(db, "region_disabled")
+    disabled.region_code, disabled.status = "440300", "inactive"
+    db.flush()
+
+    response = client.get("/api/v1/spec-regions")
+    assert response.status_code == 200
+    regions = {row["region_code"]: row for row in response.json()}
+    assert regions["440000"] == {
+        "region_code": "440000",
+        "region_name": "广东省",
+        "spec_count": 3,
+        "province_spec_count": 1,
+        "cities": [{"region_code": "440100", "region_name": "广州市", "spec_count": 2}],
+    }
+    assert regions["510000"]["cities"] == [
+        {"region_code": "510100", "region_name": "成都市", "spec_count": 1}
+    ]
+    assert regions["510000"]["province_spec_count"] == 0
+    assert regions["110000"]["cities"] == [] and regions["110000"]["province_spec_count"] == 1
+    assert "999999" not in regions
