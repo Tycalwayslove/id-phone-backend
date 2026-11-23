@@ -82,6 +82,8 @@ from app.modules.admin.schemas import (
     AdminProviderSpecPage,
     AdminProviderSpecUpdateIn,
     AdminProviderUpdateIn,
+    AdminReceiptPhotoOut,
+    AdminReceiptRenderOut,
     AdminRefundIn,
     AdminRefundOut,
     AdminRefundResultOut,
@@ -803,17 +805,59 @@ def list_applications(
     )
 
 
-def get_application(db: Session, app_no: str) -> AdminApplicationDetail:
+def _application_detail(
+    db: Session, app_no: str, *, viewer: CurrentAdmin | None = None
+) -> AdminApplicationDetail:
     app, spec, needs_review, form_masked, attempts = receipt_service.get_admin_application_detail(
         db, app_no=app_no
     )
-    return AdminApplicationDetail(
+    photo_out = None
+    receipt_url = receipt_reason = None
+    renders: dict[int, AdminReceiptRenderOut] = {}
+    if viewer is not None and viewer.can("photo:read"):
+        assets = photo_service.get_admin_receipt_assets(
+            db,
+            user_id=app.user_id,
+            photo_id=app.photo_id,
+            receipt_file_id=app.receipt_file_id,
+            render_ids={attempt.render_id for attempt, _ in attempts},
+        )
+        photo = assets.photo
+        original_url, original_reason = photo_service.admin_image_link(
+            assets.original, photo_status=photo.status if photo is not None else None
+        )
+        photo_out = AdminReceiptPhotoOut(
+            id=app.photo_id,
+            thumbnail_url=original_url,
+            quality=photo.quality if photo is not None else None,
+            missing_reason=original_reason if photo is not None else "照片不存在",
+        )
+        if app.receipt_file_id is None:
+            receipt_reason = "暂无官方回执图"
+        else:
+            receipt_url, receipt_reason = photo_service.admin_image_link(assets.receipt)
+        for render_id, (render, name, file, photo_status) in assets.renders.items():
+            url, reason = photo_service.admin_image_link(file, photo_status=photo_status)
+            renders[render_id] = AdminReceiptRenderOut(
+                id=render.id,
+                spec_name=name,
+                bg_color=render.bg_color,
+                beauty_level=render.beauty_level,
+                watermarked=render.watermarked,
+                created_at=render.created_at,
+                url=url,
+                missing_reason=reason,
+            )
+    detail = AdminApplicationDetail(
         **_application_fields(app, spec, needs_review),
         region_code=app.region_code,
         image_code=app.image_code,
         rejected_at=app.rejected_at,
         official_expire_at=app.official_expire_at,
         form_masked=form_masked,
+        photo=photo_out,
+        receipt_image_url=receipt_url,
+        receipt_image_missing_reason=receipt_reason,
         attempts=[
             AdminAttemptOut(
                 seq=a.seq,
@@ -824,10 +868,20 @@ def get_application(db: Session, app_no: str) -> AdminApplicationDetail:
                 cost_fen=a.cost_fen,
                 submitted_at=a.submitted_at,
                 finished_at=a.finished_at,
+                render=renders.get(a.render_id),
             )
             for a, code in attempts
         ],
     )
+    if viewer is not None:
+        _audit(db, viewer.id, "application.view", "receipt_application", app.id)
+    return detail
+
+
+def get_application(db: Session, admin: CurrentAdmin, app_no: str) -> AdminApplicationDetail:
+    detail = _application_detail(db, app_no, viewer=admin)
+    db.commit()
+    return detail
 
 
 def cancel_application(db: Session, admin: CurrentAdmin, app_no: str) -> AdminApplicationDetail:
@@ -842,7 +896,7 @@ def cancel_application(db: Session, admin: CurrentAdmin, app_no: str) -> AdminAp
     except Exception:
         db.rollback()
         raise
-    return get_application(db, app_no)
+    return _application_detail(db, app_no)
 
 
 def resolve_manual_review(
@@ -859,7 +913,7 @@ def resolve_manual_review(
             {"status": before_status, "manual_review_required": True},
             {"status": app.status, "manual_review_required": False, "remark": payload.remark},
         )
-        detail = get_application(db, app_no)
+        detail = _application_detail(db, app_no)
         db.commit()
     except Exception:
         db.rollback()

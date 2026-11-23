@@ -10,7 +10,7 @@ import { Loading, Problem, Section, Status } from './ui'
 type Photo = Schema['AdminPhotoOut']
 type PhotoDetail = Schema['AdminPhotoDetail']
 
-function PhotoView({ id, onClose }: { id: number; onClose: () => void }) {
+export function PhotoView({ id, onClose }: { id: number; onClose: () => void }) {
   const query = useQuery({
     queryKey: ['photos', 'detail', id],
     queryFn: ({ signal }) => adminApi.photo(id, signal),

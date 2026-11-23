@@ -73,3 +73,4 @@
 | 0037 | [后台照片与用户来源应用（T029）](0037-admin-photos-and-app-source.md) | 已完成，待 PostgreSQL 联调 |
 | 0038 | [真机调试问题集中修复（2026-11-20）](0038-device-debug-fixes.md) | 已完成，待真机复测 |
 | 0039 | [运营后台页码分页（T030）](0039-admin-offset-pagination.md) | 已完成，待 PostgreSQL 集成验证 |
+| 0040 | [后台回执详情展示图片（T031）](0040-admin-receipt-images.md) | 已完成，待 PostgreSQL 集成验证 |

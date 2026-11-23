@@ -5059,7 +5059,7 @@
           "后台"
         ],
         "summary": "回执申请详情",
-        "description": "查看申请详情，包含全部服务商提交记录（服务商、状态、驳回原因、成本、时间）和打码后的办理表单。权限点 application:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。后台看不到姓名、身份证号明文。",
+        "description": "查看申请详情，包含全部服务商提交记录（服务商、状态、驳回原因、成本、时间）和打码后的办理表单。权限点 application:read。需要后台登录（Cookie）；没有对应权限点返回 PERMISSION_DENIED。后台看不到姓名、身份证号明文。查看会写入 application.view 审计。同时拥有 photo:read 时返回用户原图、各次提交的证件照及官方回执图，图片地址有效期 10 分钟。",
         "operationId": "admin_applications_detail",
         "security": [
           {
@@ -8891,6 +8891,47 @@
               }
             ]
           },
+          "photo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminReceiptPhotoOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "当前用户照片摘要；没有照片查看权限或响应来自申请操作时为空"
+          },
+          "receipt_image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receipt Image Url",
+            "description": "官方回执图签名地址，有效期 10 分钟；文件不可用、没有照片查看权限或响应来自申请操作时为空",
+            "examples": [
+              "https://api.example.com/files/receipt.png"
+            ]
+          },
+          "receipt_image_missing_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receipt Image Missing Reason",
+            "description": "回执图不可用的原因；有图片地址、没有照片查看权限或响应来自申请操作时为空",
+            "examples": [
+              "暂无官方回执图"
+            ]
+          },
           "attempts": {
             "items": {
               "$ref": "#/components/schemas/AdminAttemptOut"
@@ -8920,10 +8961,13 @@
           "rejected_at",
           "official_expire_at",
           "form_masked",
+          "photo",
+          "receipt_image_url",
+          "receipt_image_missing_reason",
           "attempts"
         ],
         "title": "AdminApplicationDetail",
-        "description": "回执申请详情：增加全部提交记录和打码后的办理表单。"
+        "description": "回执申请详情，包含提交记录、脱敏表单和有权查看的图片。"
       },
       "AdminApplicationOut": {
         "properties": {
@@ -9235,6 +9279,17 @@
             "examples": [
               "2026-11-19T09:10:00Z"
             ]
+          },
+          "render": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminReceiptRenderOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "本次提交使用的证件照；没有照片查看权限、导出记录不存在或响应来自申请操作时为空"
           }
         },
         "type": "object",
@@ -9246,7 +9301,8 @@
           "reject_reason",
           "cost_fen",
           "submitted_at",
-          "finished_at"
+          "finished_at",
+          "render"
         ],
         "title": "AdminAttemptOut",
         "description": "一次提交给服务商的记录。"
@@ -11816,6 +11872,170 @@
         ],
         "title": "AdminProviderUpdateIn",
         "description": "修改服务商状态的请求。"
+      },
+      "AdminReceiptPhotoOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "后台照片详情使用的照片 ID",
+            "examples": [
+              12
+            ]
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url",
+            "description": "原图签名地址，用于缩略展示，有效期 10 分钟；文件不可用时为空",
+            "examples": [
+              "https://api.example.com/files/original.jpg"
+            ]
+          },
+          "quality": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhotoQuality"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "拍后检测等级和问题明细；没有检测记录时为空",
+            "examples": [
+              {
+                "issues": [],
+                "level": "ok"
+              }
+            ]
+          },
+          "missing_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Reason",
+            "description": "原图不可用的原因；有图片地址时为空",
+            "examples": [
+              "文件已清理"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "thumbnail_url",
+          "quality",
+          "missing_reason"
+        ],
+        "title": "AdminReceiptPhotoOut",
+        "description": "回执申请当前使用的用户照片摘要。"
+      },
+      "AdminReceiptRenderOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "导出记录 ID",
+            "examples": [
+              7
+            ]
+          },
+          "spec_name": {
+            "type": "string",
+            "title": "Spec Name",
+            "description": "导出的规格名称",
+            "examples": [
+              "广东省身份证"
+            ]
+          },
+          "bg_color": {
+            "type": "string",
+            "title": "Bg Color",
+            "description": "导出的底色，十六进制颜色值",
+            "examples": [
+              "#FFFFFF"
+            ]
+          },
+          "beauty_level": {
+            "type": "integer",
+            "title": "Beauty Level",
+            "description": "美颜档位（0～5），0 表示只自动校正光影",
+            "examples": [
+              0
+            ]
+          },
+          "watermarked": {
+            "type": "boolean",
+            "title": "Watermarked",
+            "description": "是否带水印，true 表示带水印",
+            "examples": [
+              true
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "生成时间（UTC，带时区）",
+            "examples": [
+              "2026-11-19T08:35:00Z"
+            ]
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url",
+            "description": "导出图签名地址，有效期 10 分钟；文件不可用时为空",
+            "examples": [
+              "https://api.example.com/files/render.jpg"
+            ]
+          },
+          "missing_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Reason",
+            "description": "证件照文件不可用的原因；有图片地址时为空",
+            "examples": [
+              "文件不存在"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "spec_name",
+          "bg_color",
+          "beauty_level",
+          "watermarked",
+          "created_at",
+          "url",
+          "missing_reason"
+        ],
+        "title": "AdminReceiptRenderOut",
+        "description": "某次提交时使用的证件照及文件可用性。"
       },
       "AdminRefundIn": {
         "properties": {

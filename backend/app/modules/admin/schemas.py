@@ -482,6 +482,31 @@ class AdminRefundIn(Schema):
 # ---------- 回执申请 ----------
 
 
+class AdminReceiptPhotoOut(Schema):
+    """回执申请当前使用的用户照片摘要。"""
+
+    id: int = Field(description="后台照片详情使用的照片 ID", examples=[12])
+    thumbnail_url: str | None = Field(
+        description="原图签名地址，用于缩略展示，有效期 10 分钟；文件不可用时为空",
+        examples=["https://api.example.com/files/original.jpg"],
+    )
+    quality: PhotoQuality | None = Field(
+        description="拍后检测等级和问题明细；没有检测记录时为空",
+        examples=[{"level": "ok", "issues": []}],
+    )
+    missing_reason: str | None = Field(
+        description="原图不可用的原因；有图片地址时为空", examples=["文件已清理"]
+    )
+
+
+class AdminReceiptRenderOut(AdminPhotoRenderOut):
+    """某次提交时使用的证件照及文件可用性。"""
+
+    missing_reason: str | None = Field(
+        description="证件照文件不可用的原因；有图片地址时为空", examples=["文件不存在"]
+    )
+
+
 class AdminAttemptOut(Schema):
     """一次提交给服务商的记录。"""
 
@@ -501,6 +526,9 @@ class AdminAttemptOut(Schema):
     )
     finished_at: datetime | None = Field(
         description="出结果时间；还没出结果为空", examples=["2026-11-19T09:10:00Z"]
+    )
+    render: AdminReceiptRenderOut | None = Field(
+        description="本次提交使用的证件照；没有照片查看权限、导出记录不存在或响应来自申请操作时为空"
     )
 
 
@@ -533,7 +561,7 @@ class AdminApplicationOut(Schema):
 
 
 class AdminApplicationDetail(AdminApplicationOut):
-    """回执申请详情：增加全部提交记录和打码后的办理表单。"""
+    """回执申请详情，包含提交记录、脱敏表单和有权查看的图片。"""
 
     region_code: str | None = Field(description="办理地区行政区划码；不限地区为空", examples=["440300"])
     image_code: str | None = Field(description="回执图像号；只在 completed 时有值", examples=["IMG1A2B3C4D"])
@@ -546,6 +574,17 @@ class AdminApplicationDetail(AdminApplicationOut):
     form_masked: dict[str, str] = Field(
         description="打码后的办理表单：姓名只显示姓，身份证号只显示前 3 后 4，手机号中间打码。后台看不到明文",
         examples=[{"name": "张*", "idcard": "110***********0019"}],
+    )
+    photo: AdminReceiptPhotoOut | None = Field(
+        description="当前用户照片摘要；没有照片查看权限或响应来自申请操作时为空"
+    )
+    receipt_image_url: str | None = Field(
+        description="官方回执图签名地址，有效期 10 分钟；文件不可用、没有照片查看权限或响应来自申请操作时为空",
+        examples=["https://api.example.com/files/receipt.png"],
+    )
+    receipt_image_missing_reason: str | None = Field(
+        description="回执图不可用的原因；有图片地址、没有照片查看权限或响应来自申请操作时为空",
+        examples=["暂无官方回执图"],
     )
     attempts: list[AdminAttemptOut] = Field(description="全部提交记录，按次序从早到晚")
 

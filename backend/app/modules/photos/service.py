@@ -11,6 +11,7 @@ import logging
 import uuid
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from threading import BoundedSemaphore
 
@@ -154,6 +155,55 @@ def get_admin_photo_detail(
     if photo.matting_file_id is not None:
         file_ids.append(photo.matting_file_id)
     return photo, repo.get_files(db, photo.user_id, file_ids), repo.list_admin_renders(db, photo)
+
+
+@dataclass
+class AdminReceiptAssets:
+    photo: Photo | None
+    original: File | None
+    receipt: File | None
+    renders: dict[int, tuple[PhotoRender, str, File | None, str]]
+
+
+def get_admin_receipt_assets(
+    db: Session,
+    *,
+    user_id: int,
+    photo_id: int,
+    receipt_file_id: int | None,
+    render_ids: set[int],
+) -> AdminReceiptAssets:
+    """读取后台回执详情所需的照片、导出记录和文件。"""
+    photo = repo.get_admin_photo(db, photo_id)
+    if photo is not None and photo.user_id != user_id:
+        photo = None
+    original_id = photo.original_file_id if photo is not None else None
+    files = repo.get_files(db, user_id, (i for i in (original_id, receipt_file_id) if i is not None))
+    original = files.get(original_id) if original_id is not None else None
+    receipt = files.get(receipt_file_id) if receipt_file_id is not None else None
+    return AdminReceiptAssets(
+        photo=photo,
+        original=original if original is not None and original.kind == "original" else None,
+        receipt=receipt if receipt is not None and receipt.kind == "receipt" else None,
+        renders=repo.get_admin_renders_by_ids(db, user_id, render_ids),
+    )
+
+
+def admin_image_link(file: File | None, *, photo_status: str | None = None) -> tuple[str | None, str | None]:
+    """检查后台回执图片是否可用，再签发下载链接。"""
+    if photo_status == "purged" or (file is not None and file.status == "purged"):
+        return None, "文件已清理"
+    if file is None:
+        return None, "文件不存在"
+    if not file.mime.startswith("image/"):
+        return None, "文件不是图片"
+    try:
+        get_storage().get(file.storage_key)
+    except FileNotFoundError:
+        return None, "文件不存在"
+    except OSError, ValueError:
+        return None, "暂时无法读取文件"
+    return file_url(file), None
 
 
 def _check_status(photo: Photo) -> str:

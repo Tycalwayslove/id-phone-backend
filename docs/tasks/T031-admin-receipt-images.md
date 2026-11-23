@@ -1,6 +1,6 @@
 # T031 后台回执详情展示照片与回执图
 
-- 状态：进行中
+- 状态：已完成
 - 用户原话：“我看了下回执页面已经有一个回执 R20261118000001 了，但是对应的回执照片信息，并没有在运营后台展示，帮我展示一下。”
 - 现状（Opus 已查）：该回执是 seed 演示数据（user 1、photo 2、`receipt_file_id`=9、`image_code`=DEMO-IMG-0001；attempt 1 被驳回用 render 2，attempt 2 成功用 render 3）。`AdminApplicationDetail` 与 `AdminAttemptOut` 没有任何图片字段；后台回执详情只有文字。另外 seed 只建了文件记录、没写真实文件，`/files/dev/u1/p2/original_f3.jpg` 返回 404。
 
