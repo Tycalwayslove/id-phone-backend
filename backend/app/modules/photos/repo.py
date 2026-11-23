@@ -128,6 +128,26 @@ def list_admin_renders(db: Session, photo: Photo) -> list[tuple[PhotoRender, str
     return [(render, name, file) for render, name, file in db.execute(stmt)]
 
 
+def get_admin_renders_by_ids(
+    db: Session, user_id: int, render_ids: set[int]
+) -> dict[int, tuple[PhotoRender, str, File | None, str]]:
+    if not render_ids:
+        return {}
+    stmt = (
+        select(PhotoRender, Spec.name, File, Photo.status)
+        .join(Photo, Photo.id == PhotoRender.photo_id)
+        .join(Spec, Spec.id == PhotoRender.spec_id)
+        .outerjoin(
+            File,
+            (File.id == PhotoRender.file_id)
+            & (File.user_id == user_id)
+            & File.kind.in_(("render", "preview")),
+        )
+        .where(Photo.user_id == user_id, PhotoRender.id.in_(render_ids))
+    )
+    return {render.id: (render, name, file, status) for render, name, file, status in db.execute(stmt)}
+
+
 def get_files(db: Session, user_id: int, file_ids: Iterable[int]) -> dict[int, File]:
     ids = list(file_ids)
     if not ids:

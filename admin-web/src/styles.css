@@ -103,6 +103,15 @@ body {
 .photo-stage .ant-image-img { display: block; width: auto; max-width: 100%; max-height: min(420px, 52vh); object-fit: contain; }
 .photo-stage + .ant-alert { margin-top: 12px; }
 .photo-issues { margin: 8px 0 0; padding-inline-start: 20px; }
+.receipt-images { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+.receipt-images figure { display: grid; align-content: start; gap: 6px; margin: 0; min-width: 0; }
+.receipt-images figcaption { font-weight: 600; }
+.receipt-image { --receipt-image-height: clamp(84px, 22vw, 180px); background: #edf3f0; border-radius: 6px; }
+.receipt-image .ant-image { display: block; width: 100%; }
+.receipt-image .ant-image-img { display: block; height: var(--receipt-image-height); object-fit: contain; }
+.receipt-image-placeholder { display: grid; align-content: center; justify-items: center; min-height: var(--receipt-image-height); padding: 4px; text-align: center; color: #526563; font-size: 12px; }
+.receipt-image-caption { font-size: 12px; color: #526563; }
+.receipt-attempts .receipt-image { --receipt-image-height: 72px; }
 .login { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 4fr); background: #fff; }
 .login-panel { align-self: center; padding: 40px 20px; width: min(100%, 426px); justify-self: center; }
 .login-brand { color: #126758; font-size: 16px; font-weight: 700; }

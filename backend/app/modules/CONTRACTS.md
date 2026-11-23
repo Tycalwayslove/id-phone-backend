@@ -39,6 +39,8 @@ tests/<m>/test_*.py
 - `list_admin_photos(db, *, page: OffsetPageParams, user_id=None, status=None, matting_level=None, quality_level=None) -> tuple[list[tuple[Photo, File | None]], int]`：供后台按照片 ID 倒序筛选，返回单页记录和总条数。文件优先取最新的有效预览，缺少预览时取有效原图，已清理的照片无文件。调用方检查 `photo:read`。
 - `list_recent_admin_photos(db, *, user_id, limit) -> list[tuple[Photo, File | None]]`：供后台用户详情按照片 ID 倒序展示最近照片，文件选择规则同上。调用方检查 `photo:read`。
 - `get_admin_photo_detail(db, *, photo_id)`：供后台读取照片、按文件 ID 索引的原图和当前底片，以及导出记录和规格名称。照片不存在时抛 `PHOTO_NOT_FOUND`。调用方检查 `photo:read`、仅为有效文件签名并写入查看审计。
+- `get_admin_receipt_assets(db, *, user_id, photo_id, receipt_file_id, render_ids) -> AdminReceiptAssets`：供后台回执详情批量读取同一用户的照片及原图、官方回执文件和各次提交的导出记录。导出记录按导出 ID 索引，附带规格名、文件和照片状态。调用方检查 `photo:read`。
+- `admin_image_link(file, *, photo_status=None) -> tuple[str | None, str | None]`：对后台回执图片检查文件及存储对象，返回 10 分钟签名链接和缺失原因。调用方检查 `photo:read`。
 
 ## entitlements（权益）
 

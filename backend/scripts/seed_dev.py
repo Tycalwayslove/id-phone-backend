@@ -9,12 +9,16 @@
 
 import hashlib
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
+from tempfile import NamedTemporaryFile
 
+from PIL import Image, ImageDraw
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 
 from app.core.config import settings
 from app.core.db import SessionLocal, engine
+from app.integrations.storage import LocalStorage, get_storage
 from app.models import (
     AdminUser,
     AuditLog,
@@ -46,7 +50,6 @@ from app.models import (
     WecomContact,
 )
 
-BUCKET = "idphone-dev"
 ENV = "dev"
 NOW = datetime.now(UTC)
 
@@ -266,16 +269,15 @@ def truncate_all() -> None:
         conn.execute(text(f"TRUNCATE {names} RESTART IDENTITY CASCADE"))
 
 
-def add_file(db, user: User, kind: str, folder: str, suffix: str, ext: str, mime: str, size: int) -> File:
+def add_file(db, user: User, kind: str, folder: str, suffix: str, ext: str, mime: str) -> File:
     """先插入拿到 id，再按命名规则生成 storage_key（末尾带文件 ID）。"""
     f = File(
         user_id=user.id,
         kind=kind,
-        bucket=BUCKET,
+        bucket=get_storage().bucket,
         storage_key="pending",
         mime=mime,
-        size_bytes=size,
-        sha256=sha(f"{kind}{folder}{suffix}"),
+        size_bytes=0,
     )
     db.add(f)
     db.flush()
@@ -283,6 +285,96 @@ def add_file(db, user: User, kind: str, folder: str, suffix: str, ext: str, mime
     f.storage_key = f"{ENV}/u{user.id}/{folder}/{name}"
     db.flush()
     return f
+
+
+def write_demo_image(file: File, image: Image.Image) -> None:
+    """补齐演示文件；路径已有内容时保留原文件，并按实际内容登记。"""
+    with BytesIO() as output:
+        image.save(output, format="JPEG" if file.mime == "image/jpeg" else "PNG")
+        data = output.getvalue()
+    storage = get_storage()
+    if isinstance(storage, LocalStorage):
+        path = storage.root / file.storage_key
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with NamedTemporaryFile(dir=path.parent) as tmp:
+            tmp.write(data)
+            tmp.flush()
+            try:
+                path.hardlink_to(tmp.name)
+            except FileExistsError:
+                data = storage.get(file.storage_key)
+    else:
+        try:
+            data = storage.get(file.storage_key)
+        except FileNotFoundError:
+            storage.put(file.storage_key, data, file.mime)
+    file.size_bytes = len(data)
+    file.sha256 = hashlib.sha256(data).hexdigest()
+
+
+def demo_portrait(size: tuple[int, int], background: str | None, version: int) -> Image.Image:
+    """画无真人信息的头像剪影，透明背景用作抠图底片。"""
+    image = Image.new("RGB", size, background) if background else Image.new("RGBA", size)
+    draw = ImageDraw.Draw(image)
+    width, height = size
+    center = width * (0.44 if version == 1 else 0.5)
+    color = "#527682" if version == 1 else "#345566"
+    draw.ellipse((center - width * 0.17, height * 0.17, center + width * 0.17, height * 0.60), fill=color)
+    draw.rounded_rectangle(
+        (center - width * 0.36, height * 0.64, center + width * 0.36, height * 1.1),
+        radius=width * 0.22,
+        fill=color,
+    )
+    draw.rectangle((center - width * 0.065, height * 0.54, center + width * 0.065, height * 0.71), fill=color)
+    return image
+
+
+def demo_receipt() -> Image.Image:
+    image = Image.new("RGB", (720, 520), "#edf5f3")
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((22, 22, 698, 498), radius=24, fill="white", outline="#91b8b0", width=3)
+    ink = "#254d4b"
+    # 用笔画绘制“演示回执”，让没有中文字体的开发环境也能生成示意图。
+    glyphs = (
+        (
+            ((3, 5), (6, 8)),
+            ((2, 12), (6, 15)),
+            ((3, 26), (7, 19)),
+            ((18, 2), (20, 5)),
+            ((11, 9), (11, 6), (27, 6), (27, 9)),
+            ((13, 11), (25, 11)),
+            ((19, 11), (19, 22)),
+            ((12, 14), (26, 14), (26, 22), (12, 22), (12, 14)),
+            ((12, 18), (26, 18)),
+            ((16, 24), (11, 28)),
+            ((23, 24), (27, 28)),
+        ),
+        (
+            ((6, 5), (24, 5)),
+            ((3, 12), (27, 12)),
+            ((15, 12), (15, 26), (11, 26)),
+            ((9, 17), (4, 24)),
+            ((21, 17), (26, 24)),
+        ),
+        (((3, 4), (27, 4), (27, 26), (3, 26), (3, 4)), ((10, 10), (20, 10), (20, 20), (10, 20), (10, 10))),
+        (
+            ((3, 10), (12, 10)),
+            ((8, 3), (8, 26), (4, 26)),
+            ((2, 19), (12, 15)),
+            ((14, 10), (23, 10), (23, 23), (25, 26), (28, 26), (29, 22)),
+            ((19, 3), (18, 16), (16, 22), (12, 27)),
+            ((14, 16), (21, 21)),
+        ),
+    )
+    for i, glyph in enumerate(glyphs):
+        for stroke in glyph:
+            draw.line([(206 + i * 80 + x * 2, 68 + y * 2) for x, y in stroke], fill=ink, width=4)
+    draw.text((360, 157), "DEMO ONLY", fill=ink, anchor="mm", font_size=28)
+    image.paste(demo_portrait((140, 180), "#edf5f3", 2), (100, 235))
+    draw.text((282, 248), "DEMO-IMG-0001", fill=ink, font_size=28)
+    for top, length in ((307, 300), (339, 265), (371, 287)):
+        draw.rounded_rectangle((282, top, 282 + length, top + 8), radius=4, fill="#cbdbd8")
+    return image
 
 
 def seed() -> None:
@@ -451,16 +543,17 @@ def seed() -> None:
 
         # ---------- 照片资产（小林拍了一张，重拍了一张）----------
         photos = []
-        for _ in range(2):
-            orig = add_file(db, alice, "original", "pending", "", "jpg", "image/jpeg", 2_400_000)
-            mat = add_file(db, alice, "matting", "pending", "", "png", "image/png", 900_000)
+        for version, background in enumerate(("#cddfe6", "#e9eeeb"), start=1):
+            orig = add_file(db, alice, "original", "pending", "", "jpg", "image/jpeg")
+            mat = add_file(db, alice, "matting", "pending", "", "png", "image/png")
             ph = Photo(
                 user_id=alice.id,
                 source="camera",
                 original_file_id=orig.id,
                 matting_file_id=mat.id,
                 beauty_params={"level": 1},
-                check_result={"passed": True},
+                check_result={"status": "passed"},
+                quality={"level": "ok", "issues": []},
                 access_until=NOW + timedelta(days=355),
                 retain_until=NOW + timedelta(days=535),
                 status="active",
@@ -470,6 +563,8 @@ def seed() -> None:
             # 照片 ID 有了，把文件挪到 p{照片ID} 目录下（命名规则里文件夹用照片 ID）
             for f in (orig, mat):
                 f.storage_key = f.storage_key.replace("/pending/", f"/p{ph.id}/")
+            write_demo_image(orig, demo_portrait((600, 800), background, version))
+            write_demo_image(mat, demo_portrait((600, 800), None, version))
             photos.append(ph)
         photo_v1, photo_v2 = photos
 
@@ -483,11 +578,21 @@ def seed() -> None:
                 f"_{spec_code}_{color.removeprefix('#')}_b{beauty}",
                 "jpg",
                 "image/jpeg",
-                60_000,
             )
+            spec = specs[spec_code]
+            image = demo_portrait((spec.width_px, spec.height_px), color, 1 if photo.id == photo_v1.id else 2)
+            if watermarked:
+                ImageDraw.Draw(image).text(
+                    (image.width // 2, image.height * 0.87),
+                    "DEMO PREVIEW",
+                    fill="white",
+                    anchor="mm",
+                    font_size=22,
+                )
+            write_demo_image(f, image)
             r = PhotoRender(
                 photo_id=photo.id,
-                spec_id=specs[spec_code].id,
+                spec_id=spec.id,
                 file_id=f.id,
                 bg_color=color,
                 beauty_level=beauty,
@@ -588,7 +693,7 @@ def seed() -> None:
         db.flush()
 
         # ---------- 回执履约：第一次被驳回，换照片重提后出证 ----------
-        receipt_file = add_file(db, alice, "receipt", "pending", "", "pdf", "application/pdf", 120_000)
+        receipt_file = add_file(db, alice, "receipt", "pending", "", "png", "image/png")
         app = ReceiptApplication(
             app_no="R20261118000001",
             user_id=alice.id,
@@ -609,6 +714,7 @@ def seed() -> None:
         db.add(app)
         db.flush()
         receipt_file.storage_key = receipt_file.storage_key.replace("/pending/", f"/a{app.id}/")
+        write_demo_image(receipt_file, demo_receipt())
         ent.bound_idcard_hash = app.idcard_hash  # 一卡一人：首次办理时绑定
 
         att1 = ReceiptAttempt(
@@ -748,7 +854,7 @@ def seed() -> None:
         db.add(
             AuditLog(
                 admin_id=admin.id,
-                action="view_application",
+                action="application.view",
                 target_type="receipt_application",
                 target_id=app.id,
             )

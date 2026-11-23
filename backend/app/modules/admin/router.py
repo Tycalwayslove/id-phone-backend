@@ -496,14 +496,16 @@ def list_applications(
     summary="回执申请详情",
     description=(
         f"查看申请详情，包含全部服务商提交记录（服务商、状态、驳回原因、成本、时间）和打码后的办理表单。权限点 application:read。{_LOGIN_NOTE}"
-        "后台看不到姓名、身份证号明文。"
+        "后台看不到姓名、身份证号明文。查看会写入 application.view 审计。"
+        "同时拥有 photo:read 时返回用户原图、各次提交的证件照及官方回执图，图片地址有效期 10 分钟。"
     ),
     response_model=AdminApplicationDetail,
     response_description="回执申请详情",
     responses=errors_doc(*_AUTH, ErrorCode.APPLICATION_NOT_FOUND),
 )
-def get_application(app_no: AppNoPath, _: ApplicationRead, db: DB):
-    return service.get_application(db, app_no)
+def get_application(app_no: AppNoPath, admin: ApplicationRead, db: DB, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return service.get_application(db, admin, app_no)
 
 
 @admin_router.post(
